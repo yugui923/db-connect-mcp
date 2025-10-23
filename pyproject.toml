@@ -1,0 +1,7 @@
+[project]
+name = "pg-da"
+version = "0.1.0"
+description = "postgres data analyst toolkit MCP"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = []
