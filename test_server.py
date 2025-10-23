@@ -2,12 +2,12 @@
 """Simple test to verify the PostgreSQL Data Analyst MCP Server works"""
 
 import asyncio
-import json
 import os
 from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
+
 
 async def test_server():
     """Test basic server functionality"""
@@ -17,6 +17,7 @@ async def test_server():
     # Test imports
     try:
         from src.pg_da.server import PostgresAnalyst, app
+
         print("[OK] Server module imported successfully")
     except ImportError as e:
         print(f"[ERROR] Failed to import server module: {e}")
@@ -45,7 +46,7 @@ async def test_server():
                     # Check read-only status
                     await cur.execute("SHOW default_transaction_read_only")
                     readonly = await cur.fetchone()
-                    if readonly['default_transaction_read_only'] == 'on':
+                    if readonly["default_transaction_read_only"] == "on":
                         print("[OK] Connection is read-only (safe mode)")
                     else:
                         print("[WARNING] Connection may not be read-only")
@@ -65,7 +66,7 @@ async def test_server():
 
         # Test listing tables
         try:
-            tables = await analyst.list_tables('public')
+            tables = await analyst.list_tables("public")
             print(f"[OK] Found {len(tables)} tables in public schema")
             if tables and len(tables) > 0:
                 print(f"  Sample table: {tables[0]['table_name']}")
@@ -88,6 +89,7 @@ async def test_server():
     print("=" * 50)
     print("[OK] Basic tests completed successfully!")
     return True
+
 
 if __name__ == "__main__":
     success = asyncio.run(test_server())
