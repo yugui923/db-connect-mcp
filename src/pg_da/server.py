@@ -38,17 +38,8 @@ class PostgresAnalyst:
             raise ValueError(
                 "DATABASE_URL environment variable or connection string must be provided"
             )
-
-        # Ensure read-only by parsing and modifying connection string if needed
-        self._ensure_readonly()
-
-    def _ensure_readonly(self):
-        """Add read-only parameters to connection string"""
-        if "default_transaction_read_only" not in self.connection_string:
-            separator = "&" if "?" in self.connection_string else "?"
-            self.connection_string += (
-                f"{separator}options=-c%20default_transaction_read_only%3Don"
-            )
+        # Note: Read-only mode is enforced in get_connection() via SET command
+        # This approach works with all PostgreSQL databases including cloud providers like Neon
 
     @asynccontextmanager
     async def get_connection(
@@ -79,7 +70,7 @@ class PostgresAnalyst:
                 return await cur.fetchall()
 
     async def list_tables(self, schema: str = "public") -> List[Dict[str, Any]]:
-        """List all tables in a schema with row counts"""
+        """List all tables in a schema with estimated row counts"""
         async with self.get_connection() as conn:
             async with conn.cursor() as cur:
                 await cur.execute(
@@ -92,31 +83,22 @@ class PostgresAnalyst:
                         pg_size_pretty(pg_total_relation_size(c.oid)) as total_size,
                         pg_size_pretty(pg_table_size(c.oid)) as table_size,
                         pg_size_pretty(pg_indexes_size(c.oid)) as indexes_size,
-                        (SELECT COUNT(*) FROM pg_stat_user_tables
-                         WHERE schemaname = t.table_schema
-                         AND tablename = t.table_name) as stats_available
+                        c.reltuples::bigint as row_count_estimate,
+                        CASE
+                            WHEN stat.n_live_tup IS NOT NULL THEN stat.n_live_tup
+                            ELSE c.reltuples::bigint
+                        END as row_count
                     FROM information_schema.tables t
                     JOIN pg_class c ON c.relname = t.table_name
                     JOIN pg_namespace n ON n.oid = c.relnamespace AND n.nspname = t.table_schema
+                    LEFT JOIN pg_stat_user_tables stat
+                        ON stat.schemaname = t.table_schema AND stat.relname = t.table_name
                     WHERE t.table_schema = %s
                     ORDER BY t.table_name
                 """,
                     (schema,),
                 )
-                tables = await cur.fetchall()
-
-                # Add row counts for each table
-                for table in tables:
-                    try:
-                        await cur.execute(
-                            f"SELECT COUNT(*) as row_count FROM {schema}.{table['table_name']}"
-                        )
-                        result = await cur.fetchone()
-                        table["row_count"] = result["row_count"]
-                    except Exception as e:
-                        table["row_count"] = f"Error: {str(e)}"
-
-                return tables
+                return await cur.fetchall()
 
     async def describe_table(
         self, table_name: str, schema: str = "public"
