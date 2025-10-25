@@ -1,0 +1,10 @@
+{
+  "include": ["src"],
+  "exclude": ["**/node_modules", "**/__pycache__"],
+  "reportMissingImports": false,
+  "reportMissingTypeStubs": false,
+  "reportCallIssue": false,
+  "reportIncompatibleMethodOverride": false,
+  "pythonVersion": "3.10",
+  "pythonPlatform": "All"
+}

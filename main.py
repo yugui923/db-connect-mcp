@@ -1,13 +1,14 @@
 #!/usr/bin/env python
-"""PostgreSQL Data Analyst MCP Server - Main Entry Point"""
+"""Multi-Database MCP Server - Main Entry Point"""
 
 import asyncio
 import sys
-from src.pg_da.server import main
 
-# Fix for Windows: psycopg requires SelectorEventLoop on Windows
+from src.db_mcp.server import main
+
+# Windows-specific event loop policy
 if sys.platform == "win32":
-    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())  # type: ignore[attr-defined]
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())  # type: ignore[attr-defined]
 
 if __name__ == "__main__":
     try:

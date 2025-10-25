@@ -1,12 +1,37 @@
 [project]
-name = "pg-da"
-version = "0.1.0"
-description = "postgres data analyst toolkit MCP"
+name = "db-mcp"
+version = "2.0.0"
+description = "Multi-database MCP server for PostgreSQL, MySQL, and ClickHouse"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "mcp>=1.0.0",
-    "psycopg[binary]>=3.1.0",
-    "pandas>=2.0.0",
+    "sqlalchemy[asyncio]>=2.0.0",
+    "pydantic>=2.0.0",
     "python-dotenv>=1.0.0",
+]
+
+[project.optional-dependencies]
+postgresql = [
+    "asyncpg>=0.29.0",
+]
+mysql = [
+    "aiomysql>=0.2.0",
+]
+clickhouse = [
+    "clickhouse-sqlalchemy>=0.3.0",
+    "asynch>=0.2.2",
+]
+all = [
+    "asyncpg>=0.29.0",
+    "aiomysql>=0.2.0",
+    "clickhouse-sqlalchemy>=0.3.0",
+    "asynch>=0.2.2",
+]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "black>=23.0.0",
+    "ruff>=0.1.0",
+    "pyright>=1.1.0",
 ]
