@@ -1,7 +1,8 @@
 """Metadata inspection using SQLAlchemy reflection."""
 
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Optional, cast
 
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.engine import reflection
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -41,11 +42,13 @@ class MetadataInspector:
             List of schema information objects
         """
         async with await self.connection.get_connection() as conn:
-            inspector = reflection.Inspector.from_engine(
-                await self._get_sync_bind(conn)
+            sync_bind = await self._get_sync_bind(conn)
+            inspector_obj = sa_inspect(sync_bind)
+            assert isinstance(inspector_obj, reflection.Inspector), (
+                "Failed to create Inspector"
             )
 
-            schemas = inspector.get_schema_names()
+            schemas = inspector_obj.get_schema_names()
             result = []
 
             for schema in schemas:
@@ -56,8 +59,8 @@ class MetadataInspector:
                 schema_info = SchemaInfo(
                     name=schema,
                     owner=None,  # Will be filled by adapter if available
-                    table_count=len(inspector.get_table_names(schema=schema)),
-                    view_count=len(inspector.get_view_names(schema=schema))
+                    table_count=len(inspector_obj.get_table_names(schema=schema)),
+                    view_count=len(inspector_obj.get_view_names(schema=schema))
                     if self.adapter.capabilities.views
                     else None,
                 )
@@ -82,26 +85,28 @@ class MetadataInspector:
             List of basic table information
         """
         async with await self.connection.get_connection() as conn:
-            inspector = reflection.Inspector.from_engine(
-                await self._get_sync_bind(conn)
+            sync_bind = await self._get_sync_bind(conn)
+            inspector_obj = sa_inspect(sync_bind)
+            assert isinstance(inspector_obj, reflection.Inspector), (
+                "Failed to create Inspector"
             )
 
             # Get table names
-            table_names = inspector.get_table_names(schema=schema)
+            table_names = inspector_obj.get_table_names(schema=schema)
             tables = []
 
             for table_name in table_names:
                 table_info = await self._get_basic_table_info(
-                    conn, inspector, table_name, schema, "BASE TABLE"
+                    conn, inspector_obj, table_name, schema, "BASE TABLE"
                 )
                 tables.append(table_info)
 
             # Get views if requested and supported
             if include_views and self.adapter.capabilities.views:
-                view_names = inspector.get_view_names(schema=schema)
+                view_names = inspector_obj.get_view_names(schema=schema)
                 for view_name in view_names:
                     view_info = await self._get_basic_table_info(
-                        conn, inspector, view_name, schema, "VIEW"
+                        conn, inspector_obj, view_name, schema, "VIEW"
                     )
                     tables.append(view_info)
 
@@ -121,8 +126,10 @@ class MetadataInspector:
             Comprehensive table information
         """
         async with await self.connection.get_connection() as conn:
-            inspector = reflection.Inspector.from_engine(
-                await self._get_sync_bind(conn)
+            sync_bind = await self._get_sync_bind(conn)
+            inspector_obj = sa_inspect(sync_bind)
+            assert isinstance(inspector_obj, reflection.Inspector), (
+                "Failed to create Inspector"
             )
 
             # Basic info
@@ -133,13 +140,14 @@ class MetadataInspector:
             )
 
             # Columns
-            columns_data = inspector.get_columns(table_name, schema=schema)
+            columns_data = inspector_obj.get_columns(table_name, schema=schema)
             table_info.columns = [
-                self._column_from_sa(col_data) for col_data in columns_data
+                self._column_from_sa(cast(dict[str, Any], col_data))
+                for col_data in columns_data
             ]
 
             # Primary key
-            pk_constraint = inspector.get_pk_constraint(table_name, schema=schema)
+            pk_constraint = inspector_obj.get_pk_constraint(table_name, schema=schema)
             if pk_constraint and pk_constraint.get("constrained_columns"):
                 pk_cols = pk_constraint["constrained_columns"]
                 for col in table_info.columns:
@@ -148,9 +156,10 @@ class MetadataInspector:
 
             # Indexes
             if self.adapter.capabilities.indexes:
-                indexes_data = inspector.get_indexes(table_name, schema=schema)
+                indexes_data = inspector_obj.get_indexes(table_name, schema=schema)
                 table_info.indexes = [
-                    self._index_from_sa(idx_data) for idx_data in indexes_data
+                    self._index_from_sa(cast(dict[str, Any], idx_data))
+                    for idx_data in indexes_data
                 ]
 
                 # Mark indexed columns
@@ -162,9 +171,9 @@ class MetadataInspector:
 
             # Foreign keys
             if self.adapter.capabilities.foreign_keys:
-                fk_data = inspector.get_foreign_keys(table_name, schema=schema)
+                fk_data = inspector_obj.get_foreign_keys(table_name, schema=schema)
                 for fk in fk_data:
-                    constraint = self._fk_constraint_from_sa(fk)
+                    constraint = self._fk_constraint_from_sa(cast(dict[str, Any], fk))
                     table_info.constraints.append(constraint)
 
                     # Mark FK columns
@@ -177,7 +186,9 @@ class MetadataInspector:
                             )
 
             # Unique constraints
-            unique_data = inspector.get_unique_constraints(table_name, schema=schema)
+            unique_data = inspector_obj.get_unique_constraints(
+                table_name, schema=schema
+            )
             for uniq in unique_data:
                 constraint = ConstraintInfo(
                     name=uniq["name"],
@@ -194,7 +205,9 @@ class MetadataInspector:
 
             # Check constraints (if available)
             try:
-                check_data = inspector.get_check_constraints(table_name, schema=schema)
+                check_data = inspector_obj.get_check_constraints(
+                    table_name, schema=schema
+                )
                 for check in check_data:
                     constraint = ConstraintInfo(
                         name=check["name"],
@@ -229,24 +242,28 @@ class MetadataInspector:
             return []
 
         async with await self.connection.get_connection() as conn:
-            inspector = reflection.Inspector.from_engine(
-                await self._get_sync_bind(conn)
+            sync_bind = await self._get_sync_bind(conn)
+            inspector_obj = sa_inspect(sync_bind)
+            assert isinstance(inspector_obj, reflection.Inspector), (
+                "Failed to create Inspector"
             )
 
-            fk_data = inspector.get_foreign_keys(table_name, schema=schema)
+            fk_data = inspector_obj.get_foreign_keys(table_name, schema=schema)
             relationships = []
 
             for fk in fk_data:
+                fk_dict = cast(dict[str, Any], fk)
+                constraint_name = fk_dict.get("name") or f"fk_{table_name}_auto"
                 rel = RelationshipInfo(
                     from_table=table_name,
                     from_schema=schema,
-                    from_columns=fk["constrained_columns"],
-                    to_table=fk["referred_table"],
-                    to_schema=fk.get("referred_schema"),
-                    to_columns=fk["referred_columns"],
-                    constraint_name=fk["name"],
-                    on_delete=fk.get("options", {}).get("ondelete"),
-                    on_update=fk.get("options", {}).get("onupdate"),
+                    from_columns=fk_dict["constrained_columns"],
+                    to_table=fk_dict["referred_table"],
+                    to_schema=fk_dict.get("referred_schema"),
+                    to_columns=fk_dict["referred_columns"],
+                    constraint_name=constraint_name,
+                    on_delete=fk_dict.get("options", {}).get("ondelete"),
+                    on_update=fk_dict.get("options", {}).get("onupdate"),
                 )
                 relationships.append(rel)
 
