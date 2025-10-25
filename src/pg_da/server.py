@@ -8,11 +8,12 @@ import json
 import logging
 import os
 from contextlib import asynccontextmanager
-from typing import Any, Dict, List, Optional, AsyncGenerator
+from typing import Any, Dict, Optional, AsyncGenerator, Sequence, cast
 from datetime import datetime
 
 import psycopg
-from psycopg.rows import dict_row
+from psycopg.rows import dict_row, DictRow
+from psycopg import sql
 from dotenv import load_dotenv
 from mcp.server import Server
 from mcp.types import (
@@ -44,18 +45,21 @@ class PostgresAnalyst:
     @asynccontextmanager
     async def get_connection(
         self,
-    ) -> AsyncGenerator[psycopg.AsyncConnection, None]:
+    ) -> AsyncGenerator[psycopg.AsyncConnection[DictRow], None]:
         """Get a read-only database connection"""
+        assert self.connection_string is not None, (
+            "Connection string must be set"
+        )
         async with await psycopg.AsyncConnection.connect(
             self.connection_string,
-            row_factory=dict_row,
+            row_factory=dict_row,  # type: ignore[arg-type]
             autocommit=True,  # Use autocommit for read-only queries
         ) as conn:
             # Set session to read-only as an extra safety measure
             await conn.execute("SET default_transaction_read_only = ON")
             yield conn
 
-    async def list_schemas(self) -> List[Dict[str, Any]]:
+    async def list_schemas(self) -> Sequence[Dict[str, Any]]:
         """List all schemas in the database"""
         async with self.get_connection() as conn:
             async with conn.cursor() as cur:
@@ -67,9 +71,11 @@ class PostgresAnalyst:
                     WHERE schema_name NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
                     ORDER BY schema_name
                 """)
-                return await cur.fetchall()
+                return cast(Sequence[Dict[str, Any]], await cur.fetchall())
 
-    async def list_tables(self, schema: str = "public") -> List[Dict[str, Any]]:
+    async def list_tables(
+        self, schema: str = "public"
+    ) -> Sequence[Dict[str, Any]]:
         """List all tables in a schema with estimated row counts"""
         async with self.get_connection() as conn:
             async with conn.cursor() as cur:
@@ -82,7 +88,7 @@ class PostgresAnalyst:
                         obj_description(c.oid) as table_comment,
                         pg_size_pretty(pg_total_relation_size(c.oid)) as total_size,
                         pg_size_pretty(pg_table_size(c.oid)) as table_size,
-                        pg_size_pretty(pg_indexes_size(c.oid)) as indexes_size,
+                        pg_size_pretty(pg_indexes_size(c.oid)) as indexes_size, 
                         c.reltuples::bigint as row_count_estimate,
                         CASE
                             WHEN stat.n_live_tup IS NOT NULL THEN stat.n_live_tup
@@ -98,7 +104,7 @@ class PostgresAnalyst:
                 """,
                     (schema,),
                 )
-                return await cur.fetchall()
+                return cast(Sequence[Dict[str, Any]], await cur.fetchall())
 
     async def describe_table(
         self, table_name: str, schema: str = "public"
@@ -194,15 +200,20 @@ class PostgresAnalyst:
         async with self.get_connection() as conn:
             async with conn.cursor() as cur:
                 # Basic statistics
-                await cur.execute(f"""
+                query = sql.SQL("""
                     SELECT
                         COUNT(*) as total_rows,
-                        COUNT({column_name}) as non_null_count,
-                        COUNT(DISTINCT {column_name}) as unique_count,
-                        MIN({column_name}::text) as min_value,
-                        MAX({column_name}::text) as max_value
-                    FROM {schema}.{table_name}
-                """)
+                        COUNT({col}) as non_null_count,
+                        COUNT(DISTINCT {col}) as unique_count,
+                        MIN({col}::text) as min_value,
+                        MAX({col}::text) as max_value
+                    FROM {schema}.{table}
+                """).format(
+                    col=sql.Identifier(column_name),
+                    schema=sql.Identifier(schema),
+                    table=sql.Identifier(table_name),
+                )
+                await cur.execute(query)  # type: ignore[arg-type]
                 basic_stats = await cur.fetchone()
 
                 # Get data type
@@ -219,22 +230,27 @@ class PostgresAnalyst:
                 column_info = await cur.fetchone()
 
                 # Get top values
-                await cur.execute(f"""
+                query = sql.SQL("""
                     SELECT
-                        {column_name} as value,
+                        {col} as value,
                         COUNT(*) as frequency,
                         ROUND(COUNT(*) * 100.0 / SUM(COUNT(*)) OVER(), 2) as percentage
-                    FROM {schema}.{table_name}
-                    WHERE {column_name} IS NOT NULL
-                    GROUP BY {column_name}
+                    FROM {schema}.{table}
+                    WHERE {col} IS NOT NULL
+                    GROUP BY {col}
                     ORDER BY frequency DESC
                     LIMIT 10
-                """)
+                """).format(
+                    col=sql.Identifier(column_name),
+                    schema=sql.Identifier(schema),
+                    table=sql.Identifier(table_name),
+                )
+                await cur.execute(query)  # type: ignore[arg-type]
                 top_values = await cur.fetchall()
 
                 # Try to get numeric statistics if applicable
                 numeric_stats = None
-                if column_info["data_type"] in (
+                if column_info and column_info["data_type"] in (
                     "integer",
                     "bigint",
                     "numeric",
@@ -243,16 +259,21 @@ class PostgresAnalyst:
                     "double precision",
                 ):
                     try:
-                        await cur.execute(f"""
+                        query = sql.SQL("""
                             SELECT
-                                AVG({column_name})::numeric as mean,
-                                PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY {column_name}) as median,
-                                STDDEV({column_name}) as std_dev,
-                                PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY {column_name}) as q1,
-                                PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY {column_name}) as q3
-                            FROM {schema}.{table_name}
-                            WHERE {column_name} IS NOT NULL
-                        """)
+                                AVG({col})::numeric as mean,
+                                PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY {col}) as median,
+                                STDDEV({col}) as std_dev,
+                                PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY {col}) as q1,
+                                PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY {col}) as q3
+                            FROM {schema}.{table}
+                            WHERE {col} IS NOT NULL
+                        """).format(
+                            col=sql.Identifier(column_name),
+                            schema=sql.Identifier(schema),
+                            table=sql.Identifier(table_name),
+                        )
+                        await cur.execute(query)  # type: ignore[arg-type]
                         numeric_stats = await cur.fetchone()
                     except Exception:
                         pass
@@ -260,35 +281,46 @@ class PostgresAnalyst:
                 return {
                     "table": f"{schema}.{table_name}",
                     "column": column_name,
-                    "data_type": column_info["data_type"],
-                    "is_nullable": column_info["is_nullable"],
+                    "data_type": column_info["data_type"]
+                    if column_info
+                    else None,
+                    "is_nullable": column_info["is_nullable"]
+                    if column_info
+                    else None,
                     "basic_statistics": basic_stats,
                     "numeric_statistics": numeric_stats,
                     "top_values": top_values,
                     "null_percentage": round(
-                        (basic_stats["total_rows"] - basic_stats["non_null_count"])
+                        (
+                            basic_stats["total_rows"]
+                            - basic_stats["non_null_count"]
+                        )
                         * 100.0
                         / basic_stats["total_rows"]
-                        if basic_stats["total_rows"] > 0
+                        if basic_stats and basic_stats["total_rows"] > 0
                         else 0,
                         2,
                     ),
                     "cardinality": basic_stats["unique_count"]
                     / basic_stats["non_null_count"]
-                    if basic_stats["non_null_count"] > 0
+                    if basic_stats and basic_stats["non_null_count"] > 0
                     else None,
                 }
 
     async def sample_data(
         self, table_name: str, schema: str = "public", limit: int = 100
-    ) -> List[Dict[str, Any]]:
+    ) -> Sequence[Dict[str, Any]]:
         """Get a sample of data from a table"""
         async with self.get_connection() as conn:
             async with conn.cursor() as cur:
-                await cur.execute(
-                    f"SELECT * FROM {schema}.{table_name} LIMIT %s", (limit,)
+                query = sql.SQL(
+                    "SELECT * FROM {schema}.{table} LIMIT %s"
+                ).format(
+                    schema=sql.Identifier(schema),
+                    table=sql.Identifier(table_name),
                 )
-                return await cur.fetchall()
+                await cur.execute(query, (limit,))  # type: ignore[arg-type]
+                return cast(Sequence[Dict[str, Any]], await cur.fetchall())
 
     async def execute_query(
         self, query: str, limit: Optional[int] = 1000
@@ -296,7 +328,9 @@ class PostgresAnalyst:
         """Execute a read-only SQL query"""
         # Basic SQL injection prevention - ensure it's a SELECT query
         query_upper = query.upper().strip()
-        if not query_upper.startswith("SELECT") and not query_upper.startswith("WITH"):
+        if not query_upper.startswith("SELECT") and not query_upper.startswith(
+            "WITH"
+        ):
             raise ValueError("Only SELECT and WITH queries are allowed")
 
         # Add LIMIT if not present and limit is specified
@@ -306,13 +340,15 @@ class PostgresAnalyst:
         async with self.get_connection() as conn:
             async with conn.cursor() as cur:
                 start_time = datetime.now()
-                await cur.execute(query)
+                await cur.execute(query)  # type: ignore[arg-type]
                 rows = await cur.fetchall()
                 execution_time = (datetime.now() - start_time).total_seconds()
 
                 # Get column information
                 columns = (
-                    [desc.name for desc in cur.description] if cur.description else []
+                    [desc.name for desc in cur.description]
+                    if cur.description
+                    else []
                 )
 
                 return {
@@ -329,7 +365,7 @@ class PostgresAnalyst:
 
     async def get_table_relationships(
         self, schema: str = "public"
-    ) -> List[Dict[str, Any]]:
+    ) -> Sequence[Dict[str, Any]]:
         """Get foreign key relationships between tables"""
         async with self.get_connection() as conn:
             async with conn.cursor() as cur:
@@ -356,7 +392,7 @@ class PostgresAnalyst:
                 """,
                     (schema,),
                 )
-                return await cur.fetchall()
+                return cast(Sequence[Dict[str, Any]], await cur.fetchall())
 
     async def profile_database(self) -> Dict[str, Any]:
         """Get a high-level profile of the entire database"""
@@ -384,11 +420,18 @@ class PostgresAnalyst:
                     GROUP BY table_schema
                     ORDER BY total_size DESC
                 """)
-                schema_stats = await cur.fetchall()
+                schema_stats_raw = await cur.fetchall()
 
-                # Format sizes
-                for stat in schema_stats:
-                    stat["total_size_pretty"] = self._format_bytes(stat["total_size"])
+                # Format sizes - convert to mutable dicts
+                schema_stats = [
+                    {
+                        **dict(stat),  # type: ignore[arg-type]
+                        "total_size_pretty": self._format_bytes(
+                            int(stat["total_size"] or 0)
+                        ),
+                    }
+                    for stat in schema_stats_raw
+                ]
 
                 # Top 10 largest tables
                 await cur.execute("""
@@ -412,11 +455,12 @@ class PostgresAnalyst:
 
     def _format_bytes(self, bytes_value: int) -> str:
         """Format bytes to human readable string"""
+        value = float(bytes_value)
         for unit in ["B", "KB", "MB", "GB", "TB"]:
-            if bytes_value < 1024.0:
-                return f"{bytes_value:.2f} {unit}"
-            bytes_value /= 1024.0
-        return f"{bytes_value:.2f} PB"
+            if value < 1024.0:
+                return f"{value:.2f} {unit}"
+            value /= 1024.0
+        return f"{value:.2f} PB"
 
 
 # Create MCP server
@@ -437,7 +481,7 @@ async def list_resources() -> list[Resource]:
         for schema in schemas:
             resources.append(
                 Resource(
-                    uri=f"postgres://schema/{schema['schema_name']}",
+                    uri=f"postgres://schema/{schema['schema_name']}",  # type: ignore[arg-type]
                     name=f"Schema: {schema['schema_name']}",
                     description=f"PostgreSQL schema owned by {schema['schema_owner']}",
                     mimeType="application/json",
@@ -450,7 +494,7 @@ async def list_resources() -> list[Resource]:
         return []
 
 
-@app.read_resource()
+@app.read_resource()  # type: ignore[arg-type]
 async def read_resource(uri: str) -> str:
     """Read database resource information"""
     if not analyst:
@@ -459,7 +503,9 @@ async def read_resource(uri: str) -> str:
     if uri.startswith("postgres://schema/"):
         schema_name = uri.replace("postgres://schema/", "")
         tables = await analyst.list_tables(schema_name)
-        return json.dumps({"schema": schema_name, "tables": tables}, default=str)
+        return json.dumps(
+            {"schema": schema_name, "tables": tables}, default=str
+        )
 
     raise ValueError(f"Unknown resource URI: {uri}")
 
@@ -620,7 +666,9 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             table_name = arguments["table_name"]
             column_name = arguments["column_name"]
             schema = arguments.get("schema", "public")
-            result = await analyst.analyze_column(table_name, column_name, schema)
+            result = await analyst.analyze_column(
+                table_name, column_name, schema
+            )
         elif name == "sample_data":
             table_name = arguments["table_name"]
             schema = arguments.get("schema", "public")
@@ -639,7 +687,9 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             raise ValueError(f"Unknown tool: {name}")
 
         return [
-            TextContent(type="text", text=json.dumps(result, default=str, indent=2))
+            TextContent(
+                type="text", text=json.dumps(result, default=str, indent=2)
+            )
         ]
     except Exception as e:
         logger.error(f"Error executing tool {name}: {e}")
@@ -670,7 +720,9 @@ async def main():
     await initialize_analyst()
 
     async with stdio_server() as (read_stream, write_stream):
-        await app.run(read_stream, write_stream, app.create_initialization_options())
+        await app.run(
+            read_stream, write_stream, app.create_initialization_options()
+        )
 
 
 if __name__ == "__main__":

@@ -11,7 +11,7 @@ load_dotenv()
 
 # Fix for Windows: psycopg requires SelectorEventLoop on Windows
 if sys.platform == "win32":
-    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())  # type: ignore[attr-defined]
 
 
 async def test_server():
@@ -21,7 +21,7 @@ async def test_server():
 
     # Test imports
     try:
-        from src.pg_da.server import PostgresAnalyst, app
+        from src.pg_da.server import PostgresAnalyst
 
         print("[OK] Server module imported successfully")
     except ImportError as e:
@@ -46,12 +46,15 @@ async def test_server():
                 async with conn.cursor() as cur:
                     await cur.execute("SELECT version()")
                     result = await cur.fetchone()
-                    print(f"[OK] Connected to PostgreSQL: {result['version'][:50]}...")
+                    if result:
+                        print(
+                            f"[OK] Connected to PostgreSQL: {result['version'][:50]}..."
+                        )
 
                     # Check read-only status
                     await cur.execute("SHOW default_transaction_read_only")
                     readonly = await cur.fetchone()
-                    if readonly["default_transaction_read_only"] == "on":
+                    if readonly and readonly["default_transaction_read_only"] == "on":
                         print("[OK] Connection is read-only (safe mode)")
                     else:
                         print("[WARNING] Connection may not be read-only")
@@ -85,7 +88,7 @@ async def test_server():
     # Test MCP server tools (note: list_tools is a decorator, not directly callable)
     try:
         # For basic testing, we just verify the app exists and has handlers
-        print(f"[OK] MCP server initialized with handlers")
+        print("[OK] MCP server initialized with handlers")
         print("  Note: Run via MCP client to test tools (8 tools available)")
     except Exception as e:
         print(f"[ERROR] Failed to verify MCP server: {e}")
