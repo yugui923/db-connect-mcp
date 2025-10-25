@@ -21,6 +21,7 @@ from mcp.types import (
     TextContent,
     Resource,
 )
+from pydantic import AnyUrl
 
 # Load environment variables
 load_dotenv()
@@ -28,6 +29,13 @@ load_dotenv()
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Constants
+DEFAULT_SCHEMA = "public"
+DEFAULT_SAMPLE_LIMIT = 100
+DEFAULT_QUERY_LIMIT = 1000
+MAX_SAMPLE_LIMIT = 1000
+MAX_QUERY_LIMIT = 10000
 
 
 class PostgresAnalyst:
@@ -47,11 +55,10 @@ class PostgresAnalyst:
         self,
     ) -> AsyncGenerator[psycopg.AsyncConnection[DictRow], None]:
         """Get a read-only database connection"""
-        assert self.connection_string is not None, (
-            "Connection string must be set"
-        )
+        assert self.connection_string is not None, "Connection string must be set"
         async with await psycopg.AsyncConnection.connect(
             self.connection_string,
+            # dict_row factory type not fully compatible with generic RowFactory[Any]
             row_factory=dict_row,  # type: ignore[arg-type]
             autocommit=True,  # Use autocommit for read-only queries
         ) as conn:
@@ -74,7 +81,7 @@ class PostgresAnalyst:
                 return cast(Sequence[Dict[str, Any]], await cur.fetchall())
 
     async def list_tables(
-        self, schema: str = "public"
+        self, schema: str = DEFAULT_SCHEMA
     ) -> Sequence[Dict[str, Any]]:
         """List all tables in a schema with estimated row counts"""
         async with self.get_connection() as conn:
@@ -106,8 +113,46 @@ class PostgresAnalyst:
                 )
                 return cast(Sequence[Dict[str, Any]], await cur.fetchall())
 
+    async def _get_constraints(
+        self,
+        conn: psycopg.AsyncConnection[DictRow],
+        schema: str,
+        table_name: str,
+        constraint_type: str,
+    ) -> Sequence[Dict[str, Any]] | Dict[str, Any] | None:
+        """Helper to fetch table constraints by type
+
+        Args:
+            conn: Database connection
+            schema: Schema name
+            table_name: Table name
+            constraint_type: Constraint type ('f' for foreign key, 'p' for primary key)
+
+        Returns:
+            List of constraints for foreign keys, single constraint dict for primary key
+        """
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT
+                    conname as constraint_name,
+                    pg_get_constraintdef(c.oid) as definition
+                FROM pg_constraint c
+                JOIN pg_namespace n ON n.oid = c.connamespace
+                JOIN pg_class cl ON cl.oid = c.conrelid
+                WHERE n.nspname = %s
+                    AND cl.relname = %s
+                    AND c.contype = %s
+                """,
+                (schema, table_name, constraint_type),
+            )
+            if constraint_type == "f":
+                return cast(Sequence[Dict[str, Any]], await cur.fetchall())
+            else:
+                return await cur.fetchone()
+
     async def describe_table(
-        self, table_name: str, schema: str = "public"
+        self, table_name: str, schema: str = DEFAULT_SCHEMA
     ) -> Dict[str, Any]:
         """Get detailed information about a table including columns and indexes"""
         async with self.get_connection() as conn:
@@ -150,51 +195,21 @@ class PostgresAnalyst:
                 )
                 indexes = await cur.fetchall()
 
-                # Get foreign keys
-                await cur.execute(
-                    """
-                    SELECT
-                        conname as constraint_name,
-                        pg_get_constraintdef(c.oid) as definition
-                    FROM pg_constraint c
-                    JOIN pg_namespace n ON n.oid = c.connamespace
-                    JOIN pg_class cl ON cl.oid = c.conrelid
-                    WHERE n.nspname = %s
-                    AND cl.relname = %s
-                    AND c.contype = 'f'
-                """,
-                    (schema, table_name),
-                )
-                foreign_keys = await cur.fetchall()
+            # Get constraints using helper method
+            foreign_keys = await self._get_constraints(conn, schema, table_name, "f")
+            primary_key = await self._get_constraints(conn, schema, table_name, "p")
 
-                # Get primary key
-                await cur.execute(
-                    """
-                    SELECT
-                        conname as constraint_name,
-                        pg_get_constraintdef(c.oid) as definition
-                    FROM pg_constraint c
-                    JOIN pg_namespace n ON n.oid = c.connamespace
-                    JOIN pg_class cl ON cl.oid = c.conrelid
-                    WHERE n.nspname = %s
-                    AND cl.relname = %s
-                    AND c.contype = 'p'
-                """,
-                    (schema, table_name),
-                )
-                primary_key = await cur.fetchone()
-
-                return {
-                    "schema": schema,
-                    "table": table_name,
-                    "columns": columns,
-                    "indexes": indexes,
-                    "foreign_keys": foreign_keys,
-                    "primary_key": primary_key,
-                }
+            return {
+                "schema": schema,
+                "table": table_name,
+                "columns": columns,
+                "indexes": indexes,
+                "foreign_keys": foreign_keys,
+                "primary_key": primary_key,
+            }
 
     async def analyze_column(
-        self, table_name: str, column_name: str, schema: str = "public"
+        self, table_name: str, column_name: str, schema: str = DEFAULT_SCHEMA
     ) -> Dict[str, Any]:
         """Analyze a specific column with statistics"""
         async with self.get_connection() as conn:
@@ -213,6 +228,7 @@ class PostgresAnalyst:
                     schema=sql.Identifier(schema),
                     table=sql.Identifier(table_name),
                 )
+                # execute() accepts Composed at runtime, but type stubs don't reflect this
                 await cur.execute(query)  # type: ignore[arg-type]
                 basic_stats = await cur.fetchone()
 
@@ -245,6 +261,7 @@ class PostgresAnalyst:
                     schema=sql.Identifier(schema),
                     table=sql.Identifier(table_name),
                 )
+                # execute() accepts Composed at runtime, but type stubs don't reflect this
                 await cur.execute(query)  # type: ignore[arg-type]
                 top_values = await cur.fetchall()
 
@@ -273,6 +290,7 @@ class PostgresAnalyst:
                             schema=sql.Identifier(schema),
                             table=sql.Identifier(table_name),
                         )
+                        # execute() accepts Composed at runtime, but type stubs don't reflect this
                         await cur.execute(query)  # type: ignore[arg-type]
                         numeric_stats = await cur.fetchone()
                     except Exception:
@@ -281,20 +299,13 @@ class PostgresAnalyst:
                 return {
                     "table": f"{schema}.{table_name}",
                     "column": column_name,
-                    "data_type": column_info["data_type"]
-                    if column_info
-                    else None,
-                    "is_nullable": column_info["is_nullable"]
-                    if column_info
-                    else None,
+                    "data_type": (column_info or {}).get("data_type"),
+                    "is_nullable": (column_info or {}).get("is_nullable"),
                     "basic_statistics": basic_stats,
                     "numeric_statistics": numeric_stats,
                     "top_values": top_values,
                     "null_percentage": round(
-                        (
-                            basic_stats["total_rows"]
-                            - basic_stats["non_null_count"]
-                        )
+                        (basic_stats["total_rows"] - basic_stats["non_null_count"])
                         * 100.0
                         / basic_stats["total_rows"]
                         if basic_stats and basic_stats["total_rows"] > 0
@@ -308,29 +319,29 @@ class PostgresAnalyst:
                 }
 
     async def sample_data(
-        self, table_name: str, schema: str = "public", limit: int = 100
+        self,
+        table_name: str,
+        schema: str = DEFAULT_SCHEMA,
+        limit: int = DEFAULT_SAMPLE_LIMIT,
     ) -> Sequence[Dict[str, Any]]:
         """Get a sample of data from a table"""
         async with self.get_connection() as conn:
             async with conn.cursor() as cur:
-                query = sql.SQL(
-                    "SELECT * FROM {schema}.{table} LIMIT %s"
-                ).format(
+                query = sql.SQL("SELECT * FROM {schema}.{table} LIMIT %s").format(
                     schema=sql.Identifier(schema),
                     table=sql.Identifier(table_name),
                 )
+                # execute() accepts Composed at runtime, but type stubs don't reflect this
                 await cur.execute(query, (limit,))  # type: ignore[arg-type]
                 return cast(Sequence[Dict[str, Any]], await cur.fetchall())
 
     async def execute_query(
-        self, query: str, limit: Optional[int] = 1000
+        self, query: str, limit: Optional[int] = DEFAULT_QUERY_LIMIT
     ) -> Dict[str, Any]:
         """Execute a read-only SQL query"""
         # Basic SQL injection prevention - ensure it's a SELECT query
         query_upper = query.upper().strip()
-        if not query_upper.startswith("SELECT") and not query_upper.startswith(
-            "WITH"
-        ):
+        if not query_upper.startswith("SELECT") and not query_upper.startswith("WITH"):
             raise ValueError("Only SELECT and WITH queries are allowed")
 
         # Add LIMIT if not present and limit is specified
@@ -340,15 +351,14 @@ class PostgresAnalyst:
         async with self.get_connection() as conn:
             async with conn.cursor() as cur:
                 start_time = datetime.now()
+                # execute() typing issue with cursor generic parameters
                 await cur.execute(query)  # type: ignore[arg-type]
                 rows = await cur.fetchall()
                 execution_time = (datetime.now() - start_time).total_seconds()
 
                 # Get column information
                 columns = (
-                    [desc.name for desc in cur.description]
-                    if cur.description
-                    else []
+                    [desc.name for desc in cur.description] if cur.description else []
                 )
 
                 return {
@@ -364,7 +374,7 @@ class PostgresAnalyst:
                 }
 
     async def get_table_relationships(
-        self, schema: str = "public"
+        self, schema: str = DEFAULT_SCHEMA
     ) -> Sequence[Dict[str, Any]]:
         """Get foreign key relationships between tables"""
         async with self.get_connection() as conn:
@@ -425,7 +435,7 @@ class PostgresAnalyst:
                 # Format sizes - convert to mutable dicts
                 schema_stats = [
                     {
-                        **dict(stat),  # type: ignore[arg-type]
+                        **stat,  # DictRow can be unpacked directly
                         "total_size_pretty": self._format_bytes(
                             int(stat["total_size"] or 0)
                         ),
@@ -479,11 +489,13 @@ async def list_resources() -> list[Resource]:
         resources = []
 
         for schema in schemas:
+            schema_name = str(schema["schema_name"])
+            schema_owner = str(schema["schema_owner"])
             resources.append(
                 Resource(
-                    uri=f"postgres://schema/{schema['schema_name']}",  # type: ignore[arg-type]
-                    name=f"Schema: {schema['schema_name']}",
-                    description=f"PostgreSQL schema owned by {schema['schema_owner']}",
+                    uri=AnyUrl(f"postgres://schema/{schema_name}"),  # type: ignore[call-arg]
+                    name=f"Schema: {schema_name}",
+                    description=f"PostgreSQL schema owned by {schema_owner}",
                     mimeType="application/json",
                 )
             )
@@ -494,6 +506,7 @@ async def list_resources() -> list[Resource]:
         return []
 
 
+# MCP decorator type hints don't match runtime signature requirements
 @app.read_resource()  # type: ignore[arg-type]
 async def read_resource(uri: str) -> str:
     """Read database resource information"""
@@ -503,9 +516,7 @@ async def read_resource(uri: str) -> str:
     if uri.startswith("postgres://schema/"):
         schema_name = uri.replace("postgres://schema/", "")
         tables = await analyst.list_tables(schema_name)
-        return json.dumps(
-            {"schema": schema_name, "tables": tables}, default=str
-        )
+        return json.dumps({"schema": schema_name, "tables": tables}, default=str)
 
     raise ValueError(f"Unknown resource URI: {uri}")
 
@@ -527,8 +538,8 @@ async def list_tools() -> list[Tool]:
                 "properties": {
                     "schema": {
                         "type": "string",
-                        "description": "Schema name (default: public)",
-                        "default": "public",
+                        "description": f"Schema name (default: {DEFAULT_SCHEMA})",
+                        "default": DEFAULT_SCHEMA,
                     }
                 },
                 "required": [],
@@ -546,8 +557,8 @@ async def list_tools() -> list[Tool]:
                     },
                     "schema": {
                         "type": "string",
-                        "description": "Schema name (default: public)",
-                        "default": "public",
+                        "description": f"Schema name (default: {DEFAULT_SCHEMA})",
+                        "default": DEFAULT_SCHEMA,
                     },
                 },
                 "required": ["table_name"],
@@ -569,8 +580,8 @@ async def list_tools() -> list[Tool]:
                     },
                     "schema": {
                         "type": "string",
-                        "description": "Schema name (default: public)",
-                        "default": "public",
+                        "description": f"Schema name (default: {DEFAULT_SCHEMA})",
+                        "default": DEFAULT_SCHEMA,
                     },
                 },
                 "required": ["table_name", "column_name"],
@@ -588,15 +599,15 @@ async def list_tools() -> list[Tool]:
                     },
                     "schema": {
                         "type": "string",
-                        "description": "Schema name (default: public)",
-                        "default": "public",
+                        "description": f"Schema name (default: {DEFAULT_SCHEMA})",
+                        "default": DEFAULT_SCHEMA,
                     },
                     "limit": {
                         "type": "integer",
-                        "description": "Number of rows to sample (default: 100)",
-                        "default": 100,
+                        "description": f"Number of rows to sample (default: {DEFAULT_SAMPLE_LIMIT})",
+                        "default": DEFAULT_SAMPLE_LIMIT,
                         "minimum": 1,
-                        "maximum": 1000,
+                        "maximum": MAX_SAMPLE_LIMIT,
                     },
                 },
                 "required": ["table_name"],
@@ -614,10 +625,10 @@ async def list_tools() -> list[Tool]:
                     },
                     "limit": {
                         "type": "integer",
-                        "description": "Maximum number of rows to return (default: 1000)",
-                        "default": 1000,
+                        "description": f"Maximum number of rows to return (default: {DEFAULT_QUERY_LIMIT})",
+                        "default": DEFAULT_QUERY_LIMIT,
                         "minimum": 1,
-                        "maximum": 10000,
+                        "maximum": MAX_QUERY_LIMIT,
                     },
                 },
                 "required": ["query"],
@@ -631,8 +642,8 @@ async def list_tools() -> list[Tool]:
                 "properties": {
                     "schema": {
                         "type": "string",
-                        "description": "Schema name (default: public)",
-                        "default": "public",
+                        "description": f"Schema name (default: {DEFAULT_SCHEMA})",
+                        "default": DEFAULT_SCHEMA,
                     }
                 },
                 "required": [],
@@ -652,44 +663,46 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
     if not analyst:
         raise ValueError("Database connection not initialized")
 
+    # Create local reference for type narrowing in lambdas
+    db = analyst
+
     try:
-        if name == "list_schemas":
-            result = await analyst.list_schemas()
-        elif name == "list_tables":
-            schema = arguments.get("schema", "public")
-            result = await analyst.list_tables(schema)
-        elif name == "describe_table":
-            table_name = arguments["table_name"]
-            schema = arguments.get("schema", "public")
-            result = await analyst.describe_table(table_name, schema)
-        elif name == "analyze_column":
-            table_name = arguments["table_name"]
-            column_name = arguments["column_name"]
-            schema = arguments.get("schema", "public")
-            result = await analyst.analyze_column(
-                table_name, column_name, schema
-            )
-        elif name == "sample_data":
-            table_name = arguments["table_name"]
-            schema = arguments.get("schema", "public")
-            limit = arguments.get("limit", 100)
-            result = await analyst.sample_data(table_name, schema, limit)
-        elif name == "execute_query":
-            query = arguments["query"]
-            limit = arguments.get("limit", 1000)
-            result = await analyst.execute_query(query, limit)
-        elif name == "get_table_relationships":
-            schema = arguments.get("schema", "public")
-            result = await analyst.get_table_relationships(schema)
-        elif name == "profile_database":
-            result = await analyst.profile_database()
-        else:
+        # Map tool names to analyst methods and their parameter extraction logic
+        tool_handlers = {
+            "list_schemas": lambda: db.list_schemas(),
+            "list_tables": lambda: db.list_tables(
+                schema=arguments.get("schema", DEFAULT_SCHEMA)
+            ),
+            "describe_table": lambda: db.describe_table(
+                table_name=arguments["table_name"],
+                schema=arguments.get("schema", DEFAULT_SCHEMA),
+            ),
+            "analyze_column": lambda: db.analyze_column(
+                table_name=arguments["table_name"],
+                column_name=arguments["column_name"],
+                schema=arguments.get("schema", DEFAULT_SCHEMA),
+            ),
+            "sample_data": lambda: db.sample_data(
+                table_name=arguments["table_name"],
+                schema=arguments.get("schema", DEFAULT_SCHEMA),
+                limit=arguments.get("limit", DEFAULT_SAMPLE_LIMIT),
+            ),
+            "execute_query": lambda: db.execute_query(
+                query=arguments["query"],
+                limit=arguments.get("limit", DEFAULT_QUERY_LIMIT),
+            ),
+            "get_table_relationships": lambda: db.get_table_relationships(
+                schema=arguments.get("schema", DEFAULT_SCHEMA)
+            ),
+            "profile_database": lambda: db.profile_database(),
+        }
+
+        if name not in tool_handlers:
             raise ValueError(f"Unknown tool: {name}")
 
+        result = await tool_handlers[name]()
         return [
-            TextContent(
-                type="text", text=json.dumps(result, default=str, indent=2)
-            )
+            TextContent(type="text", text=json.dumps(result, default=str, indent=2))
         ]
     except Exception as e:
         logger.error(f"Error executing tool {name}: {e}")
@@ -720,9 +733,7 @@ async def main():
     await initialize_analyst()
 
     async with stdio_server() as (read_stream, write_stream):
-        await app.run(
-            read_stream, write_stream, app.create_initialization_options()
-        )
+        await app.run(read_stream, write_stream, app.create_initialization_options())
 
 
 if __name__ == "__main__":
