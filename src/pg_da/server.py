@@ -57,7 +57,7 @@ class PostgresAnalyst:
         ) as conn:
             # Set session to read-only as an extra safety measure
             await conn.execute("SET default_transaction_read_only = ON")
-            yield conn
+            yield conn  # type: ignore[misc]  # row_factory=dict_row ensures DictRow type at runtime
 
     async def list_schemas(self) -> Sequence[Dict[str, Any]]:
         """List all schemas in the database"""
