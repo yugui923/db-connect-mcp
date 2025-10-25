@@ -5,9 +5,9 @@ from typing import TYPE_CHECKING, Optional
 from sqlalchemy.engine import reflection
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from db_mcp.core.connection import DatabaseConnection
-from db_mcp.models.database import SchemaInfo
-from db_mcp.models.table import (
+from src.core.connection import DatabaseConnection
+from src.models.database import SchemaInfo
+from src.models.table import (
     ColumnInfo,
     ConstraintInfo,
     IndexInfo,
@@ -16,7 +16,7 @@ from db_mcp.models.table import (
 )
 
 if TYPE_CHECKING:
-    from db_mcp.adapters.base import BaseAdapter
+    from src.adapters.base import BaseAdapter
 
 
 class MetadataInspector:

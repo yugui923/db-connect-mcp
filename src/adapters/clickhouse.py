@@ -5,11 +5,11 @@ from typing import Any, Optional
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from db_mcp.adapters.base import BaseAdapter
-from db_mcp.models.capabilities import DatabaseCapabilities
-from db_mcp.models.database import SchemaInfo
-from db_mcp.models.statistics import ColumnStats, Distribution
-from db_mcp.models.table import TableInfo
+from src.adapters.base import BaseAdapter
+from src.models.capabilities import DatabaseCapabilities
+from src.models.database import SchemaInfo
+from src.models.statistics import ColumnStats, Distribution
+from src.models.table import TableInfo
 
 
 class ClickHouseAdapter(BaseAdapter):

@@ -3,7 +3,7 @@
 import asyncio
 import sys
 
-from db_mcp.server import main
+from src.server import main
 
 if __name__ == "__main__":
     # Windows-specific event loop policy

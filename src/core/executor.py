@@ -6,11 +6,11 @@ from typing import TYPE_CHECKING, Any, Optional
 
 from sqlalchemy import text
 
-from db_mcp.core.connection import DatabaseConnection
-from db_mcp.models.query import ExplainPlan, QueryResult
+from src.core.connection import DatabaseConnection
+from src.models.query import ExplainPlan, QueryResult
 
 if TYPE_CHECKING:
-    from db_mcp.adapters.base import BaseAdapter
+    from src.adapters.base import BaseAdapter
 
 
 class QueryExecutor:

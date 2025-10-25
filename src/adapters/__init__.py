@@ -2,11 +2,11 @@
 
 from sqlalchemy.engine.url import make_url
 
-from db_mcp.adapters.base import BaseAdapter
-from db_mcp.adapters.clickhouse import ClickHouseAdapter
-from db_mcp.adapters.mysql import MySQLAdapter
-from db_mcp.adapters.postgresql import PostgresAdapter
-from db_mcp.models.config import DatabaseConfig
+from .base import BaseAdapter
+from .clickhouse import ClickHouseAdapter
+from .mysql import MySQLAdapter
+from .postgresql import PostgresAdapter
+from ..models.config import DatabaseConfig
 
 __all__ = [
     "BaseAdapter",

@@ -21,7 +21,7 @@ async def test_server():
 
     # Test imports
     try:
-        from src.pg_da.server import PostgresAnalyst
+        from src.server import PostgresAnalyst
 
         print("[OK] Server module imported successfully")
     except ImportError as e:

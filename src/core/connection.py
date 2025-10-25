@@ -5,7 +5,7 @@ from typing import Optional
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_engine
 
-from db_mcp.models.config import DatabaseConfig
+from src.models.config import DatabaseConfig
 
 
 class DatabaseConnection:

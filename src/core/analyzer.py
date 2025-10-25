@@ -3,11 +3,11 @@
 from typing import TYPE_CHECKING, Optional
 
 
-from db_mcp.core.connection import DatabaseConnection
-from db_mcp.models.statistics import ColumnStats, Distribution
+from src.core.connection import DatabaseConnection
+from src.models.statistics import ColumnStats, Distribution
 
 if TYPE_CHECKING:
-    from db_mcp.adapters.base import BaseAdapter
+    from src.adapters.base import BaseAdapter
 
 
 class StatisticsAnalyzer:
