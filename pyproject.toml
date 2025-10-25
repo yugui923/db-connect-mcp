@@ -9,25 +9,13 @@ dependencies = [
     "sqlalchemy[asyncio]>=2.0.0",
     "pydantic>=2.0.0",
     "python-dotenv>=1.0.0",
+    "asyncpg>=0.29.0",
+    "aiomysql>=0.2.0",
+    "clickhouse-sqlalchemy>=0.3.0",
+    "asynch>=0.2.2",
 ]
 
 [project.optional-dependencies]
-postgresql = [
-    "asyncpg>=0.29.0",
-]
-mysql = [
-    "aiomysql>=0.2.0",
-]
-clickhouse = [
-    "clickhouse-sqlalchemy>=0.3.0",
-    "asynch>=0.2.2",
-]
-all = [
-    "asyncpg>=0.29.0",
-    "aiomysql>=0.2.0",
-    "clickhouse-sqlalchemy>=0.3.0",
-    "asynch>=0.2.2",
-]
 dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
