@@ -3,7 +3,7 @@ name = "db-mcp"
 version = "2.0.0"
 description = "Multi-database MCP server for PostgreSQL, MySQL, and ClickHouse"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.13"
 dependencies = [
     "mcp>=1.0.0",
     "sqlalchemy[asyncio]>=2.0.0",
