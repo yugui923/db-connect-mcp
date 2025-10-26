@@ -29,6 +29,36 @@ class DatabaseConnection:
         if self.engine is not None:
             return  # Already initialized
 
+        # Extract SSL configuration from URL for asyncpg
+        connect_args = {}
+        if self._dialect == "postgresql" and self._driver == "asyncpg":
+            from sqlalchemy.engine.url import make_url
+
+            url_obj = make_url(self.config.url)
+
+            # Check for SSL-related query parameters
+            if url_obj.query:
+                # asyncpg expects 'ssl' parameter in connect_args, not in URL
+                if "sslmode" in url_obj.query:
+                    sslmode = url_obj.query["sslmode"]
+                    # Map sslmode to asyncpg's ssl parameter
+                    if sslmode in ["require", "prefer", "allow"]:
+                        connect_args["ssl"] = sslmode
+                    elif sslmode == "disable":
+                        connect_args["ssl"] = False
+                    # Remove sslmode from URL query to avoid "unexpected keyword" error
+                    url_obj = url_obj.difference_update_query(["sslmode"])
+                    self.config.url = url_obj.render_as_string(hide_password=False)
+                elif "ssl" in url_obj.query:
+                    ssl_value = url_obj.query["ssl"]
+                    if ssl_value in ["require", "true", "1"]:
+                        connect_args["ssl"] = "require"
+                    elif ssl_value in ["false", "0", "disable"]:
+                        connect_args["ssl"] = False
+                    # Remove ssl from URL query
+                    url_obj = url_obj.difference_update_query(["ssl"])
+                    self.config.url = url_obj.render_as_string(hide_password=False)
+
         self.engine = create_async_engine(
             self.config.url,
             pool_size=self.config.pool_size,
@@ -36,6 +66,7 @@ class DatabaseConnection:
             pool_timeout=self.config.pool_timeout,
             pool_pre_ping=True,  # Verify connections before using
             echo=self.config.echo_sql,
+            connect_args=connect_args if connect_args else None,
         )
 
     async def dispose(self) -> None:

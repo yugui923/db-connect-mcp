@@ -13,7 +13,10 @@ A read-only MCP (Model Context Protocol) server for exploratory data analysis ac
 
 2. **Configure** `.env`:
    ```env
-   DATABASE_URL=postgresql+asyncpg://user:pass@localhost:5432/mydb
+   DATABASE_URL=postgres://user:pass@localhost:5432/mydb
+   # Also supports: postgresql://, pg://, jdbc:postgresql://
+   # MariaDB: mariadb://, jdbc:mysql://, jdbc:mariadb://
+   # ClickHouse: ch://, jdbc:clickhouse://
    ```
 
 3. **Add to Claude Desktop** `claude_desktop_config.json`:
@@ -24,7 +27,7 @@ A read-only MCP (Model Context Protocol) server for exploratory data analysis ac
          "command": "uv",
          "args": ["run", "python", "C:/path/to/db-connect-mcp/main.py"],
          "env": {
-           "DATABASE_URL": "postgresql+asyncpg://user:pass@localhost:5432/mydb"
+           "DATABASE_URL": "postgresql://user:pass@localhost:5432/mydb"
          }
        }
      }
@@ -104,41 +107,109 @@ The server automatically detects the database type and adds appropriate read-onl
 
 ### Connection String Examples
 
+The server now provides more flexible and secure URL handling:
+- **Automatic driver detection**: Async drivers are automatically added if not specified
+- **JDBC URL support**: JDBC prefixes are automatically handled
+  - `jdbc:postgresql://...` → `postgresql+asyncpg://...`
+  - `jdbc:mysql://...` → `mysql+aiomysql://...`
+  - Works with all dialect variations (e.g., `jdbc:postgres://`, `jdbc:mariadb://`)
+- **Database dialect variations**: Common variations are automatically normalized
+  - PostgreSQL: `postgresql`, `postgres`, `pg`, `psql`, `pgsql`
+  - MySQL/MariaDB: `mysql`, `mariadb`, `maria`
+  - ClickHouse: `clickhouse`, `ch`, `click`
+- **Allowlist-based parameter filtering**: Only known-safe parameters are preserved
+- **Database-specific parameters**: Each database type has its own set of supported parameters
+- **Robust parsing**: Handles various URL formats gracefully
+
 **PostgreSQL:**
 ```
-# Local database
-DATABASE_URL=postgresql://postgres:password@localhost:5432/mydb
+# Simple URL (driver automatically added)
+DATABASE_URL=postgresql://user:password@localhost:5432/mydb
 
-# With asyncpg driver (recommended for PostgreSQL)
+# Common variations (all normalized to postgresql+asyncpg)
+DATABASE_URL=postgres://user:pass@host:5432/db  # Heroku, AWS RDS style
+DATABASE_URL=pg://user:pass@host:5432/db         # Short form
+DATABASE_URL=psql://user:pass@host:5432/db       # CLI style
+
+# JDBC URLs (automatically converted)
+DATABASE_URL=jdbc:postgresql://user:pass@host:5432/db  # From Java apps
+DATABASE_URL=jdbc:postgres://user:pass@host:5432/db    # JDBC with variant
+
+# With explicit async driver
 DATABASE_URL=postgresql+asyncpg://user:pass@host:5432/db
 
-# Remote with SSL
-DATABASE_URL=postgresql+asyncpg://user:pass@remote.host:5432/db?ssl=require
+# With supported parameters (see list below)
+DATABASE_URL=postgres://user:pass@host:5432/db?application_name=myapp&connect_timeout=10
 ```
+
+**Supported PostgreSQL Parameters:**
+- `application_name` - Identifies your app in pg_stat_activity (useful for monitoring)
+- `connect_timeout` - Connection timeout in seconds
+- `command_timeout` - Default timeout for operations
+- `ssl` / `sslmode` - SSL connection requirements (automatically converted for asyncpg compatibility)
+- `server_settings` - Server settings dictionary
+- `options` - Command-line options to send to server
+- Performance tuning: `prepared_statement_cache_size`, `max_cached_statement_lifetime`, etc.
 
 **MySQL/MariaDB:**
 ```
-# Local database
+# Simple URL (driver automatically added)
 DATABASE_URL=mysql://root:password@localhost:3306/mydb
 
-# With aiomysql driver (recommended for async)
+# MariaDB URLs (normalized to mysql+aiomysql)
+DATABASE_URL=mariadb://user:pass@host:3306/db    # MariaDB style
+DATABASE_URL=maria://user:pass@host:3306/db      # Short form
+
+# JDBC URLs (automatically converted)
+DATABASE_URL=jdbc:mysql://user:pass@host:3306/db     # From Java apps
+DATABASE_URL=jdbc:mariadb://user:pass@host:3306/db   # JDBC MariaDB
+
+# With explicit async driver
 DATABASE_URL=mysql+aiomysql://user:pass@host:3306/db
 
-# Remote with charset
-DATABASE_URL=mysql+aiomysql://user:pass@remote.host:3306/db?charset=utf8mb4
+# With charset (critical for proper Unicode support)
+DATABASE_URL=mariadb://user:pass@remote.host:3306/db?charset=utf8mb4
 ```
+
+**Supported MySQL Parameters:**
+- `charset` - Character encoding (e.g., utf8mb4) - **critical for data integrity**
+- `use_unicode` - Enable Unicode support
+- `connect_timeout`, `read_timeout`, `write_timeout` - Various timeouts
+- `autocommit` - Transaction autocommit mode
+- `init_command` - Initial SQL command to run
+- `sql_mode` - SQL mode settings
+- `time_zone` - Time zone setting
 
 **ClickHouse:**
 ```
-# Local database
+# Simple URL (driver automatically added)
 DATABASE_URL=clickhouse://default:@localhost:9000/default
 
-# With asynch driver
+# Short forms (normalized to clickhouse+asynch)
+DATABASE_URL=ch://user:pass@host:9000/db         # Short form
+DATABASE_URL=click://user:pass@host:9000/db      # Alternative
+
+# JDBC URLs (automatically converted)
+DATABASE_URL=jdbc:clickhouse://user:pass@host:9000/db  # From Java apps
+DATABASE_URL=jdbc:ch://user:pass@host:9000/db         # JDBC with short form
+
+# With explicit async driver
 DATABASE_URL=clickhouse+asynch://user:pass@host:9000/db
 
-# With specific settings
-DATABASE_URL=clickhouse+asynch://user:pass@host:9000/db?timeout=60
+# With performance settings
+DATABASE_URL=ch://user:pass@host:9000/db?timeout=60&max_threads=4
 ```
+
+**Supported ClickHouse Parameters:**
+- `database` - Default database selection
+- `timeout`, `connect_timeout`, `send_receive_timeout` - Various timeouts
+- `compress`, `compression` - Enable compression
+- `max_block_size`, `max_threads` - Performance tuning
+
+**Note:**
+- SSL parameters (`ssl`, `sslmode`) are automatically converted to the correct format for asyncpg
+- Certificate file parameters (`sslcert`, `sslkey`, `sslrootcert`) are filtered out as they can cause compatibility issues
+- Only parameters known to work with async drivers are preserved
 
 ## Usage
 
