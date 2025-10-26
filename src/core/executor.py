@@ -60,7 +60,7 @@ class QueryExecutor:
 
         start_time = time.time()
 
-        async with await self.connection.get_connection() as conn:
+        async with self.connection.get_connection() as conn:
             result = await conn.execute(text(modified_query), params or {})
             rows_data = result.fetchall()
 
@@ -130,7 +130,7 @@ class QueryExecutor:
         # Get database-specific EXPLAIN syntax
         explain_query = await self.adapter.get_explain_query(query, analyze)
 
-        async with await self.connection.get_connection() as conn:
+        async with self.connection.get_connection() as conn:
             result = await conn.execute(text(explain_query))
             rows = result.fetchall()
 
@@ -231,7 +231,7 @@ class QueryExecutor:
             self._validate_query(query)
 
             # Try to prepare the query (this checks syntax without executing)
-            async with await self.connection.get_connection() as conn:
+            async with self.connection.get_connection() as conn:
                 await conn.execute(text(f"EXPLAIN {query}"))
 
             return (True, None)

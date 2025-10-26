@@ -1,8 +1,16 @@
 """Table, column, index, and constraint information models."""
 
+import warnings
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+
+# Suppress the specific warning about field 'schema' shadowing
+warnings.filterwarnings(
+    "ignore",
+    message='Field name "schema" in "TableInfo" shadows an attribute in parent',
+    category=UserWarning,
+)
 
 
 class ColumnInfo(BaseModel):
@@ -110,6 +118,8 @@ class RelationshipInfo(BaseModel):
 
 class TableInfo(BaseModel):
     """Comprehensive information about a table."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     name: str = Field(..., description="Table name")
     schema: Optional[str] = Field(default=None, description="Schema name")

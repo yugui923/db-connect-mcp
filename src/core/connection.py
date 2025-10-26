@@ -1,6 +1,7 @@
 """Database connection management with SQLAlchemy."""
 
-from typing import Optional
+from contextlib import asynccontextmanager
+from typing import AsyncGenerator, Optional
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_engine
@@ -43,11 +44,12 @@ class DatabaseConnection:
             await self.engine.dispose()
             self.engine = None
 
-    async def get_connection(self) -> AsyncConnection:
+    @asynccontextmanager
+    async def get_connection(self) -> AsyncGenerator[AsyncConnection, None]:
         """
-        Get a connection from the pool.
+        Get a connection from the pool as an async context manager.
 
-        Returns:
+        Yields:
             AsyncConnection for executing queries
 
         Raises:
@@ -58,17 +60,16 @@ class DatabaseConnection:
                 "DatabaseConnection not initialized. Call initialize() first."
             )
 
-        conn = await self.engine.connect()
+        async with self.engine.connect() as conn:
+            # Set read-only mode if configured
+            if self.config.read_only:
+                await self._set_readonly(conn)
 
-        # Set read-only mode if configured
-        if self.config.read_only:
-            await self._set_readonly(conn)
+            # Set statement timeout if configured
+            if self.config.statement_timeout:
+                await self._set_timeout(conn, self.config.statement_timeout)
 
-        # Set statement timeout if configured
-        if self.config.statement_timeout:
-            await self._set_timeout(conn, self.config.statement_timeout)
-
-        return conn
+            yield conn
 
     async def _set_readonly(self, conn: AsyncConnection) -> None:
         """Set connection to read-only mode based on database dialect."""
@@ -117,7 +118,7 @@ class DatabaseConnection:
             True if connection successful, False otherwise
         """
         try:
-            async with await self.get_connection() as conn:
+            async with self.get_connection() as conn:
                 await conn.execute(text("SELECT 1"))
             return True
         except Exception:
@@ -138,7 +139,7 @@ class DatabaseConnection:
 
         query = version_query.get(self._dialect, "SELECT version()")
 
-        async with await self.get_connection() as conn:
+        async with self.get_connection() as conn:
             result = await conn.execute(text(query))
             row = result.fetchone()
             return str(row[0]) if row else "Unknown"

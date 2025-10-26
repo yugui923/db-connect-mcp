@@ -41,7 +41,7 @@ class StatisticsAnalyzer:
         Returns:
             Column statistics with all available metrics
         """
-        async with await self.connection.get_connection() as conn:
+        async with self.connection.get_connection() as conn:
             # Delegate to adapter for database-specific statistics
             stats = await self.adapter.get_column_statistics(
                 conn, table_name, column_name, schema
@@ -68,7 +68,7 @@ class StatisticsAnalyzer:
         Returns:
             Value distribution with frequencies
         """
-        async with await self.connection.get_connection() as conn:
+        async with self.connection.get_connection() as conn:
             # Delegate to adapter for database-specific distribution query
             distribution = await self.adapter.get_value_distribution(
                 conn, table_name, column_name, schema, limit

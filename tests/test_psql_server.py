@@ -67,10 +67,9 @@ async def test_server():
         await connection.initialize()
         print("[OK] Database connection initialized")
 
-        # Test connectivity - manually handle connection lifecycle
+        # Test connectivity - use context manager for proper connection handling
         try:
-            conn = await connection.get_connection()
-            try:
+            async with connection.get_connection() as conn:
                 result = await conn.execute(text("SELECT version()"))
                 row = result.fetchone()
                 if row:
@@ -79,8 +78,6 @@ async def test_server():
                 else:
                     print("[ERROR] No version returned")
                     return False
-            finally:
-                await conn.close()  # Explicitly close the connection
         except Exception as e:
             print(f"[ERROR] Connection test exception: {e}")
             import traceback
