@@ -41,12 +41,12 @@ async def test_server():
         return False
 
     # Check environment
-    database_url = os.getenv("DATABASE_URL")
+    database_url = os.getenv("PG_TEST_DATABASE_URL")
     if not database_url:
-        print("[ERROR] DATABASE_URL not set in environment")
+        print("[ERROR] PG_TEST_DATABASE_URL not set in environment")
         print("  Please create a .env file with your PostgreSQL connection")
         print(
-            "  Example: DATABASE_URL=postgresql+asyncpg://user:pass@localhost:5432/db"
+            "  Example: PG_TEST_DATABASE_URL=postgresql+asyncpg://user:pass@localhost:5432/db"
         )
         return False
 

@@ -39,7 +39,7 @@ python main.py
 # Run the PostgreSQL integration test
 uv run python tests/test_psql_server.py
 
-# Note: Requires DATABASE_URL in .env file pointing to a test database
+# Note: Requires PG_TEST_DATABASE_URL in .env file pointing to a test database
 ```
 
 ### Code Quality

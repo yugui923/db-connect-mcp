@@ -1,14 +1,8 @@
 {
   "mcpServers": {
-    "pg-da": {
+    "db-connect-mcp-pg": {
       "command": "uv",
-      "args": [
-        "--directory",
-        "C:/Code/pg-da",
-        "run",
-        "python",
-        "C:/Code/pg-da/main.py"
-      ],
+      "args": ["--directory", "C:/Code/db-connect-mcp", "run", "main.py"],
       "env": {
         "DATABASE_URL": "postgresql://username:password@localhost:5432/your_database"
       }
