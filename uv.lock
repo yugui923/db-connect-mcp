@@ -218,7 +218,7 @@ wheels = [
 
 [[package]]
 name = "db-connect-mcp"
-version = "2.0.0"
+version = "0.0.2"
 source = { virtual = "." }
 dependencies = [
     { name = "aiomysql" },
