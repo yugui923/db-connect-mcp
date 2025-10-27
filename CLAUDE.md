@@ -24,13 +24,16 @@ uv sync --dev
 ### Running the Server
 
 ```bash
-# Run with uv (recommended)
-uv run python main.py
+# Using the console script (if installed)
+db-connect-mcp
 
-# Or directly
-python main.py
+# Or as a module (recommended for development)
+python -m db_connect_mcp
 
-# For Windows: main.py sets WindowsProactorEventLoopPolicy automatically
+# Using uv (with dependencies)
+uv run db-connect-mcp
+
+# For Windows: __main__.py sets WindowsProactorEventLoopPolicy automatically
 ```
 
 ### Testing
@@ -159,6 +162,7 @@ The server implements comprehensive error handling:
 
 The project includes Windows-specific handling:
 
-- `main.py` sets `WindowsProactorEventLoopPolicy` for async operations
+- `src/db_connect_mcp/__main__.py` sets `WindowsProactorEventLoopPolicy` for async operations
 - Test files set `WindowsSelectorEventLoopPolicy` for asyncpg compatibility
 - Path handling uses `pathlib.Path` for cross-platform support
+- Console script `db-connect-mcp` is automatically registered in pyproject.toml

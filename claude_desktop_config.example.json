@@ -1,8 +1,21 @@
 {
   "mcpServers": {
     "db-connect-mcp-pg": {
+      "command": "db-connect-mcp",
+      "env": {
+        "DATABASE_URL": "postgresql://username:password@localhost:5432/your_database"
+      }
+    },
+    "db-connect-mcp-mysql": {
+      "command": "db-connect-mcp",
+      "env": {
+        "DATABASE_URL": "mysql://username:password@localhost:3306/your_database"
+      }
+    },
+    "db-connect-mcp-dev": {
+      "comment": "For development - running from source with uv",
       "command": "uv",
-      "args": ["--directory", "C:/Code/db-connect-mcp", "run", "main.py"],
+      "args": ["--directory", "C:/Code/db-connect-mcp", "run", "db-connect-mcp"],
       "env": {
         "DATABASE_URL": "postgresql://username:password@localhost:5432/your_database"
       }

@@ -28,8 +28,7 @@ A read-only MCP (Model Context Protocol) server for exploratory data analysis ac
    {
      "mcpServers": {
        "db-connect": {
-         "command": "uv",
-         "args": ["run", "python", "C:/path/to/db-connect-mcp/main.py"],
+         "command": "db-connect-mcp",
          "env": {
            "DATABASE_URL": "postgresql://user:pass@localhost:5432/mydb"
          }
@@ -73,7 +72,7 @@ A read-only MCP (Model Context Protocol) server for exploratory data analysis ac
 ## Installation
 
 ### Prerequisites
-- Python 3.13 or higher
+- Python 3.10 or higher
 - One or more of:
   - PostgreSQL database (9.6+)
   - MySQL/MariaDB database (5.7+/10.2+)
@@ -241,14 +240,13 @@ If installed from PyPI:
 db-connect-mcp
 ```
 
-If running from source:
+If running from source (development):
 ```bash
-python main.py
-```
+# Using module approach (recommended)
+python -m db_connect_mcp
 
-Or with uv:
-```bash
-uv run python main.py
+# Or using uv
+uv run db-connect-mcp
 ```
 
 ### Using with Claude Desktop
@@ -270,14 +268,14 @@ Add the server to your Claude Desktop configuration (`claude_desktop_config.json
 }
 ```
 
-#### If installed from source:
+#### If running from source (development):
 
 ```json
 {
   "mcpServers": {
     "db-connect": {
       "command": "python",
-      "args": ["C:/path/to/db-connect-mcp/main.py"],
+      "args": ["-m", "db_connect_mcp"],
       "env": {
         "DATABASE_URL": "postgresql+asyncpg://user:pass@host:5432/db"
       }
@@ -286,14 +284,14 @@ Add the server to your Claude Desktop configuration (`claude_desktop_config.json
 }
 ```
 
-#### Or using uv (for source installation):
+#### Or using uv (for development with dependencies):
 
 ```json
 {
   "mcpServers": {
     "db-connect": {
       "command": "uv",
-      "args": ["run", "python", "C:/path/to/db-connect-mcp/main.py"],
+      "args": ["--directory", "C:/path/to/db-connect-mcp", "run", "db-connect-mcp"],
       "env": {
         "DATABASE_URL": "mysql+aiomysql://user:pass@host:3306/db"
       }
@@ -307,15 +305,13 @@ You can configure multiple database connections:
 {
   "mcpServers": {
     "postgres-prod": {
-      "command": "uv",
-      "args": ["run", "python", "C:/path/to/db-connect-mcp/main.py"],
+      "command": "db-connect-mcp",
       "env": {
         "DATABASE_URL": "postgresql+asyncpg://user:pass@pg-host:5432/db"
       }
     },
     "mysql-analytics": {
-      "command": "uv",
-      "args": ["run", "python", "C:/path/to/db-connect-mcp/main.py"],
+      "command": "db-connect-mcp",
       "env": {
         "DATABASE_URL": "mysql+aiomysql://user:pass@mysql-host:3306/analytics"
       }
@@ -441,35 +437,36 @@ Once configured, you can use the server in Claude:
 ```
 db-connect-mcp/
 ├── src/
-│   ├── adapters/         # Database-specific adapters
-│   │   ├── __init__.py
-│   │   ├── base.py      # Base adapter interface
-│   │   ├── postgresql.py # PostgreSQL adapter
-│   │   ├── mysql.py     # MySQL adapter
-│   │   └── clickhouse.py # ClickHouse adapter
-│   ├── core/            # Core functionality
-│   │   ├── __init__.py
-│   │   ├── connection.py # Database connection management
-│   │   ├── executor.py  # Query execution
-│   │   ├── inspector.py # Metadata inspection
-│   │   └── analyzer.py  # Statistical analysis
-│   ├── models/          # Data models
-│   │   ├── __init__.py
-│   │   ├── capabilities.py # Database capabilities
-│   │   ├── config.py    # Configuration models
-│   │   ├── database.py  # Database models
-│   │   ├── query.py     # Query models
-│   │   ├── statistics.py # Statistics models
-│   │   └── table.py     # Table metadata models
-│   ├── __init__.py
-│   ├── __main__.py
-│   └── server.py        # Main MCP server implementation
+│   └── db_connect_mcp/
+│       ├── adapters/         # Database-specific adapters
+│       │   ├── __init__.py
+│       │   ├── base.py      # Base adapter interface
+│       │   ├── postgresql.py # PostgreSQL adapter
+│       │   ├── mysql.py     # MySQL adapter
+│       │   └── clickhouse.py # ClickHouse adapter
+│       ├── core/            # Core functionality
+│       │   ├── __init__.py
+│       │   ├── connection.py # Database connection management
+│       │   ├── executor.py  # Query execution
+│       │   ├── inspector.py # Metadata inspection
+│       │   └── analyzer.py  # Statistical analysis
+│       ├── models/          # Data models
+│       │   ├── __init__.py
+│       │   ├── capabilities.py # Database capabilities
+│       │   ├── config.py    # Configuration models
+│       │   ├── database.py  # Database models
+│       │   ├── query.py     # Query models
+│       │   ├── statistics.py # Statistics models
+│       │   └── table.py     # Table metadata models
+│       ├── __init__.py
+│       ├── __main__.py      # Module entry point
+│       └── server.py        # Main MCP server implementation
 ├── tests/
 │   ├── conftest.py      # Test configuration
 │   └── test_server.py   # Integration tests
 ├── .env.example         # Example environment configuration
-├── main.py             # Entry point
-├── pyproject.toml      # Project dependencies
+├── main.py             # Legacy entry point (optional)
+├── pyproject.toml      # Project dependencies and console scripts
 └── README.md          # This file
 ```
 
