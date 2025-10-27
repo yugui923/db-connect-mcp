@@ -1,7 +1,7 @@
 """Base adapter abstract class for database-specific implementations."""
 
 from abc import ABC, abstractmethod
-from typing import Any, Optional
+from typing import Any, Optional, Union, TYPE_CHECKING
 
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -9,6 +9,12 @@ from db_connect_mcp.models.capabilities import DatabaseCapabilities
 from db_connect_mcp.models.database import SchemaInfo
 from db_connect_mcp.models.statistics import ColumnStats, Distribution
 from db_connect_mcp.models.table import TableInfo
+
+if TYPE_CHECKING:
+    from db_connect_mcp.core.connection import AsyncConnectionWrapper
+
+# Type alias for connection types
+ConnectionType = Union[AsyncConnection, "AsyncConnectionWrapper"]
 
 
 class BaseAdapter(ABC):
@@ -22,7 +28,7 @@ class BaseAdapter(ABC):
 
     @abstractmethod
     async def enrich_schema_info(
-        self, conn: AsyncConnection, schema_info: SchemaInfo
+        self, conn: ConnectionType, schema_info: SchemaInfo
     ) -> SchemaInfo:
         """
         Enrich schema info with database-specific metadata.
@@ -38,7 +44,7 @@ class BaseAdapter(ABC):
 
     @abstractmethod
     async def enrich_table_info(
-        self, conn: AsyncConnection, table_info: TableInfo
+        self, conn: ConnectionType, table_info: TableInfo
     ) -> TableInfo:
         """
         Enrich table info with database-specific metadata.
@@ -55,7 +61,7 @@ class BaseAdapter(ABC):
     @abstractmethod
     async def get_column_statistics(
         self,
-        conn: AsyncConnection,
+        conn: ConnectionType,
         table_name: str,
         column_name: str,
         schema: Optional[str],
@@ -77,7 +83,7 @@ class BaseAdapter(ABC):
     @abstractmethod
     async def get_value_distribution(
         self,
-        conn: AsyncConnection,
+        conn: ConnectionType,
         table_name: str,
         column_name: str,
         schema: Optional[str],
