@@ -67,6 +67,59 @@ class DatabaseConfig(BaseModel):
                 # Some JDBC URLs might have jdbc:driver:// format (e.g., jdbc:postgresql://)
                 # These are already handled by removing the prefix
 
+                # Handle special case: JDBC ClickHouse URLs with query parameters
+                # Format: jdbc:clickhouse://host:port?user=X&password=Y&database=Z
+                if v.lower().startswith("clickhouse://"):
+                    import re
+                    from urllib.parse import unquote
+
+                    # Parse JDBC-style ClickHouse URL
+                    match = re.match(r"clickhouse://([^:/]+):?(\d+)?\?(.+)", v)
+                    if match:
+                        host = match.group(1)
+                        port = match.group(2) or "9000"
+                        params_str = match.group(3)
+
+                        # Parse parameters carefully
+                        user = "default"
+                        password = ""
+                        database = "default"
+
+                        # Extract user
+                        if "user=" in params_str:
+                            user_match = re.search(r"user=([^&]+)", params_str)
+                            if user_match:
+                                user = unquote(user_match.group(1))
+
+                        # Extract password (handle special characters)
+                        if "password=" in params_str:
+                            pwd_start = params_str.find("password=") + 9
+                            # Find next parameter or end
+                            next_param = len(params_str)
+                            for known_param in ["&ssl=", "&database=", "&secure="]:
+                                pos = params_str.find(known_param, pwd_start)
+                                if pos != -1 and pos < next_param:
+                                    next_param = pos
+                            password = unquote(params_str[pwd_start:next_param])
+
+                        # Extract database
+                        if "database=" in params_str:
+                            db_match = re.search(r"database=([^&]+)", params_str)
+                            if db_match:
+                                database = unquote(db_match.group(1))
+
+                        # Check for SSL/secure
+                        secure = "ssl=true" in params_str or "secure=true" in params_str
+
+                        # Build proper SQLAlchemy URL
+                        v = f"clickhousedb://{user}:{password}@{host}:{port}/{database}"
+                        if secure:
+                            v += "?secure=True"
+
+                        logger.info(
+                            "Converted JDBC ClickHouse URL to SQLAlchemy format"
+                        )
+
             # Parse the URL to handle query parameters
             parsed = urlparse(v)
 
@@ -91,6 +144,7 @@ class DatabaseConfig(BaseModel):
                 "maria": "mysql",
                 # ClickHouse variations
                 "clickhouse": "clickhouse",
+                "clickhousedb": "clickhouse",  # clickhouse-connect uses this
                 "ch": "clickhouse",
                 "click": "clickhouse",
             }
@@ -277,13 +331,19 @@ class DatabaseConfig(BaseModel):
 
             # No need to check supported dialects again as we already normalized and validated above
 
-            # Automatically add async driver if not specified
-            if "+" not in url.drivername:
-                # Map dialect to its default async driver
+            # Handle ClickHouse special case - clickhouse-connect uses 'clickhousedb' as dialect
+            if dialect == "clickhouse":
+                # clickhouse-connect uses 'clickhousedb' as the SQLAlchemy dialect name
+                # Don't add a driver suffix - just use 'clickhousedb'
+                url = url.set(drivername="clickhousedb")
+                logger.info(
+                    "Using clickhousedb dialect for ClickHouse (clickhouse-connect)"
+                )
+            elif "+" not in url.drivername:
+                # Map other dialects to their default async drivers
                 async_drivers = {
                     "postgresql": "asyncpg",
                     "mysql": "aiomysql",
-                    "clickhouse": "asynch",
                 }
 
                 driver = async_drivers.get(dialect)
@@ -304,13 +364,27 @@ class DatabaseConfig(BaseModel):
     @property
     def dialect(self) -> str:
         """Extract database dialect from URL."""
-        return make_url(self.url).drivername.split("+")[0]
+        dialect = make_url(self.url).drivername.split("+")[0]
+        # Normalize clickhousedb back to clickhouse for consistency
+        if dialect == "clickhousedb":
+            return "clickhouse"
+        return dialect
 
     @property
     def driver(self) -> str:
         """Extract driver name from URL."""
-        parts = make_url(self.url).drivername.split("+")
+        drivername = make_url(self.url).drivername
+        # clickhousedb is the whole driver name, no + separator
+        if drivername == "clickhousedb":
+            return "connect"  # Indicate we're using clickhouse-connect
+        parts = drivername.split("+")
         return parts[1] if len(parts) > 1 else ""
+
+    @property
+    def database(self) -> Optional[str]:
+        """Extract database name from URL."""
+        url = make_url(self.url)
+        return url.database
 
     model_config = {
         "json_schema_extra": {

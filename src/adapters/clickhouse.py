@@ -38,19 +38,24 @@ class ClickHouseAdapter(BaseAdapter):
         self, conn: AsyncConnection, schema_info: SchemaInfo
     ) -> SchemaInfo:
         """Add ClickHouse-specific schema metadata."""
-        query = text("""
-            SELECT
-                sum(bytes) as size_bytes
-            FROM system.parts
-            WHERE database = :schema_name
-              AND active = 1
-        """)
+        try:
+            query = text("""
+                SELECT
+                    sum(bytes) as size_bytes
+                FROM system.parts
+                WHERE database = :schema_name
+                  AND active = 1
+            """)
 
-        result = await conn.execute(query, {"schema_name": schema_info.name})
-        row = result.fetchone()
+            result = await conn.execute(query, {"schema_name": schema_info.name})
+            row = result.fetchone()
 
-        if row and row[0]:
-            schema_info.size_bytes = int(row[0])
+            if row and row[0]:
+                schema_info.size_bytes = int(row[0])
+        except Exception:
+            # Permission denied or table not available
+            # This is common for readonly users, just skip enrichment
+            pass
 
         return schema_info
 
@@ -87,26 +92,33 @@ class ClickHouseAdapter(BaseAdapter):
             table_info.extra_info["primary_key"] = row[5]
             table_info.extra_info["sampling_key"] = row[6]
 
-        # Get compression info
-        compression_query = text("""
-            SELECT
-                sum(data_compressed_bytes) as compressed,
-                sum(data_uncompressed_bytes) as uncompressed
-            FROM system.parts
-            WHERE database = currentDatabase()
-              AND table = :table_name
-              AND active = 1
-        """)
+        # Get compression info (may fail due to permissions)
+        try:
+            compression_query = text("""
+                SELECT
+                    sum(data_compressed_bytes) as compressed,
+                    sum(data_uncompressed_bytes) as uncompressed
+                FROM system.parts
+                WHERE database = currentDatabase()
+                  AND table = :table_name
+                  AND active = 1
+            """)
 
-        result = await conn.execute(compression_query, {"table_name": table_info.name})
-        row = result.fetchone()
+            result = await conn.execute(
+                compression_query, {"table_name": table_info.name}
+            )
+            row = result.fetchone()
 
-        if row and row[0]:
-            table_info.extra_info["compressed_bytes"] = int(row[0])
-            table_info.extra_info["uncompressed_bytes"] = int(row[1])
-            if row[1] and row[1] > 0:
-                ratio = float(row[0]) / float(row[1])
-                table_info.extra_info["compression_ratio"] = round(ratio, 2)
+            if row and row[0]:
+                table_info.extra_info["compressed_bytes"] = int(row[0])
+                table_info.extra_info["uncompressed_bytes"] = int(row[1])
+                if row[1] and row[1] > 0:
+                    ratio = float(row[0]) / float(row[1])
+                    table_info.extra_info["compression_ratio"] = round(ratio, 2)
+        except Exception:
+            # Permission denied or table not available
+            # This is common for readonly users, just skip compression info
+            pass
 
         return table_info
 
