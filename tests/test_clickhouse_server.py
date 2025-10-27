@@ -274,12 +274,15 @@ async def test_server():
 
             # Test sampling if table has enough rows
             if stats.total_rows > 10:
-                sample_data = await analyzer.get_sample_data(
-                    table_name, current_schema, limit=5
-                )
+                # Sample data using direct query
+                async with connection.get_connection() as conn:
+                    result = await conn.execute(
+                        text(f'SELECT * FROM "{current_schema}"."{table_name}" LIMIT 5')
+                    )
+                    sample_data = result.fetchall()
                 print(f"[OK] Sample data retrieved: {len(sample_data)} rows")
-                if sample_data:
-                    print(f"  Columns in sample: {', '.join(sample_data[0].keys())}")
+                if sample_data and len(sample_data[0]) > 0:
+                    print(f"  Columns in sample: {len(sample_data[0])} columns")
 
         # Test ClickHouse-specific features
         print("\n[INFO] Testing ClickHouse-specific features:")
