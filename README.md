@@ -6,29 +6,16 @@ A read-only MCP (Model Context Protocol) server for exploratory data analysis ac
 
 1. **Install:**
    ```bash
-   # Option 1: From PyPI (recommended)
    pip install db-connect-mcp
-
-   # Option 2: From source
-   git clone https://github.com/yugui923/db-connect-mcp.git
-   cd db-connect-mcp
-   uv sync
    ```
 
-2. **Configure** `.env`:
-   ```env
-   DATABASE_URL=postgres://user:pass@localhost:5432/mydb
-   # Also supports: postgresql://, pg://, jdbc:postgresql://
-   # MariaDB: mariadb://, jdbc:mysql://, jdbc:mariadb://
-   # ClickHouse: ch://, jdbc:clickhouse://
-   ```
-
-3. **Add to Claude Desktop** `claude_desktop_config.json`:
+2. **Add to Claude Desktop** `claude_desktop_config.json`:
    ```json
    {
      "mcpServers": {
        "db-connect": {
-         "command": "db-connect-mcp",
+         "command": "python",
+         "args": ["-m", "db_connect_mcp"],
          "env": {
            "DATABASE_URL": "postgresql://user:pass@localhost:5432/mydb"
          }
@@ -37,7 +24,9 @@ A read-only MCP (Model Context Protocol) server for exploratory data analysis ac
    }
    ```
 
-4. **Restart Claude Desktop** and start querying your database!
+3. **Restart Claude Desktop** and start querying your database!
+
+> **Note**: Using `python -m db_connect_mcp` ensures the command works even if Python's Scripts directory isn't in your PATH.
 
 ## Features
 
@@ -72,48 +61,18 @@ A read-only MCP (Model Context Protocol) server for exploratory data analysis ac
 ## Installation
 
 ### Prerequisites
-- Python 3.10 or higher
-- One or more of:
-  - PostgreSQL database (9.6+)
-  - MySQL/MariaDB database (5.7+/10.2+)
-  - ClickHouse database
+- **Python 3.10 or higher**
+- **A database**: PostgreSQL (9.6+), MySQL/MariaDB (5.7+/10.2+), or ClickHouse
 
-### Method 1: Install from PyPI (Recommended)
+### Install via pip
 
 ```bash
 pip install db-connect-mcp
 ```
 
-### Method 2: Install from Source
+That's it! The package is now ready to use.
 
-For development or the latest features:
-
-```bash
-# Clone the repository
-git clone https://github.com/yugui923/db-connect-mcp.git
-cd db-connect-mcp
-
-# Install with uv (recommended)
-uv sync
-
-# Or install with pip
-pip install -e .
-```
-
-### Method 3: Install from GitHub
-
-```bash
-pip install git+https://github.com/yugui923/db-connect-mcp.git
-```
-
-### Configuration
-
-After installation, configure your database connection:
-
-```bash
-cp .env.example .env
-# Edit .env with your database connection string
-```
+> **For developers**: See [Development Guide](docs/DEVELOPMENT.md) for setting up a development environment.
 
 ## Configuration
 
@@ -235,40 +194,19 @@ DATABASE_URL=ch://user:pass@host:9000/db?timeout=60&max_threads=4
 
 ### Running the Server
 
-If installed from PyPI:
 ```bash
-db-connect-mcp
-```
-
-If running from source (development):
-```bash
-# Using module approach (recommended)
+# Run the server (works everywhere, no PATH configuration needed)
 python -m db_connect_mcp
 
-# Or using uv
-uv run db-connect-mcp
+# With environment variable
+DATABASE_URL="postgresql://user:pass@host:5432/db" python -m db_connect_mcp
 ```
+
+> **Note**: Using `python -m db_connect_mcp` works regardless of whether Python's Scripts directory is in your PATH.
 
 ### Using with Claude Desktop
 
 Add the server to your Claude Desktop configuration (`claude_desktop_config.json`):
-
-#### If installed from PyPI:
-
-```json
-{
-  "mcpServers": {
-    "db-connect": {
-      "command": "db-connect-mcp",
-      "env": {
-        "DATABASE_URL": "postgresql+asyncpg://user:pass@host:5432/db"
-      }
-    }
-  }
-}
-```
-
-#### If running from source (development):
 
 ```json
 {
@@ -284,34 +222,21 @@ Add the server to your Claude Desktop configuration (`claude_desktop_config.json
 }
 ```
 
-#### Or using uv (for development with dependencies):
+**Multiple database connections:**
 
-```json
-{
-  "mcpServers": {
-    "db-connect": {
-      "command": "uv",
-      "args": ["--directory", "C:/path/to/db-connect-mcp", "run", "db-connect-mcp"],
-      "env": {
-        "DATABASE_URL": "mysql+aiomysql://user:pass@host:3306/db"
-      }
-    }
-  }
-}
-```
-
-You can configure multiple database connections:
 ```json
 {
   "mcpServers": {
     "postgres-prod": {
-      "command": "db-connect-mcp",
+      "command": "python",
+      "args": ["-m", "db_connect_mcp"],
       "env": {
         "DATABASE_URL": "postgresql+asyncpg://user:pass@pg-host:5432/db"
       }
     },
     "mysql-analytics": {
-      "command": "db-connect-mcp",
+      "command": "python",
+      "args": ["-m", "db_connect_mcp"],
       "env": {
         "DATABASE_URL": "mysql+aiomysql://user:pass@mysql-host:3306/analytics"
       }
@@ -319,6 +244,8 @@ You can configure multiple database connections:
   }
 }
 ```
+
+> **For development**: See [Development Guide](docs/DEVELOPMENT.md) for running from source with uv.
 
 ## Database Feature Support
 
@@ -433,6 +360,8 @@ Once configured, you can use the server in Claude:
 
 ## Development
 
+For detailed development setup, testing, and contribution guidelines, see the [Development Guide](docs/DEVELOPMENT.md).
+
 ### Project Structure
 ```
 db-connect-mcp/
@@ -480,13 +409,8 @@ The server uses an adapter pattern to support multiple database systems:
 - **Server**: MCP server implementation that routes requests to appropriate components
 
 ### Running Tests
-```bash
-# Run integration tests
-uv run python tests/test_server.py
 
-# Or with pytest (when available)
-uv run pytest tests/
-```
+See the [Development Guide](docs/DEVELOPMENT.md#running-tests) and [Test Guide](tests/README.md) for detailed testing instructions.
 
 ## Troubleshooting
 

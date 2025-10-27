@@ -1,23 +1,24 @@
 {
   "mcpServers": {
     "db-connect-mcp-pg": {
-      "command": "db-connect-mcp",
+      "command": "python",
+      "args": ["-m", "db_connect_mcp"],
       "env": {
         "DATABASE_URL": "postgresql://username:password@localhost:5432/your_database"
       }
     },
     "db-connect-mcp-mysql": {
-      "command": "db-connect-mcp",
+      "command": "python",
+      "args": ["-m", "db_connect_mcp"],
       "env": {
         "DATABASE_URL": "mysql://username:password@localhost:3306/your_database"
       }
     },
-    "db-connect-mcp-dev": {
-      "comment": "For development - running from source with uv",
-      "command": "uv",
-      "args": ["--directory", "C:/Code/db-connect-mcp", "run", "db-connect-mcp"],
+    "db-connect-mcp-clickhouse": {
+      "command": "python",
+      "args": ["-m", "db_connect_mcp"],
       "env": {
-        "DATABASE_URL": "postgresql://username:password@localhost:5432/your_database"
+        "DATABASE_URL": "clickhouse://username:password@localhost:9000/your_database"
       }
     }
   }

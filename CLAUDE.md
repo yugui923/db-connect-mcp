@@ -24,17 +24,16 @@ uv sync --dev
 ### Running the Server
 
 ```bash
-# Using the console script (if installed)
-db-connect-mcp
-
-# Or as a module (recommended for development)
+# As a module (recommended - works without PATH configuration)
 python -m db_connect_mcp
 
-# Using uv (with dependencies)
-uv run db-connect-mcp
+# Using uv (for development with dependencies)
+uv run python -m db_connect_mcp
 
 # For Windows: __main__.py sets WindowsProactorEventLoopPolicy automatically
 ```
+
+See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for detailed development setup.
 
 ### Testing
 
@@ -166,3 +165,9 @@ The project includes Windows-specific handling:
 - Test files set `WindowsSelectorEventLoopPolicy` for asyncpg compatibility
 - Path handling uses `pathlib.Path` for cross-platform support
 - Console script `db-connect-mcp` is automatically registered in pyproject.toml
+
+## Additional Documentation
+
+- **[Development Guide](docs/DEVELOPMENT.md)** - Complete development environment setup, testing, and contribution guidelines
+- **[Test Guide](tests/README.md)** - Detailed testing documentation and best practices
+- **[README.md](README.md)** - User-facing documentation and usage examples
