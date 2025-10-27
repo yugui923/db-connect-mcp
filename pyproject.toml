@@ -4,14 +4,12 @@ build-backend = "hatchling.build"
 
 [project]
 name = "db-connect-mcp"
-version = "0.1.1"
+version = "0.1.2"
 description = "Multi-database MCP server for PostgreSQL, MySQL, and ClickHouse"
 readme = "README.md"
 requires-python = ">=3.13"
-license = {text = "MIT"}
-authors = [
-    {name = "Yuri Gui", email = "yugui923@users.noreply.github.com"}
-]
+license = { text = "MIT" }
+authors = [{ name = "Yuri Gui", email = "yugui923@users.noreply.github.com" }]
 keywords = [
     "mcp",
     "database",
@@ -20,7 +18,7 @@ keywords = [
     "clickhouse",
     "claude",
     "analysis",
-    "data-exploration"
+    "data-exploration",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -67,8 +65,7 @@ dev = [
 only-include = ["src/db_connect_mcp"]
 
 [tool.hatch.build.targets.wheel]
-only-include = ["src/db_connect_mcp"]
-sources = ["src"]
+packages = ["src/db_connect_mcp"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
