@@ -488,9 +488,25 @@ async def main() -> None:
         await mcp_server.cleanup()
 
 
-if __name__ == "__main__":
+def cli_entry() -> None:
+    """
+    Synchronous entry point for console script.
+
+    This function is called by the 'db-connect-mcp' console script.
+    It sets up the event loop and runs the async main() function.
+    """
     # Windows-specific event loop policy
     if os.name == "nt":
         asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())  # type: ignore[attr-defined]
 
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.info("Server stopped by user")
+    except Exception as e:
+        logger.error(f"Server error: {e}", exc_info=True)
+        raise
+
+
+if __name__ == "__main__":
+    cli_entry()

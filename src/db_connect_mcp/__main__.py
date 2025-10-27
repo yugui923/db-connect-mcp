@@ -1,13 +1,6 @@
 """Entry point for running db_connect_mcp as a module."""
 
-import asyncio
-import sys
-
-from db_connect_mcp.server import main
+from db_connect_mcp.server import cli_entry
 
 if __name__ == "__main__":
-    # Windows-specific event loop policy
-    if sys.platform == "win32":
-        asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())  # type: ignore[attr-defined]
-
-    asyncio.run(main())
+    cli_entry()
