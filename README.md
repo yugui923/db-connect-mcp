@@ -6,6 +6,10 @@ A read-only MCP (Model Context Protocol) server for exploratory data analysis ac
 
 1. **Install:**
    ```bash
+   # Option 1: From PyPI (recommended)
+   pip install db-connect-mcp
+
+   # Option 2: From source
    git clone https://github.com/yugui923/db-connect-mcp.git
    cd db-connect-mcp
    uv sync
@@ -74,22 +78,39 @@ A read-only MCP (Model Context Protocol) server for exploratory data analysis ac
   - PostgreSQL database (9.6+)
   - MySQL/MariaDB database (5.7+/10.2+)
   - ClickHouse database
-- `uv` package manager (or pip)
 
-### Setup with uv
+### Method 1: Install from PyPI (Recommended)
 
-1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/db-connect-mcp.git
+pip install db-connect-mcp
+```
+
+### Method 2: Install from Source
+
+For development or the latest features:
+
+```bash
+# Clone the repository
+git clone https://github.com/yugui923/db-connect-mcp.git
 cd db-connect-mcp
-```
 
-2. Install dependencies:
-```bash
+# Install with uv (recommended)
 uv sync
+
+# Or install with pip
+pip install -e .
 ```
 
-3. Configure database connection:
+### Method 3: Install from GitHub
+
+```bash
+pip install git+https://github.com/yugui923/db-connect-mcp.git
+```
+
+### Configuration
+
+After installation, configure your database connection:
+
 ```bash
 cp .env.example .env
 # Edit .env with your database connection string
@@ -229,6 +250,24 @@ uv run python main.py
 
 Add the server to your Claude Desktop configuration (`claude_desktop_config.json`):
 
+#### If installed from PyPI:
+
+```json
+{
+  "mcpServers": {
+    "db-connect": {
+      "command": "python",
+      "args": ["-m", "src"],
+      "env": {
+        "DATABASE_URL": "postgresql+asyncpg://user:pass@host:5432/db"
+      }
+    }
+  }
+}
+```
+
+#### If installed from source:
+
 ```json
 {
   "mcpServers": {
@@ -243,7 +282,8 @@ Add the server to your Claude Desktop configuration (`claude_desktop_config.json
 }
 ```
 
-Or using uv:
+#### Or using uv (for source installation):
+
 ```json
 {
   "mcpServers": {
