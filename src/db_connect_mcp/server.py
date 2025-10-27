@@ -14,14 +14,14 @@ from dotenv import load_dotenv
 from mcp.server import Server
 from mcp.types import TextContent, Tool
 
-from src.adapters import create_adapter
-from src.core import (
+from db_connect_mcp.adapters import create_adapter
+from db_connect_mcp.core import (
     DatabaseConnection,
     MetadataInspector,
     QueryExecutor,
     StatisticsAnalyzer,
 )
-from src.models.config import DatabaseConfig
+from db_connect_mcp.models.config import DatabaseConfig
 
 # Load environment variables
 load_dotenv()
@@ -261,7 +261,7 @@ class DatabaseMCPServer:
         else:
             sanitized_url = self.config.url
 
-        from src.models.database import DatabaseInfo
+        from db_connect_mcp.models.database import DatabaseInfo
 
         db_info = DatabaseInfo(
             name=self.config.url.split("/")[-1],  # Extract DB name from URL

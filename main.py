@@ -4,7 +4,7 @@
 import asyncio
 import sys
 
-from src.server import main
+from db_connect_mcp.server import main
 
 # Windows-specific event loop policy
 if sys.platform == "win32":

@@ -3,9 +3,13 @@
 import pytest
 from sqlalchemy import text
 
-from src.adapters.base import BaseAdapter
-from src.core import DatabaseConnection, MetadataInspector, StatisticsAnalyzer
-from src.models.config import DatabaseConfig
+from db_connect_mcp.adapters.base import BaseAdapter
+from db_connect_mcp.core import (
+    DatabaseConnection,
+    MetadataInspector,
+    StatisticsAnalyzer,
+)
+from db_connect_mcp.models.config import DatabaseConfig
 
 # Mark all tests in this module as PostgreSQL and integration tests
 pytestmark = [pytest.mark.postgresql, pytest.mark.integration]

@@ -7,10 +7,14 @@ from typing import AsyncGenerator, Optional
 import pytest
 from dotenv import load_dotenv
 
-from src.adapters import create_adapter
-from src.adapters.base import BaseAdapter
-from src.core import DatabaseConnection, MetadataInspector, StatisticsAnalyzer
-from src.models.config import DatabaseConfig
+from db_connect_mcp.adapters import create_adapter
+from db_connect_mcp.adapters.base import BaseAdapter
+from db_connect_mcp.core import (
+    DatabaseConnection,
+    MetadataInspector,
+    StatisticsAnalyzer,
+)
+from db_connect_mcp.models.config import DatabaseConfig
 
 # Load environment variables
 load_dotenv()

@@ -4,7 +4,7 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
-from src.models.capabilities import DatabaseCapabilities
+from db_connect_mcp.models.capabilities import DatabaseCapabilities
 
 
 class SchemaInfo(BaseModel):

@@ -6,11 +6,11 @@ from typing import Any, Optional
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from src.adapters.base import BaseAdapter
-from src.models.capabilities import DatabaseCapabilities
-from src.models.database import SchemaInfo
-from src.models.statistics import ColumnStats, Distribution
-from src.models.table import TableInfo
+from db_connect_mcp.adapters.base import BaseAdapter
+from db_connect_mcp.models.capabilities import DatabaseCapabilities
+from db_connect_mcp.models.database import SchemaInfo
+from db_connect_mcp.models.statistics import ColumnStats, Distribution
+from db_connect_mcp.models.table import TableInfo
 
 
 class PostgresAdapter(BaseAdapter):

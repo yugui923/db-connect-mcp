@@ -236,7 +236,12 @@ DATABASE_URL=ch://user:pass@host:9000/db?timeout=60&max_threads=4
 
 ### Running the Server
 
-Run the MCP server:
+If installed from PyPI:
+```bash
+db-connect-mcp
+```
+
+If running from source:
 ```bash
 python main.py
 ```
@@ -256,8 +261,7 @@ Add the server to your Claude Desktop configuration (`claude_desktop_config.json
 {
   "mcpServers": {
     "db-connect": {
-      "command": "python",
-      "args": ["-m", "src"],
+      "command": "db-connect-mcp",
       "env": {
         "DATABASE_URL": "postgresql+asyncpg://user:pass@host:5432/db"
       }

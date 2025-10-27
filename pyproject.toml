@@ -48,6 +48,9 @@ Homepage = "https://github.com/yugui923/db-connect-mcp"
 Repository = "https://github.com/yugui923/db-connect-mcp"
 Issues = "https://github.com/yugui923/db-connect-mcp/issues"
 
+[project.scripts]
+db-connect-mcp = "db_connect_mcp.server:main"
+
 [dependency-groups]
 dev = [
     "pytest>=7.0.0",
@@ -60,11 +63,12 @@ dev = [
     "hatchling>=1.0.0",
 ]
 
-[tool.hatch.build]
-packages = ["src"]
+[tool.hatch.build.targets.sdist]
+only-include = ["src/db_connect_mcp"]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src"]
+only-include = ["src/db_connect_mcp"]
+sources = ["src"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
@@ -74,7 +78,7 @@ python_classes = ["Test*"]
 python_functions = ["test_*"]
 
 [tool.coverage.run]
-source = ["src"]
+source = ["src/db_connect_mcp"]
 omit = ["tests/*", "**/__pycache__/*"]
 
 [tool.coverage.report]

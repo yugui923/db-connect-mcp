@@ -27,13 +27,13 @@ async def test_server():
 
     # Test imports
     try:
-        from src.adapters import create_adapter
-        from src.core import (
+        from db_connect_mcp.adapters import create_adapter
+        from db_connect_mcp.core import (
             DatabaseConnection,
             MetadataInspector,
             StatisticsAnalyzer,
         )
-        from src.models.config import DatabaseConfig
+        from db_connect_mcp.models.config import DatabaseConfig
 
         print("[OK] Imports successful: adapters, core, models")
     except ImportError as e:

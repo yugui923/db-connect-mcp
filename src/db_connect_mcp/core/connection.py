@@ -7,7 +7,7 @@ from typing import AsyncGenerator, Optional, Union
 from sqlalchemy import text, create_engine, Engine, Connection
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_engine
 
-from src.models.config import DatabaseConfig
+from db_connect_mcp.models.config import DatabaseConfig
 
 
 class SyncConnectionWrapper:

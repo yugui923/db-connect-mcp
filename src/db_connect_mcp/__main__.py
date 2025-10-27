@@ -1,9 +1,9 @@
-"""Entry point for running db_mcp as a module."""
+"""Entry point for running db_connect_mcp as a module."""
 
 import asyncio
 import sys
 
-from src.server import main
+from db_connect_mcp.server import main
 
 if __name__ == "__main__":
     # Windows-specific event loop policy
