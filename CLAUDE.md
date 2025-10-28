@@ -21,6 +21,27 @@ pip install -e .
 uv sync --dev
 ```
 
+### Interactive Setup for End Users
+
+For end-users setting up the MCP server with Claude Code or ChatGPT:
+
+```bash
+# Run the interactive setup wizard (recommended)
+db-connect-mcp setup
+
+# Or using Python module syntax
+python -m db_connect_mcp setup
+
+# The wizard will:
+# - Prompt for database connection string
+# - Validate the connection by attempting to connect
+# - Generate MCP config files for Claude Code and/or ChatGPT
+# - Save configs to platform-specific locations
+# - Create backups of existing configs
+```
+
+See [docs/SETUP.md](docs/SETUP.md) for comprehensive setup instructions and troubleshooting.
+
 ### Running the Server
 
 ```bash

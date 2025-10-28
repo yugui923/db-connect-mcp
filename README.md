@@ -4,6 +4,29 @@ A read-only MCP (Model Context Protocol) server for exploratory data analysis ac
 
 ## Quick Start
 
+### Option 1: Interactive Setup (Recommended)
+
+1. **Install:**
+   ```bash
+   pip install db-connect-mcp
+   ```
+
+2. **Run the setup wizard:**
+   ```bash
+   db-connect-mcp setup
+   # Or: python -m db_connect_mcp setup
+   ```
+
+   The wizard will:
+   - Prompt you for your database connection string
+   - Validate the connection by attempting to connect
+   - Generate MCP configuration files for Claude Code and/or ChatGPT
+   - Save the configuration to the appropriate location on your system
+
+3. **Restart Claude Code** and start querying your database!
+
+### Option 2: Manual Configuration
+
 1. **Install:**
    ```bash
    pip install db-connect-mcp

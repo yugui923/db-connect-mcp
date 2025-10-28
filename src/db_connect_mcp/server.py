@@ -494,7 +494,63 @@ def cli_entry() -> None:
 
     This function is called by the 'db-connect-mcp' console script.
     It sets up the event loop and runs the async main() function.
+
+    Supports commands:
+    - (no args): Run the MCP server
+    - setup: Run the interactive setup wizard
+    - --help: Show help message
     """
+    import sys
+
+    # Check for command-line arguments
+    if len(sys.argv) > 1:
+        command = sys.argv[1].lower()
+
+        if command in ["setup", "--setup"]:
+            # Run the setup wizard
+            try:
+                from db_connect_mcp.cli_setup import run_setup
+                exit_code = run_setup()
+                sys.exit(exit_code)
+            except KeyboardInterrupt:
+                print("\n\nSetup cancelled by user.")
+                sys.exit(1)
+            except Exception as e:
+                print(f"\n\nSetup error: {str(e)}")
+                import traceback
+                traceback.print_exc()
+                sys.exit(1)
+
+        elif command in ["--help", "-h", "help"]:
+            print("db-connect-mcp - Multi-Database MCP Server")
+            print()
+            print("Usage:")
+            print("  db-connect-mcp          Run the MCP server")
+            print("  db-connect-mcp setup    Run the interactive setup wizard")
+            print("  db-connect-mcp --help   Show this help message")
+            print()
+            print("Environment Variables:")
+            print("  DATABASE_URL            Database connection string (required for server)")
+            print("  DB_POOL_SIZE            Connection pool size (default: 5)")
+            print("  DB_MAX_OVERFLOW         Max overflow connections (default: 10)")
+            print("  DB_POOL_TIMEOUT         Pool timeout in seconds (default: 30)")
+            print()
+            print("Examples:")
+            print("  # Run setup wizard")
+            print("  db-connect-mcp setup")
+            print()
+            print("  # Run server with environment variable")
+            print("  DATABASE_URL='postgresql://...' db-connect-mcp")
+            print()
+            print("For more information, visit: https://github.com/yourusername/db-connect-mcp")
+            sys.exit(0)
+
+        else:
+            print(f"Unknown command: {command}")
+            print("Use 'db-connect-mcp --help' for usage information")
+            sys.exit(1)
+
+    # Default: Run the MCP server
     # Windows-specific event loop policy
     if os.name == "nt":
         asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())  # type: ignore[attr-defined]
