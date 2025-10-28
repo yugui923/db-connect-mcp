@@ -18,6 +18,7 @@ from typing import Dict
 
 from db_connect_mcp.adapters import create_adapter
 from db_connect_mcp.core.connection import DatabaseConnection
+from db_connect_mcp.models.config import DatabaseConfig
 
 
 class Colors:
@@ -122,23 +123,23 @@ async def validate_connection(database_url: str) -> bool:
     print_info("Validating database connection...")
 
     try:
+        # Create database config
+        config = DatabaseConfig(url=database_url)
+
         # Create adapter
-        adapter = create_adapter(database_url)
+        adapter = create_adapter(config)
 
         # Create connection
-        connection = DatabaseConnection(database_url, adapter)
-        await connection.connect()
+        connection = DatabaseConnection(config)
+        await connection.initialize()
 
-        # Test the connection
-        async with connection.get_connection() as conn:
-            # Simple query to verify connection works
-            result = await conn.execute(adapter.get_database_info_query())
-            db_info = result.mappings().first()
+        # Test the connection and get version
+        version = await connection.get_version()
 
-            print_success("Connection successful!")
-            print_info(f"Connected to: {db_info.get('database_type', 'Unknown')} {db_info.get('version', '')}")
+        print_success("Connection successful!")
+        print_info(f"Connected to: {config.dialect} {version}")
 
-        await connection.disconnect()
+        await connection.dispose()
         return True
 
     except Exception as e:
