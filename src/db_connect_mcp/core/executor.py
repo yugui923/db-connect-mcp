@@ -8,6 +8,7 @@ from sqlalchemy import text
 
 from db_connect_mcp.core.connection import DatabaseConnection
 from db_connect_mcp.models.query import ExplainPlan, QueryResult
+from db_connect_mcp.utils import convert_rows_to_json_safe
 
 if TYPE_CHECKING:
     from db_connect_mcp.adapters.base import BaseAdapter
@@ -67,6 +68,9 @@ class QueryExecutor:
             # Convert to list of dicts
             columns = list(result.keys())
             rows = [dict(zip(columns, row)) for row in rows_data]
+
+            # Convert special types to JSON-serializable formats
+            rows = convert_rows_to_json_safe(rows)
 
             execution_time = (time.time() - start_time) * 1000  # Convert to ms
 
@@ -134,20 +138,28 @@ class QueryExecutor:
             result = await conn.execute(text(explain_query))
             rows = result.fetchall()
 
-            # Format plan output
-            plan_lines = []
-            for row in rows:
-                # Different databases return EXPLAIN in different formats
-                plan_lines.append(str(row[0]))
-
-            plan_text = "\n".join(plan_lines)
+            # Get raw plan output
+            # PostgreSQL EXPLAIN (FORMAT JSON) returns JSON as string
+            # Other databases may return multiple rows of text
+            if len(rows) == 1 and isinstance(rows[0][0], str):
+                # Single row - might be JSON or text
+                plan_text = rows[0][0]
+            else:
+                # Multiple rows - join as text
+                plan_lines = []
+                for row in rows:
+                    plan_lines.append(str(row[0]))
+                plan_text = "\n".join(plan_lines)
 
             # Parse plan (adapter-specific)
             plan_info = await self.adapter.parse_explain_plan(plan_text, analyze)
 
+            # Use human-readable plan if provided, otherwise use raw plan_text
+            human_readable_plan = plan_info.get("plan_text", plan_text)
+
             return ExplainPlan(
                 query=query,
-                plan=plan_text,
+                plan=human_readable_plan,
                 plan_json=plan_info.get("json"),
                 estimated_cost=plan_info.get("estimated_cost"),
                 estimated_rows=plan_info.get("estimated_rows"),

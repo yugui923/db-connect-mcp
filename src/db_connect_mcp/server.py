@@ -284,27 +284,19 @@ class DatabaseMCPServer:
         )
 
         return [
-            TextContent(
-                type="text", text=json.dumps(db_info.model_dump(), indent=2)
-            )
+            TextContent(type="text", text=json.dumps(db_info.model_dump(), indent=2))
         ]
 
-    async def handle_list_schemas(
-        self, arguments: dict[str, Any]
-    ) -> list[TextContent]:
+    async def handle_list_schemas(self, arguments: dict[str, Any]) -> list[TextContent]:
         """Handle list_schemas request."""
         assert self.inspector is not None
 
         schemas = await self.inspector.get_schemas()
         schemas_data = [s.model_dump() for s in schemas]
 
-        return [
-            TextContent(type="text", text=json.dumps(schemas_data, indent=2))
-        ]
+        return [TextContent(type="text", text=json.dumps(schemas_data, indent=2))]
 
-    async def handle_list_tables(
-        self, arguments: dict[str, Any]
-    ) -> list[TextContent]:
+    async def handle_list_tables(self, arguments: dict[str, Any]) -> list[TextContent]:
         """Handle list_tables request."""
         assert self.inspector is not None
 
@@ -314,9 +306,7 @@ class DatabaseMCPServer:
         tables = await self.inspector.get_tables(schema, include_views)
         tables_data = [t.model_dump() for t in tables]
 
-        return [
-            TextContent(type="text", text=json.dumps(tables_data, indent=2))
-        ]
+        return [TextContent(type="text", text=json.dumps(tables_data, indent=2))]
 
     async def handle_describe_table(
         self, arguments: dict[str, Any]
@@ -330,9 +320,7 @@ class DatabaseMCPServer:
         table_info = await self.inspector.describe_table(table, schema)
 
         return [
-            TextContent(
-                type="text", text=json.dumps(table_info.model_dump(), indent=2)
-            )
+            TextContent(type="text", text=json.dumps(table_info.model_dump(), indent=2))
         ]
 
     async def handle_execute_query(
@@ -347,14 +335,10 @@ class DatabaseMCPServer:
         result = await self.executor.execute_query(query, limit=limit)
 
         return [
-            TextContent(
-                type="text", text=json.dumps(result.model_dump(), indent=2)
-            )
+            TextContent(type="text", text=json.dumps(result.model_dump(), indent=2))
         ]
 
-    async def handle_sample_data(
-        self, arguments: dict[str, Any]
-    ) -> list[TextContent]:
+    async def handle_sample_data(self, arguments: dict[str, Any]) -> list[TextContent]:
         """Handle sample_data request."""
         assert self.executor is not None
 
@@ -365,9 +349,7 @@ class DatabaseMCPServer:
         result = await self.executor.sample_data(table, schema, limit)
 
         return [
-            TextContent(
-                type="text", text=json.dumps(result.model_dump(), indent=2)
-            )
+            TextContent(type="text", text=json.dumps(result.model_dump(), indent=2))
         ]
 
     async def handle_get_relationships(
@@ -382,11 +364,7 @@ class DatabaseMCPServer:
         relationships = await self.inspector.get_relationships(table, schema)
         relationships_data = [r.model_dump() for r in relationships]
 
-        return [
-            TextContent(
-                type="text", text=json.dumps(relationships_data, indent=2)
-            )
-        ]
+        return [TextContent(type="text", text=json.dumps(relationships_data, indent=2))]
 
     async def handle_analyze_column(
         self, arguments: dict[str, Any]
@@ -400,11 +378,7 @@ class DatabaseMCPServer:
 
         stats = await self.analyzer.analyze_column(table, column, schema)
 
-        return [
-            TextContent(
-                type="text", text=json.dumps(stats.model_dump(), indent=2)
-            )
-        ]
+        return [TextContent(type="text", text=json.dumps(stats.model_dump(), indent=2))]
 
     async def handle_explain_query(
         self, arguments: dict[str, Any]
@@ -417,26 +391,27 @@ class DatabaseMCPServer:
 
         plan = await self.executor.explain_query(query, analyze)
 
-        return [
-            TextContent(
-                type="text", text=json.dumps(plan.model_dump(), indent=2)
-            )
-        ]
+        return [TextContent(type="text", text=json.dumps(plan.model_dump(), indent=2))]
 
     async def handle_profile_database(
         self, arguments: dict[str, Any]
     ) -> list[TextContent]:
         """Handle profile_database request."""
-        # This would be implemented with adapter-specific profiling queries
-        return [
-            TextContent(
-                type="text",
-                text=json.dumps(
-                    {"message": "Database profiling not yet implemented"},
-                    indent=2,
-                ),
-            )
-        ]
+        assert self.inspector is not None
+
+        # Extract database name from configuration
+        database_name = self.config.url.split("/")[-1].split("?")[0]
+
+        async with self.connection.get_connection() as conn:
+            # Use adapter to generate database profile
+            profile = await self.adapter.profile_database(conn, database_name)
+
+            return [
+                TextContent(
+                    type="text",
+                    text=json.dumps(profile.model_dump(), indent=2),
+                )
+            ]
 
     async def cleanup(self) -> None:
         """Cleanup resources."""
@@ -490,9 +465,7 @@ async def main() -> None:
 
         # Register tool call handlers
         @mcp_server.server.call_tool()
-        async def call_tool(
-            name: str, arguments: dict[str, Any]
-        ) -> list[TextContent]:
+        async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
             """Handle tool calls."""
             handlers = {
                 "get_database_info": mcp_server.handle_get_database_info,
