@@ -1,18 +1,92 @@
-"""Type conversion utilities for JSON serialization.
+"""JSON serialization utilities using orjson for speed and correctness.
 
-Handles conversion of database-specific types to JSON-serializable formats.
+orjson handles most database types automatically and correctly:
+- datetime, date, time → ISO format
+- UUID → string
+- Decimal → number or string (preserving precision)
+- bytes → base64
+- dataclasses, pydantic models → dict
+
+We only need to handle a few special cases.
 """
 
 import datetime
-import decimal
 import ipaddress
-import uuid
 from typing import Any
+
+import orjson
+
+
+def _default_handler(obj: Any) -> Any:
+    """
+    Custom default handler for types orjson doesn't handle natively.
+
+    Args:
+        obj: Object to serialize
+
+    Returns:
+        JSON-serializable representation
+
+    Raises:
+        TypeError: If object cannot be serialized
+    """
+    # timedelta - convert to total seconds
+    if isinstance(obj, datetime.timedelta):
+        return obj.total_seconds()
+
+    # bytes/bytearray - try UTF-8 decode, fall back to base64
+    if isinstance(obj, (bytes, bytearray)):
+        try:
+            return obj.decode("utf-8")
+        except UnicodeDecodeError:
+            import base64
+
+            return base64.b64encode(obj).decode("ascii")
+
+    # Memoryview (from bytea)
+    if isinstance(obj, memoryview):
+        data = bytes(obj)
+        try:
+            return data.decode("utf-8")
+        except UnicodeDecodeError:
+            import base64
+
+            return base64.b64encode(data).decode("ascii")
+
+    # Sets - convert to list
+    if isinstance(obj, set):
+        return list(obj)
+
+    # IP address types
+    if isinstance(obj, (ipaddress.IPv4Address, ipaddress.IPv6Address)):
+        return str(obj)
+    if isinstance(obj, (ipaddress.IPv4Network, ipaddress.IPv6Network)):
+        return str(obj)
+
+    # PostgreSQL range types (have lower, upper, bounds attributes)
+    if (
+        hasattr(obj, "lower")
+        and hasattr(obj, "upper")
+        and hasattr(obj, "bounds")
+        and not isinstance(obj, str)
+        and not callable(obj.lower)
+    ):
+        return {
+            "lower": obj.lower,
+            "upper": obj.upper,
+            "bounds": obj.bounds,
+        }
+
+    # Fallback for other types
+    raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
 
 
 def convert_value_to_json_safe(value: Any) -> Any:
     """
-    Convert a value to a JSON-serializable format.
+    Convert a value to JSON-serializable format.
+
+    Uses orjson's serialization and decodes back to Python objects.
+    This ensures consistency with what will actually be serialized.
 
     Args:
         value: Value to convert
@@ -20,84 +94,14 @@ def convert_value_to_json_safe(value: Any) -> Any:
     Returns:
         JSON-serializable value
     """
-    if value is None:
-        return None
-
-    # Handle datetime types
-    if isinstance(value, (datetime.datetime, datetime.date)):
-        return value.isoformat()
-
-    if isinstance(value, datetime.time):
-        return value.isoformat()
-
-    if isinstance(value, datetime.timedelta):
-        return value.total_seconds()
-
-    # Handle IP address types
-    if isinstance(value, (ipaddress.IPv4Address, ipaddress.IPv6Address)):
+    try:
+        # Use orjson to serialize then deserialize - this ensures
+        # the value is actually JSON-safe and matches final output
+        json_bytes = orjson.dumps(value, default=_default_handler)
+        return orjson.loads(json_bytes)
+    except TypeError:
+        # If orjson can't handle it, convert to string as fallback
         return str(value)
-
-    if isinstance(value, (ipaddress.IPv4Network, ipaddress.IPv6Network)):
-        return str(value)
-
-    # Handle UUID
-    if isinstance(value, uuid.UUID):
-        return str(value)
-
-    # Handle Decimal (preserve precision as string)
-    if isinstance(value, decimal.Decimal):
-        # Convert to float for numbers, but keep as string if very large/precise
-        if abs(value) < 1e15 and value == value.to_integral_value():
-            # Integer-like decimal
-            return int(value)
-        elif abs(value) < 1e15:
-            # Float-like decimal
-            return float(value)
-        else:
-            # Very large or very precise - keep as string
-            return str(value)
-
-    # Handle bytes/bytea
-    if isinstance(value, (bytes, bytearray)):
-        # Try UTF-8 decode first, fall back to base64
-        try:
-            return value.decode("utf-8")
-        except UnicodeDecodeError:
-            import base64
-
-            return base64.b64encode(value).decode("ascii")
-
-    # Handle memoryview (from bytea)
-    if isinstance(value, memoryview):
-        return convert_value_to_json_safe(bytes(value))
-
-    # Handle sets (convert to list)
-    if isinstance(value, set):
-        return list(value)
-
-    # Handle arrays/lists (recursively convert elements)
-    if isinstance(value, (list, tuple)):
-        return [convert_value_to_json_safe(item) for item in value]
-
-    # Handle dicts (recursively convert values)
-    if isinstance(value, dict):
-        return {key: convert_value_to_json_safe(val) for key, val in value.items()}
-
-    # Handle PostgreSQL range types (if available)
-    # These are typically from psycopg2.extras or asyncpg Range types
-    if hasattr(value, "lower") and hasattr(value, "upper"):
-        return {
-            "lower": convert_value_to_json_safe(value.lower),
-            "upper": convert_value_to_json_safe(value.upper),
-            "bounds": getattr(value, "bounds", "[]"),
-        }
-
-    # For any other type, try to convert to string as fallback
-    # This handles custom types, enums, etc.
-    if not isinstance(value, (str, int, float, bool)):
-        return str(value)
-
-    return value
 
 
 def convert_row_to_json_safe(row: dict[str, Any]) -> dict[str, Any]:
@@ -124,3 +128,16 @@ def convert_rows_to_json_safe(rows: list[dict[str, Any]]) -> list[dict[str, Any]
         List of dictionaries with JSON-serializable values
     """
     return [convert_row_to_json_safe(row) for row in rows]
+
+
+def dumps(obj: Any) -> str:
+    """
+    Serialize object to JSON string using orjson.
+
+    Args:
+        obj: Object to serialize
+
+    Returns:
+        JSON string
+    """
+    return orjson.dumps(obj, default=_default_handler).decode("utf-8")

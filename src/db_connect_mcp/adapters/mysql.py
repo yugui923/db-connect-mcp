@@ -12,6 +12,7 @@ from db_connect_mcp.models.database import SchemaInfo
 from db_connect_mcp.models.profile import DatabaseProfile, SchemaProfile, TableProfile
 from db_connect_mcp.models.statistics import ColumnStats, Distribution
 from db_connect_mcp.models.table import TableInfo
+from db_connect_mcp.utils import convert_value_to_json_safe
 
 
 class MySQLAdapter(BaseAdapter):
@@ -161,8 +162,8 @@ class MySQLAdapter(BaseAdapter):
                 total_rows=int(row[0]),
                 null_count=int(row[1]),
                 distinct_count=int(row[2]) if row[2] else None,
-                min_value=row[3],
-                max_value=row[4],
+                min_value=convert_value_to_json_safe(row[3]),
+                max_value=convert_value_to_json_safe(row[4]),
                 avg_value=float(row[5]) if row[5] is not None else None,
                 stddev_value=float(row[6]) if row[6] is not None else None,
                 most_common_values=most_common,
