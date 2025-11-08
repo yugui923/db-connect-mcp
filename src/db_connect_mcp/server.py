@@ -30,6 +30,19 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Response size limits (in characters) for MCP tool responses
+# These limits prevent context window exhaustion while preserving useful information
+MAX_RESPONSE_DATABASE_INFO = 2000  # Basic database metadata
+MAX_RESPONSE_PROFILE_DATABASE = 2000  # High-level database overview
+MAX_RESPONSE_LIST_SCHEMAS = 3000  # Schema listings
+MAX_RESPONSE_GET_RELATIONSHIPS = 3000  # Foreign key relationships
+MAX_RESPONSE_SAMPLE_DATA = 5000  # Table data preview
+MAX_RESPONSE_LIST_TABLES = 5000  # Table listings with metadata
+MAX_RESPONSE_ANALYZE_COLUMN = 5000  # Column statistics
+MAX_RESPONSE_DESCRIBE_TABLE = 8000  # Detailed table structure
+MAX_RESPONSE_EXPLAIN_QUERY = 8000  # Query execution plans
+MAX_RESPONSE_EXECUTE_QUERY = 10000  # Query results (up to 1000 rows)
+
 
 def truncate_json_response(data: str, max_length: int) -> str:
     """
@@ -327,7 +340,12 @@ class DatabaseMCPServer:
         )
 
         response = json.dumps(db_info.model_dump(), indent=2)
-        return [TextContent(type="text", text=truncate_json_response(response, 2000))]
+        return [
+            TextContent(
+                type="text",
+                text=truncate_json_response(response, MAX_RESPONSE_DATABASE_INFO),
+            )
+        ]
 
     async def handle_list_schemas(self, arguments: dict[str, Any]) -> list[TextContent]:
         """Handle list_schemas request."""
@@ -337,7 +355,12 @@ class DatabaseMCPServer:
         schemas_data = [s.model_dump() for s in schemas]
 
         response = json.dumps(schemas_data, indent=2)
-        return [TextContent(type="text", text=truncate_json_response(response, 3000))]
+        return [
+            TextContent(
+                type="text",
+                text=truncate_json_response(response, MAX_RESPONSE_LIST_SCHEMAS),
+            )
+        ]
 
     async def handle_list_tables(self, arguments: dict[str, Any]) -> list[TextContent]:
         """Handle list_tables request."""
@@ -350,7 +373,12 @@ class DatabaseMCPServer:
         tables_data = [t.model_dump() for t in tables]
 
         response = json.dumps(tables_data, indent=2)
-        return [TextContent(type="text", text=truncate_json_response(response, 5000))]
+        return [
+            TextContent(
+                type="text",
+                text=truncate_json_response(response, MAX_RESPONSE_LIST_TABLES),
+            )
+        ]
 
     async def handle_describe_table(
         self, arguments: dict[str, Any]
@@ -364,7 +392,12 @@ class DatabaseMCPServer:
         table_info = await self.inspector.describe_table(table, schema)
 
         response = json.dumps(table_info.model_dump(), indent=2)
-        return [TextContent(type="text", text=truncate_json_response(response, 8000))]
+        return [
+            TextContent(
+                type="text",
+                text=truncate_json_response(response, MAX_RESPONSE_DESCRIBE_TABLE),
+            )
+        ]
 
     async def handle_execute_query(
         self, arguments: dict[str, Any]
@@ -378,7 +411,12 @@ class DatabaseMCPServer:
         result = await self.executor.execute_query(query, limit=limit)
 
         response = json.dumps(result.model_dump(), indent=2)
-        return [TextContent(type="text", text=truncate_json_response(response, 10000))]
+        return [
+            TextContent(
+                type="text",
+                text=truncate_json_response(response, MAX_RESPONSE_EXECUTE_QUERY),
+            )
+        ]
 
     async def handle_sample_data(self, arguments: dict[str, Any]) -> list[TextContent]:
         """Handle sample_data request."""
@@ -391,7 +429,12 @@ class DatabaseMCPServer:
         result = await self.executor.sample_data(table, schema, limit)
 
         response = json.dumps(result.model_dump(), indent=2)
-        return [TextContent(type="text", text=truncate_json_response(response, 5000))]
+        return [
+            TextContent(
+                type="text",
+                text=truncate_json_response(response, MAX_RESPONSE_SAMPLE_DATA),
+            )
+        ]
 
     async def handle_get_relationships(
         self, arguments: dict[str, Any]
@@ -406,7 +449,12 @@ class DatabaseMCPServer:
         relationships_data = [r.model_dump() for r in relationships]
 
         response = json.dumps(relationships_data, indent=2)
-        return [TextContent(type="text", text=truncate_json_response(response, 3000))]
+        return [
+            TextContent(
+                type="text",
+                text=truncate_json_response(response, MAX_RESPONSE_GET_RELATIONSHIPS),
+            )
+        ]
 
     async def handle_analyze_column(
         self, arguments: dict[str, Any]
@@ -421,7 +469,12 @@ class DatabaseMCPServer:
         stats = await self.analyzer.analyze_column(table, column, schema)
 
         response = json.dumps(stats.model_dump(), indent=2)
-        return [TextContent(type="text", text=truncate_json_response(response, 5000))]
+        return [
+            TextContent(
+                type="text",
+                text=truncate_json_response(response, MAX_RESPONSE_ANALYZE_COLUMN),
+            )
+        ]
 
     async def handle_explain_query(
         self, arguments: dict[str, Any]
@@ -435,7 +488,12 @@ class DatabaseMCPServer:
         plan = await self.executor.explain_query(query, analyze)
 
         response = json.dumps(plan.model_dump(), indent=2)
-        return [TextContent(type="text", text=truncate_json_response(response, 8000))]
+        return [
+            TextContent(
+                type="text",
+                text=truncate_json_response(response, MAX_RESPONSE_EXPLAIN_QUERY),
+            )
+        ]
 
     async def handle_profile_database(
         self, arguments: dict[str, Any]
@@ -454,7 +512,9 @@ class DatabaseMCPServer:
             return [
                 TextContent(
                     type="text",
-                    text=truncate_json_response(response, 2000),
+                    text=truncate_json_response(
+                        response, MAX_RESPONSE_PROFILE_DATABASE
+                    ),
                 )
             ]
 
