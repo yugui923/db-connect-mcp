@@ -164,7 +164,7 @@ class MySQLAdapter(BaseAdapter):
                 try:
                     orjson.dumps(val)
                     return val
-                except:
+                except Exception:
                     return str(val)
 
             return ColumnStats(

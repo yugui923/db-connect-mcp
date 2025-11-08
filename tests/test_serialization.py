@@ -5,10 +5,8 @@ import decimal
 import ipaddress
 import json
 import uuid
-from typing import Any
 
 import orjson
-import pytest
 
 
 class TestOrjsonSerialization:
@@ -156,7 +154,7 @@ class TestAdapterSerialization:
             try:
                 orjson.dumps(val)
                 return val
-            except:
+            except Exception:
                 return str(val)
 
         # Test various values

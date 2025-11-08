@@ -5,7 +5,6 @@ Run with: pytest tests/test_mcp_tools.py -v
 """
 
 import json
-from typing import Any
 
 import pytest
 
@@ -238,12 +237,10 @@ class TestMCPTools:
         tables = await inspector.get_tables("public")
 
         # Try to find a table with relationships
-        found_relationship = False
         for table in tables[:10]:  # Check first 10 tables
             relationships = await inspector.get_relationships(table.name, "public")
 
             if relationships:
-                found_relationship = True
                 rel = relationships[0]
 
                 # Validate relationship structure

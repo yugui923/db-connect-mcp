@@ -101,7 +101,7 @@ class MCPTestRunner:
         )
         pytest_args.extend(
             [
-                f"--json-report",
+                "--json-report",
                 f"--json-report-file={report_file}",
             ]
         )
