@@ -55,7 +55,12 @@ class MCPServerTestHelper:
 
         Returns:
             Tuple of (server, client) ready for testing
+
+        Note:
+            The caller is responsible for calling server.cleanup() when done.
         """
+        import anyio
+
         # Create server
         server = DatabaseMCPServer(config)
         await server.initialize()
@@ -112,14 +117,9 @@ class MCPServerTestHelper:
 
         # Create in-memory streams for testing
         # These replace stdio streams for testing
-        server_to_client_send, server_to_client_recv = (
-            MemoryObjectSendStream(),
-            MemoryObjectReceiveStream(),
-        )
-        client_to_server_send, client_to_server_recv = (
-            MemoryObjectSendStream(),
-            MemoryObjectReceiveStream(),
-        )
+        # Create paired streams using anyio's factory function
+        server_to_client_send, server_to_client_recv = anyio.create_memory_object_stream()
+        client_to_server_send, client_to_server_recv = anyio.create_memory_object_stream()
 
         # Create client session
         client = ClientSession(
@@ -128,8 +128,6 @@ class MCPServerTestHelper:
         )
 
         # Start server in background
-        import anyio
-
         async def run_server():
             """Run the MCP server."""
             async with server_to_client_send, client_to_server_recv:
