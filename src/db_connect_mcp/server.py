@@ -30,6 +30,62 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Response size limits (in characters) for MCP tool responses
+# These limits prevent context window exhaustion while preserving useful information
+MAX_RESPONSE_DATABASE_INFO = 2000  # Basic database metadata
+MAX_RESPONSE_PROFILE_DATABASE = 2000  # High-level database overview
+MAX_RESPONSE_LIST_SCHEMAS = 3000  # Schema listings
+MAX_RESPONSE_GET_RELATIONSHIPS = 3000  # Foreign key relationships
+MAX_RESPONSE_SAMPLE_DATA = 5000  # Table data preview
+MAX_RESPONSE_LIST_TABLES = 5000  # Table listings with metadata
+MAX_RESPONSE_ANALYZE_COLUMN = 5000  # Column statistics
+MAX_RESPONSE_DESCRIBE_TABLE = 8000  # Detailed table structure
+MAX_RESPONSE_EXPLAIN_QUERY = 8000  # Query execution plans
+MAX_RESPONSE_EXECUTE_QUERY = 10000  # Query results (up to 1000 rows)
+
+
+def truncate_json_response(data: str, max_length: int) -> str:
+    """
+    Truncate JSON response to a maximum length while preserving JSON structure.
+
+    Args:
+        data: JSON string to truncate
+        max_length: Maximum length in characters
+
+    Returns:
+        Truncated JSON string with truncation notice if needed
+    """
+    if len(data) <= max_length:
+        return data
+
+    # Calculate space for truncation message
+    truncation_msg = f"\n\n... [Response truncated: {len(data)} chars -> {max_length} chars to preserve context window]"
+    available_length = max_length - len(truncation_msg)
+
+    if available_length < 100:
+        # If we have very little space, just return a simple message
+        return json.dumps(
+            {
+                "error": "Response too large",
+                "original_size": len(data),
+                "limit": max_length,
+                "message": "Response exceeds size limit. Please use more specific filters or query directly.",
+            },
+            indent=2,
+        )
+
+    # Truncate the data and add message
+    truncated = data[:available_length]
+
+    # Try to truncate at a reasonable point (end of a line)
+    last_newline = truncated.rfind("\n")
+    if (
+        last_newline > available_length * 0.8
+    ):  # Only use newline if it's in the last 20%
+        truncated = truncated[:last_newline]
+
+    return truncated + truncation_msg
+
 
 class DatabaseMCPServer:
     """MCP server for multi-database operations."""
@@ -283,8 +339,12 @@ class DatabaseMCPServer:
             read_only=self.config.read_only,
         )
 
+        response = json.dumps(db_info.model_dump(), indent=2)
         return [
-            TextContent(type="text", text=json.dumps(db_info.model_dump(), indent=2))
+            TextContent(
+                type="text",
+                text=truncate_json_response(response, MAX_RESPONSE_DATABASE_INFO),
+            )
         ]
 
     async def handle_list_schemas(self, arguments: dict[str, Any]) -> list[TextContent]:
@@ -294,7 +354,13 @@ class DatabaseMCPServer:
         schemas = await self.inspector.get_schemas()
         schemas_data = [s.model_dump() for s in schemas]
 
-        return [TextContent(type="text", text=json.dumps(schemas_data, indent=2))]
+        response = json.dumps(schemas_data, indent=2)
+        return [
+            TextContent(
+                type="text",
+                text=truncate_json_response(response, MAX_RESPONSE_LIST_SCHEMAS),
+            )
+        ]
 
     async def handle_list_tables(self, arguments: dict[str, Any]) -> list[TextContent]:
         """Handle list_tables request."""
@@ -306,7 +372,13 @@ class DatabaseMCPServer:
         tables = await self.inspector.get_tables(schema, include_views)
         tables_data = [t.model_dump() for t in tables]
 
-        return [TextContent(type="text", text=json.dumps(tables_data, indent=2))]
+        response = json.dumps(tables_data, indent=2)
+        return [
+            TextContent(
+                type="text",
+                text=truncate_json_response(response, MAX_RESPONSE_LIST_TABLES),
+            )
+        ]
 
     async def handle_describe_table(
         self, arguments: dict[str, Any]
@@ -319,8 +391,12 @@ class DatabaseMCPServer:
 
         table_info = await self.inspector.describe_table(table, schema)
 
+        response = json.dumps(table_info.model_dump(), indent=2)
         return [
-            TextContent(type="text", text=json.dumps(table_info.model_dump(), indent=2))
+            TextContent(
+                type="text",
+                text=truncate_json_response(response, MAX_RESPONSE_DESCRIBE_TABLE),
+            )
         ]
 
     async def handle_execute_query(
@@ -334,8 +410,12 @@ class DatabaseMCPServer:
 
         result = await self.executor.execute_query(query, limit=limit)
 
+        response = json.dumps(result.model_dump(), indent=2)
         return [
-            TextContent(type="text", text=json.dumps(result.model_dump(), indent=2))
+            TextContent(
+                type="text",
+                text=truncate_json_response(response, MAX_RESPONSE_EXECUTE_QUERY),
+            )
         ]
 
     async def handle_sample_data(self, arguments: dict[str, Any]) -> list[TextContent]:
@@ -348,8 +428,12 @@ class DatabaseMCPServer:
 
         result = await self.executor.sample_data(table, schema, limit)
 
+        response = json.dumps(result.model_dump(), indent=2)
         return [
-            TextContent(type="text", text=json.dumps(result.model_dump(), indent=2))
+            TextContent(
+                type="text",
+                text=truncate_json_response(response, MAX_RESPONSE_SAMPLE_DATA),
+            )
         ]
 
     async def handle_get_relationships(
@@ -364,7 +448,13 @@ class DatabaseMCPServer:
         relationships = await self.inspector.get_relationships(table, schema)
         relationships_data = [r.model_dump() for r in relationships]
 
-        return [TextContent(type="text", text=json.dumps(relationships_data, indent=2))]
+        response = json.dumps(relationships_data, indent=2)
+        return [
+            TextContent(
+                type="text",
+                text=truncate_json_response(response, MAX_RESPONSE_GET_RELATIONSHIPS),
+            )
+        ]
 
     async def handle_analyze_column(
         self, arguments: dict[str, Any]
@@ -378,7 +468,13 @@ class DatabaseMCPServer:
 
         stats = await self.analyzer.analyze_column(table, column, schema)
 
-        return [TextContent(type="text", text=json.dumps(stats.model_dump(), indent=2))]
+        response = json.dumps(stats.model_dump(), indent=2)
+        return [
+            TextContent(
+                type="text",
+                text=truncate_json_response(response, MAX_RESPONSE_ANALYZE_COLUMN),
+            )
+        ]
 
     async def handle_explain_query(
         self, arguments: dict[str, Any]
@@ -391,7 +487,13 @@ class DatabaseMCPServer:
 
         plan = await self.executor.explain_query(query, analyze)
 
-        return [TextContent(type="text", text=json.dumps(plan.model_dump(), indent=2))]
+        response = json.dumps(plan.model_dump(), indent=2)
+        return [
+            TextContent(
+                type="text",
+                text=truncate_json_response(response, MAX_RESPONSE_EXPLAIN_QUERY),
+            )
+        ]
 
     async def handle_profile_database(
         self, arguments: dict[str, Any]
@@ -406,10 +508,13 @@ class DatabaseMCPServer:
             # Use adapter to generate database profile
             profile = await self.adapter.profile_database(conn, database_name)
 
+            response = json.dumps(profile.model_dump(), indent=2)
             return [
                 TextContent(
                     type="text",
-                    text=json.dumps(profile.model_dump(), indent=2),
+                    text=truncate_json_response(
+                        response, MAX_RESPONSE_PROFILE_DATABASE
+                    ),
                 )
             ]
 
