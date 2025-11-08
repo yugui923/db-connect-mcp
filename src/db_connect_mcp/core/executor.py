@@ -1,5 +1,6 @@
 """Safe query execution with validation."""
 
+import datetime
 import re
 import time
 from typing import TYPE_CHECKING, Any, Optional
@@ -12,6 +13,26 @@ from db_connect_mcp.models.query import ExplainPlan, QueryResult
 
 if TYPE_CHECKING:
     from db_connect_mcp.adapters.base import BaseAdapter
+
+
+def json_default(obj: Any) -> Any:
+    """
+    Default handler for orjson to handle database types.
+
+    Handles timezone-aware datetime objects and other special types
+    that orjson doesn't natively support.
+    """
+    # Handle timezone-aware datetime objects
+    if isinstance(obj, datetime.datetime):
+        return obj.isoformat()
+    elif isinstance(obj, datetime.date):
+        return obj.isoformat()
+    elif isinstance(obj, datetime.time):
+        return obj.isoformat()
+    elif isinstance(obj, datetime.timedelta):
+        return obj.total_seconds()
+    # Fallback to string representation
+    return str(obj)
 
 
 class QueryExecutor:
@@ -69,9 +90,25 @@ class QueryExecutor:
             columns = list(result.keys())
             rows = [dict(zip(columns, row)) for row in rows_data]
 
-            # Ensure all values are JSON-serializable using orjson
-            # orjson handles most types automatically, fallback to str() for others
-            json_bytes = orjson.dumps(rows, default=str)
+            # Pre-process rows to handle timezone-aware datetimes
+            # orjson doesn't support timezone-aware datetimes even with a default handler
+            processed_rows = []
+            for row in rows:
+                processed_row = {}
+                for key, value in row.items():
+                    # Convert timezone-aware datetime/time to ISO string
+                    if isinstance(value, (datetime.datetime, datetime.date, datetime.time)):
+                        if hasattr(value, 'tzinfo') and value.tzinfo is not None:
+                            processed_row[key] = value.isoformat()
+                        else:
+                            # Let orjson handle naive datetime objects
+                            processed_row[key] = value
+                    else:
+                        processed_row[key] = value
+                processed_rows.append(processed_row)
+
+            # Now use orjson with fallback for remaining types
+            json_bytes = orjson.dumps(processed_rows, default=str)
             rows = orjson.loads(json_bytes)
 
             execution_time = (time.time() - start_time) * 1000  # Convert to ms
