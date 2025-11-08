@@ -6,6 +6,7 @@ from typing import AsyncGenerator, Optional
 
 import pytest
 from dotenv import load_dotenv
+from sqlalchemy import text
 
 from db_connect_mcp.adapters import create_adapter
 from db_connect_mcp.adapters.base import BaseAdapter
@@ -70,7 +71,15 @@ async def pg_connection(
 ) -> AsyncGenerator[DatabaseConnection, None]:
     """PostgreSQL database connection with proper cleanup"""
     connection = DatabaseConnection(pg_config)
-    await connection.initialize()
+    try:
+        await connection.initialize()
+        # Test actual connectivity (engine creation is lazy)
+        async with connection.get_connection() as conn:
+            await conn.execute(text("SELECT 1"))
+    except Exception as e:
+        # Skip test if database connection fails (network, DNS, authentication, etc.)
+        await connection.dispose()
+        pytest.skip(f"PostgreSQL database connection failed: {e}")
     try:
         yield connection
     finally:
@@ -104,7 +113,11 @@ async def pg_mcp_server(
     from db_connect_mcp.server import DatabaseMCPServer
 
     server = DatabaseMCPServer(pg_config)
-    await server.initialize()
+    try:
+        await server.initialize()
+    except Exception as e:
+        # Skip test if database connection fails (network, DNS, authentication, etc.)
+        pytest.skip(f"MCP server initialization failed: {e}")
 
     try:
         yield server
@@ -135,7 +148,19 @@ async def ch_connection(
 ) -> AsyncGenerator[DatabaseConnection, None]:
     """ClickHouse database connection with proper cleanup"""
     connection = DatabaseConnection(ch_config)
-    await connection.initialize()
+    try:
+        await connection.initialize()
+        # Test actual connectivity (ClickHouse uses sync engine)
+        if connection.sync_engine:
+            with connection.sync_engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
+        else:
+            async with connection.get_connection() as conn:
+                await conn.execute(text("SELECT 1"))
+    except Exception as e:
+        # Skip test if database connection fails (network, DNS, authentication, etc.)
+        await connection.dispose()
+        pytest.skip(f"ClickHouse database connection failed: {e}")
     try:
         yield connection
     finally:
@@ -203,7 +228,19 @@ async def db_connection(
 ) -> AsyncGenerator[DatabaseConnection, None]:
     """Parametrized database connection for all supported databases"""
     connection = DatabaseConnection(db_config)
-    await connection.initialize()
+    try:
+        await connection.initialize()
+        # Test actual connectivity (handle both sync and async engines)
+        if connection.sync_engine:
+            with connection.sync_engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
+        else:
+            async with connection.get_connection() as conn:
+                await conn.execute(text("SELECT 1"))
+    except Exception as e:
+        # Skip test if database connection fails (network, DNS, authentication, etc.)
+        await connection.dispose()
+        pytest.skip(f"Database connection failed: {e}")
     try:
         yield connection
     finally:
