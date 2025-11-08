@@ -96,7 +96,7 @@ class TestQueryResultSerialization:
                 "created": datetime.datetime(2024, 1, 16, 11, 45, 0),
                 "ip": ipaddress.IPv4Address("192.168.1.2"),
                 "price": decimal.Decimal("29.99"),
-            }
+            },
         ]
 
         # This is exactly how executor.py handles rows
@@ -148,6 +148,7 @@ class TestAdapterSerialization:
 
     def test_safe_value_pattern(self):
         """Test the safe_value function pattern used in adapters."""
+
         def safe_value(val):
             """Replicate the safe_value function from adapters."""
             if val is None:
@@ -225,12 +226,14 @@ class TestEdgeCases:
         # Create 1000 rows
         rows = []
         for i in range(1000):
-            rows.append({
-                "id": i,
-                "name": f"User {i}",
-                "created": datetime.datetime(2024, 1, 15, 10, 30, 0),
-                "value": decimal.Decimal(f"{i}.99"),
-            })
+            rows.append(
+                {
+                    "id": i,
+                    "name": f"User {i}",
+                    "created": datetime.datetime(2024, 1, 15, 10, 30, 0),
+                    "value": decimal.Decimal(f"{i}.99"),
+                }
+            )
 
         # Should handle large datasets efficiently
         json_bytes = orjson.dumps(rows, default=str)

@@ -97,8 +97,10 @@ class QueryExecutor:
                 processed_row = {}
                 for key, value in row.items():
                     # Convert timezone-aware datetime/time to ISO string
-                    if isinstance(value, (datetime.datetime, datetime.date, datetime.time)):
-                        if hasattr(value, 'tzinfo') and value.tzinfo is not None:
+                    if isinstance(
+                        value, (datetime.datetime, datetime.date, datetime.time)
+                    ):
+                        if hasattr(value, "tzinfo") and value.tzinfo is not None:
                             processed_row[key] = value.isoformat()
                         else:
                             # Let orjson handle naive datetime objects

@@ -10,7 +10,12 @@ from typing import Any
 import pytest
 
 from db_connect_mcp.adapters.base import BaseAdapter
-from db_connect_mcp.core import DatabaseConnection, MetadataInspector, QueryExecutor, StatisticsAnalyzer
+from db_connect_mcp.core import (
+    DatabaseConnection,
+    MetadataInspector,
+    QueryExecutor,
+    StatisticsAnalyzer,
+)
 
 
 class TestMCPTools:
@@ -276,7 +281,10 @@ class TestMCPTools:
             # Find numeric column
             numeric_col = None
             for col in table_info.columns:
-                if any(t in col.data_type.lower() for t in ['int', 'numeric', 'decimal', 'float', 'real', 'double']):
+                if any(
+                    t in col.data_type.lower()
+                    for t in ["int", "numeric", "decimal", "float", "real", "double"]
+                ):
                     numeric_col = col.name
                     break
 
@@ -327,7 +335,7 @@ class TestMCPTools:
             # Find text column
             text_col = None
             for col in table_info.columns:
-                if any(t in col.data_type.lower() for t in ['text', 'varchar', 'char']):
+                if any(t in col.data_type.lower() for t in ["text", "varchar", "char"]):
                     text_col = col.name
                     break
 
@@ -346,7 +354,9 @@ class TestMCPTools:
                 # Min/Max should work as text sorting
 
                 # Verify no SQL errors occurred
-                assert stats.warning is None or "unavailable" not in stats.warning.lower()
+                assert (
+                    stats.warning is None or "unavailable" not in stats.warning.lower()
+                )
 
                 break
 
@@ -374,8 +384,9 @@ class TestMCPTools:
         # Critical: plan_json should be parsed dict, not escaped string
         # This was the bug - it was returning "[{'Plan': ...}]" as string
         if plan.plan_json is not None:
-            assert isinstance(plan.plan_json, (dict, list)), \
+            assert isinstance(plan.plan_json, (dict, list)), (
                 f"plan_json should be dict/list, not string: {type(plan.plan_json)}"
+            )
 
             # Verify it's proper JSON structure
             try:
@@ -459,8 +470,7 @@ class TestDataTypeCoverage:
 
         # Query with timestamp
         result = await executor.execute_query(
-            "SELECT NOW() as ts, CURRENT_DATE as dt, CURRENT_TIME as tm",
-            limit=1
+            "SELECT NOW() as ts, CURRENT_DATE as dt, CURRENT_TIME as tm", limit=1
         )
 
         assert len(result.rows) == 1
@@ -484,8 +494,7 @@ class TestDataTypeCoverage:
 
         # Query with INET type
         result = await executor.execute_query(
-            "SELECT '192.168.1.1'::inet as ip4, '::1'::inet as ip6",
-            limit=1
+            "SELECT '192.168.1.1'::inet as ip4, '::1'::inet as ip6", limit=1
         )
 
         assert len(result.rows) == 1
@@ -508,10 +517,7 @@ class TestDataTypeCoverage:
         executor = QueryExecutor(pg_connection, pg_adapter)
 
         # Query with UUID
-        result = await executor.execute_query(
-            "SELECT gen_random_uuid() as id",
-            limit=1
-        )
+        result = await executor.execute_query("SELECT gen_random_uuid() as id", limit=1)
 
         assert len(result.rows) == 1
         row = result.rows[0]
