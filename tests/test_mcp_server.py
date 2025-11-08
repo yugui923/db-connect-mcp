@@ -10,6 +10,10 @@ This validates:
 - Error handling at the protocol layer
 
 Run with: pytest tests/test_mcp_server.py -v
+
+Note: These tests use in-memory streams that cannot be serialized for parallel
+execution. Run these tests serially (without -n flag) or they will be grouped
+in the same worker.
 """
 
 import json
@@ -24,6 +28,10 @@ from db_connect_mcp.server import DatabaseMCPServer
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import get_default_environment, stdio_client
 from mcp.types import TextContent
+
+# Mark all tests in this module to run in the same xdist worker
+# This is necessary because MemoryObjectSendStream cannot be serialized
+pytestmark = [pytest.mark.postgresql, pytest.mark.integration, pytest.mark.xdist_group(name="mcp_server")]
 
 
 class MCPServerTestHelper:
@@ -155,9 +163,6 @@ class MCPServerTestHelper:
         assert len(content) == 1
         assert content[0].type == "text"
         return json.loads(content[0].text)
-
-
-pytestmark = [pytest.mark.postgresql, pytest.mark.integration]
 
 
 class TestMCPServerInitialization:

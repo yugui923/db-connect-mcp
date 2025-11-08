@@ -93,6 +93,25 @@ async def pg_analyzer(
     return StatisticsAnalyzer(pg_connection, pg_adapter)
 
 
+@pytest.fixture
+async def pg_mcp_server(
+    pg_config: DatabaseConfig,
+) -> AsyncGenerator:
+    """PostgreSQL MCP server for protocol-level testing.
+
+    This fixture properly manages the lifecycle of an MCP server for testing.
+    """
+    from db_connect_mcp.server import DatabaseMCPServer
+
+    server = DatabaseMCPServer(pg_config)
+    await server.initialize()
+
+    try:
+        yield server
+    finally:
+        await server.cleanup()
+
+
 # ==================== ClickHouse Fixtures ====================
 
 
