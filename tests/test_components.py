@@ -1,7 +1,12 @@
-"""Comprehensive MCP Server Tools Testing
+"""Component-Level Testing for Database Operations
 
-Tests all 10 MCP tool functions against real databases with systematic validation.
-Run with: pytest tests/test_mcp_tools.py -v
+Tests the core database components (MetadataInspector, QueryExecutor, StatisticsAnalyzer)
+directly without going through the MCP protocol layer. These tests validate the business
+logic and database interaction layer.
+
+For MCP protocol-level testing, see test_mcp_server.py.
+
+Run with: pytest tests/test_components.py -v
 """
 
 import json
@@ -17,8 +22,8 @@ from db_connect_mcp.core import (
 )
 
 
-class TestMCPTools:
-    """Comprehensive test suite for all MCP server tools."""
+class TestDatabaseComponents:
+    """Comprehensive test suite for database operation components."""
 
     # ============= Tool 1: get_database_info =============
 
