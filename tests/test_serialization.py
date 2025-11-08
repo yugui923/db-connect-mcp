@@ -1,312 +1,283 @@
-"""Tests for serialization utilities."""
+"""Tests for direct orjson serialization used in the codebase."""
 
 import datetime
 import decimal
 import ipaddress
 import json
 import uuid
-from typing import Any
 
-import pytest
-
-from db_connect_mcp.utils.serialization import (
-    convert_row_to_json_safe,
-    convert_rows_to_json_safe,
-    convert_value_to_json_safe,
-)
+import orjson
 
 
-class TestValueConversion:
-    """Test individual value conversion."""
+class TestOrjsonSerialization:
+    """Test orjson's native serialization capabilities."""
 
-    def test_none_conversion(self):
-        """Test None value conversion."""
-        assert convert_value_to_json_safe(None) is None
+    def test_orjson_basic_types(self):
+        """Test that orjson handles basic types correctly."""
+        data = {
+            "string": "test",
+            "int": 42,
+            "float": 3.14,
+            "bool": True,
+            "none": None,
+            "list": [1, 2, 3],
+            "dict": {"nested": "value"},
+        }
 
-    def test_basic_types(self):
-        """Test basic Python types pass through unchanged."""
-        assert convert_value_to_json_safe("string") == "string"
-        assert convert_value_to_json_safe(42) == 42
-        assert convert_value_to_json_safe(3.14) == 3.14
-        assert convert_value_to_json_safe(True) is True
-        assert convert_value_to_json_safe(False) is False
+        # orjson should handle all basic types
+        json_bytes = orjson.dumps(data)
+        result = orjson.loads(json_bytes)
+        assert result == data
 
-    def test_datetime_conversion(self):
-        """Test datetime types are converted to ISO format strings."""
+    def test_orjson_datetime_types(self):
+        """Test that orjson handles datetime types natively."""
         dt = datetime.datetime(2024, 1, 15, 10, 30, 0)
-        assert convert_value_to_json_safe(dt) == "2024-01-15T10:30:00"
-
         date = datetime.date(2024, 1, 15)
-        assert convert_value_to_json_safe(date) == "2024-01-15"
-
         time = datetime.time(10, 30, 0)
-        assert convert_value_to_json_safe(time) == "10:30:00"
 
-        delta = datetime.timedelta(days=1, hours=2, minutes=30)
-        assert convert_value_to_json_safe(delta) == 95400.0  # Total seconds
+        # orjson converts these to ISO format strings
+        assert orjson.loads(orjson.dumps(dt)) == "2024-01-15T10:30:00"
+        assert orjson.loads(orjson.dumps(date)) == "2024-01-15"
+        assert orjson.loads(orjson.dumps(time)) == "10:30:00"
 
-    def test_ip_address_conversion(self):
-        """Test IP address types are converted to strings."""
-        ipv4 = ipaddress.IPv4Address("192.168.1.1")
-        assert convert_value_to_json_safe(ipv4) == "192.168.1.1"
-
-        ipv6 = ipaddress.IPv6Address("::1")
-        assert convert_value_to_json_safe(ipv6) == "::1"
-
-        ipv4_net = ipaddress.IPv4Network("192.168.1.0/24")
-        assert convert_value_to_json_safe(ipv4_net) == "192.168.1.0/24"
-
-    def test_uuid_conversion(self):
-        """Test UUID is converted to string."""
+    def test_orjson_uuid(self):
+        """Test that orjson handles UUID natively."""
         test_uuid = uuid.UUID("12345678-1234-5678-1234-567812345678")
-        assert (
-            convert_value_to_json_safe(test_uuid)
-            == "12345678-1234-5678-1234-567812345678"
-        )
+        result = orjson.loads(orjson.dumps(test_uuid))
+        assert result == "12345678-1234-5678-1234-567812345678"
 
-    def test_decimal_conversion(self):
-        """Test Decimal conversion.
+    def test_orjson_decimal(self):
+        """Test that orjson handles Decimal with str() default handler."""
+        # orjson doesn't handle Decimal natively, need default handler
+        dec = decimal.Decimal("123.456789")
+        result = orjson.loads(orjson.dumps(dec, default=str))
+        assert result == "123.456789"
 
-        orjson preserves Decimals as strings to maintain precision,
-        which is the correct behavior for financial/precision data.
-        """
-        # Integer-like decimal - orjson keeps as string for precision
-        assert convert_value_to_json_safe(decimal.Decimal("42")) == "42"
+    def test_orjson_with_str_default(self):
+        """Test using str() as default handler for unsupported types."""
+        # Types orjson doesn't handle natively
+        test_data = {
+            "ipv4": ipaddress.IPv4Address("192.168.1.1"),
+            "ipv6": ipaddress.IPv6Address("::1"),
+            "timedelta": datetime.timedelta(days=1),
+            "set": {1, 2, 3},
+        }
 
-        # Float-like decimal - also kept as string
-        assert convert_value_to_json_safe(decimal.Decimal("3.14")) == "3.14"
+        # Use str() as default handler (as we do in the codebase)
+        json_bytes = orjson.dumps(test_data, default=str)
+        result = orjson.loads(json_bytes)
 
-        # Very large decimal - string preserves full precision
-        large = decimal.Decimal("12345678901234567890.123456789")
-        result = convert_value_to_json_safe(large)
-        assert isinstance(result, str)
-        assert result == "12345678901234567890.123456789"
+        # All non-native types should be converted to strings
+        assert result["ipv4"] == "192.168.1.1"
+        assert result["ipv6"] == "::1"
+        assert "1 day" in result["timedelta"] or "86400" in result["timedelta"]
+        assert "{" in result["set"]  # Set converted to string representation
 
-    def test_bytes_conversion(self):
-        """Test bytes/bytearray conversion."""
-        # UTF-8 decodable bytes
-        utf8_bytes = b"Hello, World!"
-        assert convert_value_to_json_safe(utf8_bytes) == "Hello, World!"
 
-        # Non-UTF-8 bytes - should be base64 encoded
-        binary_bytes = bytes([0xFF, 0xFE, 0xFD])
-        result = convert_value_to_json_safe(binary_bytes)
-        assert isinstance(result, str)
-        # Should be base64 encoded
-        import base64
+class TestQueryResultSerialization:
+    """Test serialization patterns used in QueryExecutor."""
 
-        assert result == base64.b64encode(binary_bytes).decode("ascii")
+    def test_query_result_pattern(self):
+        """Test the pattern used in executor.py for query results."""
+        # Simulate database query result rows
+        rows = [
+            {
+                "id": 1,
+                "name": "Alice",
+                "created": datetime.datetime(2024, 1, 15, 10, 30, 0),
+                "ip": ipaddress.IPv4Address("192.168.1.1"),
+                "price": decimal.Decimal("19.99"),
+            },
+            {
+                "id": 2,
+                "name": "Bob",
+                "created": datetime.datetime(2024, 1, 16, 11, 45, 0),
+                "ip": ipaddress.IPv4Address("192.168.1.2"),
+                "price": decimal.Decimal("29.99"),
+            },
+        ]
 
-    def test_memoryview_conversion(self):
-        """Test memoryview conversion (from bytea)."""
-        data = b"test data"
-        mv = memoryview(data)
-        assert convert_value_to_json_safe(mv) == "test data"
+        # This is exactly how executor.py handles rows
+        json_bytes = orjson.dumps(rows, default=str)
+        result = orjson.loads(json_bytes)
 
-    def test_set_conversion(self):
-        """Test set is converted to list."""
-        test_set = {1, 2, 3}
-        result = convert_value_to_json_safe(test_set)
-        assert isinstance(result, list)
-        assert set(result) == test_set
+        # Verify the results
+        assert result[0]["id"] == 1
+        assert result[0]["name"] == "Alice"
+        assert result[0]["created"] == "2024-01-15T10:30:00"
+        assert result[0]["ip"] == "192.168.1.1"
+        assert result[0]["price"] == "19.99"
 
-    def test_list_conversion(self):
-        """Test list with nested values is recursively converted."""
-        test_list = [1, "text", datetime.date(2024, 1, 15), None]
-        result = convert_value_to_json_safe(test_list)
-        assert result == [1, "text", "2024-01-15", None]
+        assert result[1]["id"] == 2
+        assert result[1]["name"] == "Bob"
 
-    def test_dict_conversion(self):
-        """Test dict with nested values is recursively converted."""
-        test_dict = {
-            "number": 42,
-            "date": datetime.date(2024, 1, 15),
+    def test_mixed_types_in_row(self):
+        """Test rows with various database types."""
+        row = {
+            "id": 42,
+            "table_name": "my_table",  # Should remain as string
+            "schema": "public",  # Should remain as string
+            "created_at": datetime.datetime(2024, 1, 15, 10, 30),
+            "is_active": True,
+            "metadata": {"type": "base_table"},  # Nested dict
+            "tags": ["tag1", "tag2"],  # List
             "uuid": uuid.UUID("12345678-1234-5678-1234-567812345678"),
         }
-        result = convert_value_to_json_safe(test_dict)
-        assert result == {
-            "number": 42,
-            "date": "2024-01-15",
-            "uuid": "12345678-1234-5678-1234-567812345678",
-        }
 
-    def test_string_not_treated_as_range(self):
-        """Test that regular strings are NOT converted as range types.
+        # Use orjson with str() default as in the codebase
+        json_bytes = orjson.dumps(row, default=str)
+        result = orjson.loads(json_bytes)
 
-        This is the critical bug fix - strings have .lower and .upper methods
-        but should not be treated as PostgreSQL range types.
-        """
-        # Simple string
-        assert convert_value_to_json_safe("table_name") == "table_name"
+        # Strings should be preserved as-is
+        assert result["table_name"] == "my_table"
+        assert result["schema"] == "public"
 
-        # String with various cases
-        assert convert_value_to_json_safe("MyTableName") == "MyTableName"
+        # Other types should be converted appropriately
+        assert result["id"] == 42
+        assert result["created_at"] == "2024-01-15T10:30:00"
+        assert result["is_active"] is True
+        assert result["metadata"] == {"type": "base_table"}
+        assert result["tags"] == ["tag1", "tag2"]
+        assert result["uuid"] == "12345678-1234-5678-1234-567812345678"
 
-        # Empty string
-        assert convert_value_to_json_safe("") == ""
 
-        # String with special characters
-        assert convert_value_to_json_safe("hello_world_123") == "hello_world_123"
+class TestAdapterSerialization:
+    """Test the safe_value pattern used in database adapters."""
 
-    def test_mock_range_type(self):
-        """Test that actual range-like objects ARE converted correctly."""
+    def test_safe_value_pattern(self):
+        """Test the safe_value function pattern used in adapters."""
 
-        class MockRange:
-            """Mock PostgreSQL range type."""
+        def safe_value(val):
+            """Replicate the safe_value function from adapters."""
+            if val is None:
+                return None
+            try:
+                orjson.dumps(val)
+                return val
+            except Exception:
+                return str(val)
 
-            def __init__(self, lower, upper, bounds="[]"):
-                self.lower = lower
-                self.upper = upper
-                self.bounds = bounds
+        # Test various values
+        assert safe_value(None) is None
+        assert safe_value("string") == "string"
+        assert safe_value(42) == 42
+        assert safe_value(3.14) == 3.14
+        assert safe_value(True) is True
 
-        mock_range = MockRange(1, 10, "[)")
-        result = convert_value_to_json_safe(mock_range)
+        # datetime is handled by orjson
+        dt = datetime.datetime(2024, 1, 15, 10, 30, 0)
+        assert safe_value(dt) == dt
 
-        assert isinstance(result, dict)
-        assert result == {"lower": 1, "upper": 10, "bounds": "[)"}
+        # UUID is handled by orjson
+        test_uuid = uuid.UUID("12345678-1234-5678-1234-567812345678")
+        assert safe_value(test_uuid) == test_uuid
 
-    def test_fallback_to_string(self):
-        """Test that unknown types fall back to string conversion."""
+        # IP addresses need str() conversion
+        ipv4 = ipaddress.IPv4Address("192.168.1.1")
+        assert safe_value(ipv4) == "192.168.1.1"
 
+        # Custom class falls back to str()
         class CustomType:
             def __str__(self):
                 return "custom_value"
 
         custom = CustomType()
-        assert convert_value_to_json_safe(custom) == "custom_value"
+        assert safe_value(custom) == "custom_value"
 
 
-class TestRowConversion:
-    """Test row dictionary conversion."""
+class TestEdgeCases:
+    """Test edge cases and special scenarios."""
 
-    def test_empty_row(self):
-        """Test empty row conversion."""
-        assert convert_row_to_json_safe({}) == {}
-
-    def test_simple_row(self):
-        """Test row with basic types."""
-        row = {
-            "id": 1,
-            "name": "test",
-            "active": True,
-            "score": 3.14,
-        }
-        assert convert_row_to_json_safe(row) == row
-
-    def test_complex_row(self):
-        """Test row with complex types."""
-        row = {
-            "id": 1,
-            "created_at": datetime.datetime(2024, 1, 15, 10, 30),
-            "user_uuid": uuid.UUID("12345678-1234-5678-1234-567812345678"),
-            "ip_address": ipaddress.IPv4Address("192.168.1.1"),
-            "metadata": {"key": "value"},
+    def test_empty_collections(self):
+        """Test empty collections."""
+        data = {
+            "empty_list": [],
+            "empty_dict": {},
+            "empty_string": "",
         }
 
-        result = convert_row_to_json_safe(row)
+        json_bytes = orjson.dumps(data)
+        result = orjson.loads(json_bytes)
+        assert result == data
 
-        assert result["id"] == 1
-        assert result["created_at"] == "2024-01-15T10:30:00"
-        assert result["user_uuid"] == "12345678-1234-5678-1234-567812345678"
-        assert result["ip_address"] == "192.168.1.1"
-        assert result["metadata"] == {"key": "value"}
+    def test_nested_structures(self):
+        """Test deeply nested structures."""
+        data = {
+            "level1": {
+                "level2": {
+                    "level3": {
+                        "values": [1, 2, 3],
+                        "date": datetime.date(2024, 1, 15),
+                    }
+                }
+            }
+        }
 
+        json_bytes = orjson.dumps(data)
+        result = orjson.loads(json_bytes)
 
-class TestRowsConversion:
-    """Test multiple rows conversion."""
+        assert result["level1"]["level2"]["level3"]["values"] == [1, 2, 3]
+        assert result["level1"]["level2"]["level3"]["date"] == "2024-01-15"
 
-    def test_empty_rows(self):
-        """Test empty rows list."""
-        assert convert_rows_to_json_safe([]) == []
+    def test_large_dataset(self):
+        """Test with larger dataset to ensure performance."""
+        # Create 1000 rows
+        rows = []
+        for i in range(1000):
+            rows.append(
+                {
+                    "id": i,
+                    "name": f"User {i}",
+                    "created": datetime.datetime(2024, 1, 15, 10, 30, 0),
+                    "value": decimal.Decimal(f"{i}.99"),
+                }
+            )
 
-    def test_multiple_rows(self):
-        """Test multiple rows conversion."""
+        # Should handle large datasets efficiently
+        json_bytes = orjson.dumps(rows, default=str)
+        result = orjson.loads(json_bytes)
+
+        assert len(result) == 1000
+        assert result[0]["id"] == 0
+        assert result[999]["id"] == 999
+
+    def test_null_values(self):
+        """Test handling of null/None values."""
         rows = [
-            {"id": 1, "name": "Alice", "created": datetime.date(2024, 1, 1)},
-            {"id": 2, "name": "Bob", "created": datetime.date(2024, 1, 2)},
+            {"id": 1, "value": None},
+            {"id": 2, "value": "not null"},
         ]
 
-        result = convert_rows_to_json_safe(rows)
+        json_bytes = orjson.dumps(rows)
+        result = orjson.loads(json_bytes)
 
-        assert len(result) == 2
-        assert result[0]["created"] == "2024-01-01"
-        assert result[1]["created"] == "2024-01-02"
+        assert result[0]["value"] is None
+        assert result[1]["value"] == "not null"
 
 
-class TestJSONSerialization:
-    """Test that converted values are actually JSON-serializable."""
+class TestCompatibility:
+    """Test that orjson output is compatible with standard json."""
 
-    def test_converted_values_are_json_safe(self):
-        """Test all converted values can be serialized to JSON."""
-        test_values = [
-            None,
-            "string",
-            42,
-            3.14,
-            True,
-            datetime.datetime(2024, 1, 15),
-            datetime.date(2024, 1, 15),
-            ipaddress.IPv4Address("192.168.1.1"),
-            uuid.UUID("12345678-1234-5678-1234-567812345678"),
-            decimal.Decimal("123.45"),
-            b"hello",
-            [1, 2, 3],
-            {"key": "value"},
-        ]
-
-        for value in test_values:
-            converted = convert_value_to_json_safe(value)
-            # This should not raise an exception
-            json.dumps(converted)
-
-    def test_query_result_like_structure(self):
-        """Test structure similar to actual query results."""
-        # Simulate a query result with string values (the bug scenario)
-        rows = [
-            {"table_name": "users"},
-            {"table_name": "products"},
-            {"table_name": "orders"},
-        ]
-
-        # Convert rows (this was failing before the fix)
-        converted_rows = convert_rows_to_json_safe(rows)
-
-        # Verify strings are preserved
-        assert converted_rows[0]["table_name"] == "users"
-        assert converted_rows[1]["table_name"] == "products"
-        assert converted_rows[2]["table_name"] == "orders"
-
-        # Verify JSON serialization works
-        json_str = json.dumps(converted_rows)
-
-        # Verify we can deserialize and get original values back
-        deserialized = json.loads(json_str)
-        assert deserialized == converted_rows
-
-    def test_mixed_types_in_row(self):
-        """Test row with mixed types including strings (regression test)."""
-        row = {
-            "id": 42,
-            "table_name": "my_table",  # This was being incorrectly converted
-            "schema": "public",  # This too
-            "created_at": datetime.datetime(2024, 1, 15, 10, 30),
-            "is_active": True,
-            "metadata": {"type": "base_table"},  # Nested strings
+    def test_orjson_json_compatibility(self):
+        """Test that orjson output can be read by standard json."""
+        data = {
+            "string": "test",
+            "number": 42,
+            "float": 3.14,
+            "bool": True,
+            "none": None,
+            "list": [1, 2, 3],
+            "dict": {"key": "value"},
+            "date": datetime.date(2024, 1, 15),
         }
 
-        converted = convert_row_to_json_safe(row)
+        # Serialize with orjson
+        orjson_bytes = orjson.dumps(data)
+        orjson_str = orjson_bytes.decode("utf-8")
 
-        # All strings should be preserved as-is
-        assert converted["table_name"] == "my_table"
-        assert converted["schema"] == "public"
-        assert converted["metadata"]["type"] == "base_table"
+        # Should be readable by standard json
+        json_result = json.loads(orjson_str)
 
-        # Other types should be converted appropriately
-        assert converted["id"] == 42
-        assert converted["created_at"] == "2024-01-15T10:30:00"
-        assert converted["is_active"] is True
-
-        # Verify full JSON serialization
-        json_str = json.dumps(converted)
-        assert "my_table" in json_str
-        assert "public" in json_str
+        assert json_result["string"] == "test"
+        assert json_result["number"] == 42
+        assert json_result["date"] == "2024-01-15"

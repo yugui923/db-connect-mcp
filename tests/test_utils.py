@@ -25,14 +25,16 @@ class TestReporter:
         details: Optional[dict[str, Any]] = None,
     ):
         """Add a test result."""
-        self.results.append({
-            "tool": tool_name,
-            "test": test_name,
-            "passed": passed,
-            "error": error,
-            "details": details or {},
-            "timestamp": datetime.now().isoformat(),
-        })
+        self.results.append(
+            {
+                "tool": tool_name,
+                "test": test_name,
+                "passed": passed,
+                "error": error,
+                "details": details or {},
+                "timestamp": datetime.now().isoformat(),
+            }
+        )
 
     def generate_report(self, database_type: str) -> str:
         """Generate markdown report."""
@@ -47,8 +49,8 @@ class TestReporter:
 ## Summary
 
 - **Total Tests:** {total}
-- **Passed:** {passed} ({passed/total*100:.1f}%)
-- **Failed:** {failed} ({failed/total*100:.1f}%)
+- **Passed:** {passed} ({passed / total * 100:.1f}%)
+- **Failed:** {failed} ({failed / total * 100:.1f}%)
 
 ## Results by Tool
 
@@ -78,7 +80,9 @@ class TestReporter:
                     report += f"\n  - Error: `{result['error']}`"
 
                 if result["details"]:
-                    report += f"\n  - Details: {json.dumps(result['details'], indent=2)}"
+                    report += (
+                        f"\n  - Details: {json.dumps(result['details'], indent=2)}"
+                    )
 
                 report += "\n"
 
@@ -91,7 +95,9 @@ class TestReporter:
 
     def save_report(self, database_type: str) -> Path:
         """Save report to file."""
-        filename = f"test_report_{database_type}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
+        filename = (
+            f"test_report_{database_type}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
+        )
         filepath = self.output_dir / filename
 
         report = self.generate_report(database_type)
@@ -134,8 +140,8 @@ class DataTypeTestHelper:
             "CIDR": "'192.168.1.0/24'::cidr",
             "MACADDR": "'08:00:2b:01:02:03'::macaddr",
             "UUID": "gen_random_uuid()",
-            "JSON": "'{\"key\": \"value\"}'::json",
-            "JSONB": "'{\"key\": \"value\"}'::jsonb",
+            "JSON": '\'{"key": "value"}\'::json',
+            "JSONB": '\'{"key": "value"}\'::jsonb',
             "BYTEA": "'\\\\x48656c6c6f'::bytea",
             "BOOLEAN": "true",
             "POINT": "POINT(1, 2)",

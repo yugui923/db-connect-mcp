@@ -69,7 +69,9 @@ class MCPTestRunner:
         if not any(availability.values()):
             print("\n❌ ERROR: No database URLs configured!")
             print("\nPlease set at least one of these environment variables:")
-            print("  - PG_TEST_DATABASE_URL=postgresql+asyncpg://user:pass@host:port/db")
+            print(
+                "  - PG_TEST_DATABASE_URL=postgresql+asyncpg://user:pass@host:port/db"
+            )
             print("  - MYSQL_TEST_DATABASE_URL=mysql+aiomysql://user:pass@host:port/db")
             print("  - CH_TEST_DATABASE_URL=clickhouse+asynch://user:pass@host:port/db")
             return 1
@@ -93,11 +95,16 @@ class MCPTestRunner:
             pytest_args.append("-vv")
 
         # Generate JSON report
-        report_file = self.results_dir / f"pytest_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-        pytest_args.extend([
-            f"--json-report",
-            f"--json-report-file={report_file}",
-        ])
+        report_file = (
+            self.results_dir
+            / f"pytest_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        )
+        pytest_args.extend(
+            [
+                "--json-report",
+                f"--json-report-file={report_file}",
+            ]
+        )
 
         print("\n🧪 Running Tests...")
         print(f"Command: pytest {' '.join(pytest_args)}")
@@ -136,7 +143,10 @@ class MCPTestRunner:
         report = self._generate_markdown_report(pytest_data)
 
         # Save report
-        report_file = self.results_dir / f"mcp_test_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
+        report_file = (
+            self.results_dir
+            / f"mcp_test_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
+        )
         report_file.write_text(report, encoding="utf-8")
 
         print(f"✅ Report saved: {report_file}")
@@ -156,16 +166,16 @@ class MCPTestRunner:
         report = f"""# 🔬 MCP Server Comprehensive Test Report
 
 **Generated:** {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
-**Duration:** {pytest_data.get('duration', 0):.2f} seconds
+**Duration:** {pytest_data.get("duration", 0):.2f} seconds
 
 ## Executive Summary
 
 | Metric | Count | Percentage |
 |--------|-------|------------|
 | **Total Tests** | {total} | 100% |
-| **✅ Passed** | {passed} | {passed/total*100:.1f}% |
-| **❌ Failed** | {failed} | {failed/total*100:.1f}% |
-| **⏭️ Skipped** | {skipped} | {skipped/total*100:.1f}% |
+| **✅ Passed** | {passed} | {passed / total * 100:.1f}% |
+| **❌ Failed** | {failed} | {failed / total * 100:.1f}% |
+| **⏭️ Skipped** | {skipped} | {skipped / total * 100:.1f}% |
 
 """
 
@@ -285,9 +295,7 @@ class MCPTestRunner:
 
 def main():
     """Main entry point."""
-    parser = argparse.ArgumentParser(
-        description="Run comprehensive MCP server tests"
-    )
+    parser = argparse.ArgumentParser(description="Run comprehensive MCP server tests")
     parser.add_argument(
         "--database",
         "-d",
