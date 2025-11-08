@@ -4,11 +4,11 @@ import re
 import time
 from typing import TYPE_CHECKING, Any, Optional
 
+import orjson
 from sqlalchemy import text
 
 from db_connect_mcp.core.connection import DatabaseConnection
 from db_connect_mcp.models.query import ExplainPlan, QueryResult
-from db_connect_mcp.utils import convert_rows_to_json_safe
 
 if TYPE_CHECKING:
     from db_connect_mcp.adapters.base import BaseAdapter
@@ -69,8 +69,10 @@ class QueryExecutor:
             columns = list(result.keys())
             rows = [dict(zip(columns, row)) for row in rows_data]
 
-            # Convert special types to JSON-serializable formats
-            rows = convert_rows_to_json_safe(rows)
+            # Ensure all values are JSON-serializable using orjson
+            # orjson handles most types automatically, fallback to str() for others
+            json_bytes = orjson.dumps(rows, default=str)
+            rows = orjson.loads(json_bytes)
 
             execution_time = (time.time() - start_time) * 1000  # Convert to ms
 

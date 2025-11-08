@@ -244,8 +244,19 @@ class PostgresAdapter(BaseAdapter):
             mcv_rows = mcv_result.fetchall()
             most_common = [{"value": str(r[0]), "count": int(r[1])} for r in mcv_rows]
 
-            # Convert values to JSON-safe formats
-            from db_connect_mcp.utils import convert_value_to_json_safe
+            # Use orjson to ensure JSON-serializable values
+            import orjson
+
+            def safe_value(val):
+                """Convert value to JSON-safe format."""
+                if val is None:
+                    return None
+                # Try to serialize with orjson, fallback to str
+                try:
+                    orjson.dumps(val)
+                    return val
+                except:
+                    return str(val)
 
             return ColumnStats(
                 column=column_name,
@@ -253,15 +264,15 @@ class PostgresAdapter(BaseAdapter):
                 total_rows=int(row[0]),
                 null_count=int(row[1]),
                 distinct_count=int(row[2]) if row[2] else None,
-                min_value=convert_value_to_json_safe(row[3]),
-                max_value=convert_value_to_json_safe(row[4]),
+                min_value=safe_value(row[3]),
+                max_value=safe_value(row[4]),
                 avg_value=float(row[6]) if row[6] is not None else None,
                 stddev_value=float(row[7]) if row[7] is not None else None,
-                percentile_25=convert_value_to_json_safe(row[8]),
-                median_value=convert_value_to_json_safe(row[9]),
-                percentile_75=convert_value_to_json_safe(row[10]),
-                percentile_95=convert_value_to_json_safe(row[11]),
-                percentile_99=convert_value_to_json_safe(row[12]),
+                percentile_25=safe_value(row[8]),
+                median_value=safe_value(row[9]),
+                percentile_75=safe_value(row[10]),
+                percentile_95=safe_value(row[11]),
+                percentile_99=safe_value(row[12]),
                 most_common_values=most_common,
                 sample_size=int(row[0]),
             )
