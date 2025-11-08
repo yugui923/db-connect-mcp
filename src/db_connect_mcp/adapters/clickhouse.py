@@ -313,11 +313,12 @@ class ClickHouseAdapter(BaseAdapter):
         self, conn: AsyncConnection, database_name: str
     ) -> DatabaseProfile:
         """Generate ClickHouse database profile (basic implementation)."""
-        # Get database version
+        # Get database version (extract just version number)
         version_query = text("SELECT version()")
         version_result = await conn.execute(version_query)
         version_row = version_result.fetchone()
-        version = version_row[0] if version_row else "Unknown"
+        raw_version = version_row[0] if version_row else "Unknown"
+        version = f"ClickHouse {raw_version}" if raw_version != "Unknown" else "Unknown"
 
         # Get database statistics from system tables
         db_query = text("""
@@ -335,10 +336,13 @@ class ClickHouseAdapter(BaseAdapter):
         db_result = await conn.execute(db_query)
         db_rows = db_result.fetchall()
 
+        # Calculate totals from all databases
+        total_tables = sum(int(row[1]) if row[1] else 0 for row in db_rows)
+        total_size = sum(int(row[2]) if row[2] else 0 for row in db_rows)
+
+        # Limit to top 10 databases by size for conciseness
         schemas = []
-        total_tables = 0
-        total_size = 0
-        for row in db_rows:
+        for row in db_rows[:10]:
             schema_profile = SchemaProfile(
                 name=row[0],
                 table_count=int(row[1]) if row[1] else 0,
@@ -347,10 +351,8 @@ class ClickHouseAdapter(BaseAdapter):
                 total_rows=int(row[3]) if row[3] else 0,
             )
             schemas.append(schema_profile)
-            total_tables += schema_profile.table_count
-            total_size += schema_profile.total_size_bytes or 0
 
-        # Get largest tables
+        # Get largest tables (top 5 for conciseness)
         tables_query = text("""
             SELECT
                 database,
@@ -362,7 +364,7 @@ class ClickHouseAdapter(BaseAdapter):
             FROM system.tables
             WHERE database NOT IN ('system', 'information_schema', 'INFORMATION_SCHEMA')
             ORDER BY bytes DESC
-            LIMIT 20
+            LIMIT 5
         """)
 
         tables_result = await conn.execute(tables_query)

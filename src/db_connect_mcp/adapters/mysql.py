@@ -304,11 +304,17 @@ class MySQLAdapter(BaseAdapter):
         self, conn: AsyncConnection, database_name: str
     ) -> DatabaseProfile:
         """Generate MySQL database profile (basic implementation)."""
-        # Get database version
+        # Get database version (extract just version number)
         version_query = text("SELECT VERSION()")
         version_result = await conn.execute(version_query)
         version_row = version_result.fetchone()
-        version = version_row[0] if version_row else "Unknown"
+        # Extract just the version number (e.g., "8.0.32" from "8.0.32-MariaDB")
+        raw_version = version_row[0] if version_row else "Unknown"
+        version = (
+            f"MySQL {raw_version.split('-')[0]}"
+            if raw_version != "Unknown"
+            else "Unknown"
+        )
 
         # Get schema statistics from information_schema
         schema_query = text("""
@@ -325,10 +331,13 @@ class MySQLAdapter(BaseAdapter):
         schema_result = await conn.execute(schema_query)
         schema_rows = schema_result.fetchall()
 
+        # Calculate totals from all schemas
+        total_tables = sum(int(row[1]) if row[1] else 0 for row in schema_rows)
+        total_size = sum(int(row[2]) if row[2] else 0 for row in schema_rows)
+
+        # Limit to top 10 schemas by size for conciseness
         schemas = []
-        total_tables = 0
-        total_size = 0
-        for row in schema_rows:
+        for row in schema_rows[:10]:
             schema_profile = SchemaProfile(
                 name=row[0],
                 table_count=int(row[1]) if row[1] else 0,
@@ -337,10 +346,8 @@ class MySQLAdapter(BaseAdapter):
                 total_rows=None,  # Would require additional queries
             )
             schemas.append(schema_profile)
-            total_tables += schema_profile.table_count
-            total_size += schema_profile.total_size_bytes or 0
 
-        # Get largest tables
+        # Get largest tables (top 5 for conciseness)
         tables_query = text("""
             SELECT
                 table_schema,
@@ -352,7 +359,7 @@ class MySQLAdapter(BaseAdapter):
             FROM information_schema.TABLES
             WHERE table_schema NOT IN ('information_schema', 'mysql', 'performance_schema', 'sys')
             ORDER BY total_size DESC
-            LIMIT 20
+            LIMIT 5
         """)
 
         tables_result = await conn.execute(tables_query)
