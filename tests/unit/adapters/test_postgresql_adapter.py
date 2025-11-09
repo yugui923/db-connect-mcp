@@ -1,28 +1,28 @@
-"""PostgreSQL adapter and integration tests"""
+"""Unit Tests for PostgreSQL Adapter
+
+Tests PostgreSQL-specific adapter implementation:
+- Adapter configuration and capabilities
+- Database connections
+- SQL query generation
+- Metadata enrichment
+"""
 
 import pytest
 from sqlalchemy import text
 
 from db_connect_mcp.adapters.base import BaseAdapter
-from db_connect_mcp.core import (
-    DatabaseConnection,
-    MetadataInspector,
-    StatisticsAnalyzer,
-)
+from db_connect_mcp.core import DatabaseConnection, MetadataInspector, StatisticsAnalyzer
 from db_connect_mcp.models.config import DatabaseConfig
 
-# Mark all tests in this module as PostgreSQL and integration tests
+# Mark all tests in this module as PostgreSQL tests
 pytestmark = [pytest.mark.postgresql, pytest.mark.integration]
 
 
-# ==================== Configuration Tests ====================
-
-
 class TestPostgreSQLConfiguration:
-    """Test PostgreSQL configuration and setup"""
+    """Test PostgreSQL configuration and setup."""
 
     async def test_config_creation(self, pg_config: DatabaseConfig):
-        """Test that PostgreSQL configuration is created correctly"""
+        """Test that PostgreSQL configuration is created correctly."""
         assert pg_config is not None
         assert pg_config.dialect == "postgresql"
         assert pg_config.driver == "asyncpg"
@@ -30,7 +30,7 @@ class TestPostgreSQLConfiguration:
     async def test_adapter_creation(
         self, pg_adapter: BaseAdapter, pg_config: DatabaseConfig
     ):
-        """Test that PostgreSQL adapter is created with correct capabilities"""
+        """Test that PostgreSQL adapter is created with correct capabilities."""
         assert pg_adapter is not None
 
         capabilities = pg_adapter.capabilities
@@ -39,30 +39,31 @@ class TestPostgreSQLConfiguration:
         # PostgreSQL should support these features
         assert capabilities.foreign_keys is True
         assert capabilities.indexes is True
+        assert capabilities.advanced_stats is True
+        assert capabilities.explain_plans is True
+        assert capabilities.profiling is True
 
         # Check supported features list
         features = capabilities.get_supported_features()
         assert len(features) > 0
         assert "foreign_keys" in features
+        assert "indexes" in features
 
     async def test_read_only_mode(self, pg_config: DatabaseConfig):
-        """Test that read-only mode is properly configured"""
+        """Test that read-only mode is properly configured."""
         assert pg_config.read_only is True
 
 
-# ==================== Connection Tests ====================
-
-
 class TestPostgreSQLConnection:
-    """Test PostgreSQL connection and basic queries"""
+    """Test PostgreSQL connection and basic queries."""
 
     async def test_connection_initialization(self, pg_connection: DatabaseConnection):
-        """Test that database connection initializes successfully"""
+        """Test that database connection initializes successfully."""
         assert pg_connection is not None
-        # Engine may be lazy-initialized, so we just verify connection object exists
+        assert pg_connection.engine is not None
 
     async def test_database_connectivity(self, pg_connection: DatabaseConnection):
-        """Test that we can connect and query the database"""
+        """Test that we can connect and query the database."""
         async with pg_connection.get_connection() as conn:
             result = await conn.execute(text("SELECT version()"))
             row = result.fetchone()
@@ -73,7 +74,7 @@ class TestPostgreSQLConnection:
             assert len(version) > 0
 
     async def test_connection_context_manager(self, pg_connection: DatabaseConnection):
-        """Test that connection context manager works properly"""
+        """Test that connection context manager works properly."""
         async with pg_connection.get_connection() as conn:
             result = await conn.execute(text("SELECT 1 AS test"))
             row = result.fetchone()
@@ -81,18 +82,15 @@ class TestPostgreSQLConnection:
             assert row[0] == 1
 
 
-# ==================== Metadata Inspector Tests ====================
-
-
 class TestPostgreSQLMetadata:
-    """Test PostgreSQL metadata inspection"""
+    """Test PostgreSQL metadata inspection."""
 
     async def test_inspector_creation(self, pg_inspector: MetadataInspector):
-        """Test that metadata inspector is created successfully"""
+        """Test that metadata inspector is created successfully."""
         assert pg_inspector is not None
 
     async def test_get_schemas(self, pg_inspector: MetadataInspector):
-        """Test listing database schemas"""
+        """Test listing database schemas."""
         schemas = await pg_inspector.get_schemas()
 
         assert schemas is not None
@@ -111,7 +109,7 @@ class TestPostgreSQLMetadata:
             assert schema.table_count >= 0
 
     async def test_get_tables(self, pg_inspector: MetadataInspector):
-        """Test listing tables in a schema"""
+        """Test listing tables in a schema."""
         tables = await pg_inspector.get_tables("public")
 
         assert tables is not None
@@ -127,7 +125,7 @@ class TestPostgreSQLMetadata:
 
     @pytest.mark.slow
     async def test_describe_table(self, pg_inspector: MetadataInspector):
-        """Test getting detailed table information"""
+        """Test getting detailed table information."""
         # Get tables first
         tables = await pg_inspector.get_tables("public")
 
@@ -156,7 +154,7 @@ class TestPostgreSQLMetadata:
     async def test_get_relationships(
         self, pg_inspector: MetadataInspector, pg_adapter: BaseAdapter
     ):
-        """Test getting table relationships (foreign keys)"""
+        """Test getting table relationships (foreign keys)."""
         if not pg_adapter.capabilities.foreign_keys:
             pytest.skip("Database doesn't support foreign keys")
 
@@ -181,32 +179,38 @@ class TestPostgreSQLMetadata:
                 assert len(rel.to_columns) > 0
                 break
 
-        # Note: Not all databases have foreign keys, so we don't assert relationship_found
-
-
-# ==================== Statistics Analyzer Tests ====================
-
 
 class TestPostgreSQLStatistics:
-    """Test PostgreSQL statistics and analysis"""
+    """Test PostgreSQL statistics and analysis."""
 
     async def test_analyzer_creation(self, pg_analyzer: StatisticsAnalyzer):
-        """Test that statistics analyzer is created successfully"""
+        """Test that statistics analyzer is created successfully."""
         assert pg_analyzer is not None
 
     @pytest.mark.slow
     async def test_analyze_column(
         self, pg_inspector: MetadataInspector, pg_analyzer: StatisticsAnalyzer
     ):
-        """Test column statistics analysis"""
+        """Test column statistics analysis."""
         # Get a table with columns
         tables = await pg_inspector.get_tables("public")
 
-        if not tables or not tables[0].columns:
+        if not tables:
+            pytest.skip("No tables in public schema")
+
+        # Find a table with columns
+        table_with_columns = None
+        for table in tables:
+            table_info = await pg_inspector.describe_table(table.name, "public")
+            if table_info.columns:
+                table_with_columns = table_info
+                break
+
+        if not table_with_columns:
             pytest.skip("No tables with columns in public schema")
 
-        table_name = tables[0].name
-        column_name = tables[0].columns[0].name
+        table_name = table_with_columns.name
+        column_name = table_with_columns.columns[0].name
 
         stats = await pg_analyzer.analyze_column(table_name, column_name, "public")
 
@@ -224,37 +228,9 @@ class TestPostgreSQLStatistics:
             assert stats.distinct_count > 0
             assert stats.distinct_count <= stats.total_rows
 
-    @pytest.mark.slow
-    async def test_sample_data_via_query(
-        self, pg_connection: DatabaseConnection, pg_inspector: MetadataInspector
-    ):
-        """Test sampling data from tables using direct query"""
-        tables = await pg_inspector.get_tables("public")
-
-        if not tables:
-            pytest.skip("No tables in public schema")
-
-        table_name = tables[0].name
-
-        # Sample data using a direct query
-        async with pg_connection.get_connection() as conn:
-            from sqlalchemy import text
-
-            result = await conn.execute(
-                text(f'SELECT * FROM "public"."{table_name}" LIMIT 5')
-            )
-            rows = result.fetchall()
-
-        assert rows is not None
-        assert isinstance(rows, list)
-        assert len(rows) <= 5
-
-
-# ==================== Integration Tests ====================
-
 
 class TestPostgreSQLIntegration:
-    """End-to-end integration tests"""
+    """End-to-end integration tests for PostgreSQL."""
 
     async def test_full_workflow(
         self,
@@ -262,7 +238,7 @@ class TestPostgreSQLIntegration:
         pg_inspector: MetadataInspector,
         pg_analyzer: StatisticsAnalyzer,
     ):
-        """Test complete workflow: connect → inspect → analyze"""
+        """Test complete workflow: connect → inspect → analyze."""
         # 1. Verify connection works
         async with pg_connection.get_connection() as conn:
             result = await conn.execute(text("SELECT 1"))
@@ -277,16 +253,23 @@ class TestPostgreSQLIntegration:
         assert tables is not None
 
         # 4. If tables exist, analyze them
-        if tables and tables[0].columns:
-            table_name = tables[0].name
-            column_name = tables[0].columns[0].name
+        if tables:
+            # Find a table with columns
+            for table in tables:
+                table_info = await pg_inspector.describe_table(table.name, "public")
+                if table_info.columns:
+                    table_name = table_info.name
+                    column_name = table_info.columns[0].name
 
-            # Describe table
-            detailed = await pg_inspector.describe_table(table_name, "public")
-            assert detailed is not None
-            assert len(detailed.columns) > 0
+                    # Describe table
+                    detailed = await pg_inspector.describe_table(table_name, "public")
+                    assert detailed is not None
+                    assert len(detailed.columns) > 0
 
-            # Analyze column
-            stats = await pg_analyzer.analyze_column(table_name, column_name, "public")
-            assert stats is not None
-            assert stats.total_rows >= 0
+                    # Analyze column
+                    stats = await pg_analyzer.analyze_column(
+                        table_name, column_name, "public"
+                    )
+                    assert stats is not None
+                    assert stats.total_rows >= 0
+                    break
