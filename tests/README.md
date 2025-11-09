@@ -1,16 +1,65 @@
 # Test Suite
 
-This directory contains the pytest-based test suite for the db-connect-mcp project.
+This directory contains the comprehensive pytest-based test suite for the db-connect-mcp project.
 
-## Structure
+## Test Structure
+
+The test suite is organized into multiple layers:
+
+### 1. **MCP Protocol-Level Tests** (`test_mcp_server.py`)
+Tests the full MCP server implementation including:
+- Server initialization and lifecycle
+- MCP tool registration based on database capabilities
+- Tool input validation via JSON schemas
+- Tool calls through the actual MCP protocol using ClientSession
+- Response serialization to MCP TextContent format
+- Error handling at the protocol layer
+- End-to-end workflows (explore database, query and analyze)
+
+**Purpose**: Catch errors that only appear when running the actual MCP server with a real MCP client.
+
+### 2. **Component-Level Tests** (`test_components.py`)
+Tests the core database operation components directly:
+- `MetadataInspector` - Schema, table, and column metadata
+- `QueryExecutor` - Query execution and sampling
+- `StatisticsAnalyzer` - Column statistics and profiling
+
+**Purpose**: Test business logic and database interaction without MCP protocol overhead.
+
+### 3. **Adapter Tests** (`test_postgresql.py`, `test_clickhouse.py`, `test_mysql.py`)
+Tests database-specific adapter implementations:
+- Adapter configuration and capabilities
+- Database connections and connection pooling
+- Database-specific SQL query generation
+- Metadata enrichment
+- Statistics queries
+
+**Purpose**: Ensure each database adapter works correctly with its specific database.
+
+### 4. **Data Serialization Tests** (`test_serialization.py`)
+Tests JSON serialization of database-specific types:
+- Temporal types (TIMESTAMP, DATE, TIME, INTERVAL)
+- Network types (INET, CIDR, MACADDR)
+- Special types (UUID, JSON, JSONB, BYTEA)
+- Geometric types, arrays, etc.
+
+**Purpose**: Prevent JSON serialization errors when returning data to MCP clients.
+
+### 5. **Utility Tests** (`test_utils.py`)
+Tests supporting utilities like test reporters and helpers.
+
+## File Structure
 
 ```
 tests/
 ├── conftest.py              # Shared fixtures and pytest configuration
+├── test_mcp_server.py       # MCP protocol-level tests (NEW)
+├── test_components.py       # Component-level tests (renamed from test_mcp_tools.py)
 ├── test_postgresql.py       # PostgreSQL adapter tests
 ├── test_clickhouse.py       # ClickHouse adapter tests
-├── test_psql_server.py      # Legacy PostgreSQL test (deprecated)
-├── test_clickhouse_server.py # Legacy ClickHouse test (deprecated)
+├── test_serialization.py    # Data type serialization tests
+├── test_utils.py           # Test utility tests
+├── run_mcp_tests.py        # Test orchestration script
 └── README.md               # This file
 ```
 
@@ -355,41 +404,66 @@ SKIPPED [1] tests/conftest.py:XX: PG_TEST_DATABASE_URL not set in environment
 
 Solution: Create a `.env` file with the appropriate database URL.
 
-## Legacy Tests
+## Running MCP Protocol Tests
 
-The legacy test files (`test_psql_server.py` and `test_clickhouse_server.py`) are deprecated in favor of the new pytest-based tests. They will be removed in a future version.
+The MCP protocol-level tests require the MCP SDK's `ClientSession`:
 
-To run legacy tests:
 ```bash
-python tests/test_psql_server.py
-python tests/test_clickhouse_server.py
+# Run all MCP protocol tests
+pytest tests/test_mcp_server.py -v
+
+# Run specific test class
+pytest tests/test_mcp_server.py::TestMCPServerInitialization -v
+
+# Run specific test
+pytest tests/test_mcp_server.py::TestMCPToolCalls::test_execute_query_protocol -v
 ```
+
+These tests create an in-memory connection between a `DatabaseMCPServer` and a `ClientSession` to test the full MCP protocol flow.
 
 ---
 
-## 🔬 MCP Tools Testing Framework
+## 🔬 Component & MCP Testing Framework
 
-A comprehensive testing framework specifically for testing all 10 MCP server tool functions against real databases. This framework systematically validates that all MCP tools work correctly with real-world data and data types.
+A comprehensive testing framework with two layers:
 
-### Why This Framework?
+### 1. MCP Protocol Testing (`test_mcp_server.py`)
+Tests the full MCP server including tool registration, protocol handling, and end-to-end workflows.
+Uses the MCP SDK's `ClientSession` to simulate real MCP client interactions.
 
-After the comprehensive bug fixes (JSON serialization, SQL syntax errors, missing metadata), this framework ensures:
-1. All 10 MCP tools are tested systematically
-2. JSON serialization works for all PostgreSQL data types
-3. Real-world scenarios are covered (actual tables, actual data)
-4. Regressions are caught immediately
-5. Test reports show exactly what works and what doesn't
+**Key features:**
+- Tests actual MCP protocol messages (JSON-RPC)
+- Validates tool registration based on database capabilities
+- Tests input validation via JSON schemas
+- Catches protocol-level errors (serialization, tool routing, error handling)
+
+### 2. Component Testing (`test_components.py`)
+Tests individual database operation components directly without MCP protocol overhead.
+Validates business logic and database interaction.
+
+**Key features:**
+- Fast execution (no protocol overhead)
+- Direct testing of core logic
+- Easy debugging
+- Comprehensive data type coverage
 
 ### Test Files
 
-- **`test_mcp_tools.py`** - Comprehensive tests for all 10 MCP tool functions
+- **`test_mcp_server.py`** - MCP protocol-level tests (NEW)
+- **`test_components.py`** - Component-level tests (renamed from test_mcp_tools.py)
 - **`test_utils.py`** - Testing utilities, report generation, helpers
 - **`run_mcp_tests.py`** - Orchestration script for running tests and generating reports
 
-### Quick Start - MCP Tools Tests
+### Quick Start
 
 ```bash
-# Run all MCP tool tests with comprehensive reporting
+# Run MCP protocol-level tests
+pytest tests/test_mcp_server.py -v
+
+# Run component-level tests
+pytest tests/test_components.py -v
+
+# Run all tests with comprehensive reporting
 python tests/run_mcp_tests.py
 
 # Run PostgreSQL tests only

@@ -352,7 +352,7 @@ class DatabaseMCPServer:
         assert self.inspector is not None
 
         schemas = await self.inspector.get_schemas()
-        schemas_data = [s.model_dump() for s in schemas]
+        schemas_data = [s.model_dump(mode='json') for s in schemas]
 
         response = json.dumps(schemas_data, indent=2)
         return [
@@ -370,7 +370,7 @@ class DatabaseMCPServer:
         include_views = arguments.get("include_views", True)
 
         tables = await self.inspector.get_tables(schema, include_views)
-        tables_data = [t.model_dump() for t in tables]
+        tables_data = [t.model_dump(mode='json') for t in tables]
 
         response = json.dumps(tables_data, indent=2)
         return [
@@ -446,7 +446,7 @@ class DatabaseMCPServer:
         schema = arguments.get("schema")
 
         relationships = await self.inspector.get_relationships(table, schema)
-        relationships_data = [r.model_dump() for r in relationships]
+        relationships_data = [r.model_dump(mode='json') for r in relationships]
 
         response = json.dumps(relationships_data, indent=2)
         return [

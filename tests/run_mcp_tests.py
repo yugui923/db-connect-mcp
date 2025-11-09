@@ -78,7 +78,8 @@ class MCPTestRunner:
 
         # Build pytest args
         pytest_args = [
-            "tests/test_mcp_tools.py",
+            "tests/test_components.py",
+            "tests/test_mcp_server.py",
             "-v",  # Verbose
             "--tb=short",  # Short traceback
             "--color=yes",  # Colored output
