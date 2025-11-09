@@ -342,4 +342,13 @@ class MetadataInspector:
         }
 
         dialect = self.connection.dialect
-        return schema in system_schemas.get(dialect, set())
+
+        # Check exact matches first
+        if schema in system_schemas.get(dialect, set()):
+            return True
+
+        # For PostgreSQL, also filter TimescaleDB internal schemas
+        if dialect == "postgresql" and schema.startswith("_timescaledb"):
+            return True
+
+        return False

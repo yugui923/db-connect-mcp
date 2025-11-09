@@ -54,7 +54,7 @@ uv run ruff format .
 uv run ruff check .
 
 # Type checking
-uv run pyright src/
+npx pyright
 ```
 
 ## Architecture

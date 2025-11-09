@@ -108,8 +108,12 @@ class MCPProtocolHelper:
             return await handler(arguments)
 
         # Create in-memory streams for testing
-        server_to_client_send, server_to_client_recv = anyio.create_memory_object_stream()
-        client_to_server_send, client_to_server_recv = anyio.create_memory_object_stream()
+        server_to_client_send, server_to_client_recv = (
+            anyio.create_memory_object_stream()
+        )
+        client_to_server_send, client_to_server_recv = (
+            anyio.create_memory_object_stream()
+        )
 
         # Create client session
         client = ClientSession(
@@ -156,7 +160,7 @@ class MCPProtocolHelper:
         text = content[0].text
 
         # If it looks like an error message (not JSON), raise a clear error
-        if not text.strip().startswith(('{', '[')):
+        if not text.strip().startswith(("{", "[")):
             raise ValueError(f"Response is not JSON (likely an error): {text}")
 
         return json.loads(text)
@@ -177,10 +181,15 @@ class MCPProtocolHelper:
         """
         # Check for error responses
         if response.isError:
-            error_text = str(response.content[0].text if response.content else "Unknown error")
+            error_text = str(
+                response.content[0].text if response.content else "Unknown error"
+            )
 
             # Skip test on connection errors (network, DNS, etc.)
-            if any(err in error_text.lower() for err in ["errno", "connection", "resolution", "refused"]):
+            if any(
+                err in error_text.lower()
+                for err in ["errno", "connection", "resolution", "refused"]
+            ):
                 pytest.skip(f"Database connection error: {error_text}")
 
             # For other errors, fail the test
@@ -225,7 +234,7 @@ class TestMCPServerLifecycle:
 
         # Connection should be disposed
         with pytest.raises(Exception):
-            async with server.connection.get_connection() as conn:
+            async with server.connection.get_connection():
                 pass
 
 
@@ -235,7 +244,9 @@ class TestMCPToolRegistration:
     @pytest.mark.asyncio
     async def test_list_tools_basic(self, pg_config: DatabaseConfig):
         """Test that basic tools are always registered."""
-        server, client = await MCPProtocolHelper.create_test_server_and_client(pg_config)
+        server, client = await MCPProtocolHelper.create_test_server_and_client(
+            pg_config
+        )
 
         try:
             # Get tools via protocol
@@ -257,7 +268,9 @@ class TestMCPToolRegistration:
     @pytest.mark.asyncio
     async def test_list_tools_conditional_postgresql(self, pg_config: DatabaseConfig):
         """Test PostgreSQL-specific tools are registered."""
-        server, client = await MCPProtocolHelper.create_test_server_and_client(pg_config)
+        server, client = await MCPProtocolHelper.create_test_server_and_client(
+            pg_config
+        )
 
         try:
             tools_response = await client.list_tools()
@@ -276,7 +289,9 @@ class TestMCPToolRegistration:
     @pytest.mark.asyncio
     async def test_tool_input_schemas(self, pg_config: DatabaseConfig):
         """Test that all tools have valid input schemas."""
-        server, client = await MCPProtocolHelper.create_test_server_and_client(pg_config)
+        server, client = await MCPProtocolHelper.create_test_server_and_client(
+            pg_config
+        )
 
         try:
             tools_response = await client.list_tools()
@@ -309,7 +324,9 @@ class TestMCPToolCalls:
     @pytest.mark.asyncio
     async def test_get_database_info_protocol(self, pg_config: DatabaseConfig):
         """Test get_database_info via MCP protocol."""
-        server, client = await MCPProtocolHelper.create_test_server_and_client(pg_config)
+        server, client = await MCPProtocolHelper.create_test_server_and_client(
+            pg_config
+        )
 
         try:
             response = await client.call_tool("get_database_info", arguments={})
@@ -328,7 +345,9 @@ class TestMCPToolCalls:
     @pytest.mark.asyncio
     async def test_list_schemas_protocol(self, pg_config: DatabaseConfig):
         """Test list_schemas via MCP protocol."""
-        server, client = await MCPProtocolHelper.create_test_server_and_client(pg_config)
+        server, client = await MCPProtocolHelper.create_test_server_and_client(
+            pg_config
+        )
 
         try:
             response = await client.call_tool("list_schemas", arguments={})
@@ -349,7 +368,9 @@ class TestMCPToolCalls:
     @pytest.mark.asyncio
     async def test_execute_query_protocol(self, pg_config: DatabaseConfig):
         """Test execute_query via MCP protocol."""
-        server, client = await MCPProtocolHelper.create_test_server_and_client(pg_config)
+        server, client = await MCPProtocolHelper.create_test_server_and_client(
+            pg_config
+        )
 
         try:
             response = await client.call_tool(
@@ -379,7 +400,9 @@ class TestMCPErrorHandling:
     @pytest.mark.asyncio
     async def test_invalid_tool_name(self, pg_config: DatabaseConfig):
         """Test calling a non-existent tool."""
-        server, client = await MCPProtocolHelper.create_test_server_and_client(pg_config)
+        server, client = await MCPProtocolHelper.create_test_server_and_client(
+            pg_config
+        )
 
         try:
             response = await client.call_tool("non_existent_tool", arguments={})
@@ -395,7 +418,9 @@ class TestMCPErrorHandling:
     @pytest.mark.asyncio
     async def test_invalid_query_readonly_enforcement(self, pg_config: DatabaseConfig):
         """Test that write queries are rejected."""
-        server, client = await MCPProtocolHelper.create_test_server_and_client(pg_config)
+        server, client = await MCPProtocolHelper.create_test_server_and_client(
+            pg_config
+        )
 
         try:
             response = await client.call_tool(
@@ -405,8 +430,14 @@ class TestMCPErrorHandling:
 
             # MCP returns error response for invalid queries
             assert response.isError
-            error_text = str(response.content[0].text if response.content else "").lower()
-            assert "read-only" in error_text or "not allowed" in error_text or "drop" in error_text
+            error_text = str(
+                response.content[0].text if response.content else ""
+            ).lower()
+            assert (
+                "read-only" in error_text
+                or "not allowed" in error_text
+                or "drop" in error_text
+            )
 
         finally:
             await server.cleanup()
@@ -414,7 +445,9 @@ class TestMCPErrorHandling:
     @pytest.mark.asyncio
     async def test_tool_call_missing_required_argument(self, pg_config: DatabaseConfig):
         """Test that missing required arguments return proper errors."""
-        server, client = await MCPProtocolHelper.create_test_server_and_client(pg_config)
+        server, client = await MCPProtocolHelper.create_test_server_and_client(
+            pg_config
+        )
 
         try:
             # describe_table requires 'table' argument
@@ -433,7 +466,9 @@ class TestMCPDataSerialization:
     @pytest.mark.asyncio
     async def test_timestamp_serialization(self, pg_config: DatabaseConfig):
         """Test that timestamp data serializes correctly via MCP protocol."""
-        server, client = await MCPProtocolHelper.create_test_server_and_client(pg_config)
+        server, client = await MCPProtocolHelper.create_test_server_and_client(
+            pg_config
+        )
 
         try:
             response = await client.call_tool(
@@ -460,7 +495,9 @@ class TestMCPDataSerialization:
     @pytest.mark.asyncio
     async def test_special_types_serialization(self, pg_config: DatabaseConfig):
         """Test PostgreSQL special types serialize via MCP protocol."""
-        server, client = await MCPProtocolHelper.create_test_server_and_client(pg_config)
+        server, client = await MCPProtocolHelper.create_test_server_and_client(
+            pg_config
+        )
 
         try:
             response = await client.call_tool(
@@ -485,7 +522,9 @@ class TestMCPDataSerialization:
     @pytest.mark.asyncio
     async def test_sample_data_protocol(self, pg_config: DatabaseConfig):
         """Test sample_data via MCP protocol with JSON serialization."""
-        server, client = await MCPProtocolHelper.create_test_server_and_client(pg_config)
+        server, client = await MCPProtocolHelper.create_test_server_and_client(
+            pg_config
+        )
 
         try:
             # First get a table to sample from

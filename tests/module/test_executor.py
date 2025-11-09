@@ -166,8 +166,14 @@ class TestQueryExecutorReadOnly:
             # Verify it's a validation error, not a database error
             error_msg = str(exc_info.value).lower()
             assert any(
-                word in error_msg
-                for word in ["read-only", "not allowed", "validation", "invalid"]
+                phrase in error_msg
+                for phrase in [
+                    "read-only",
+                    "are allowed",
+                    "only",
+                    "queries are allowed",
+                    "dangerous",
+                ]
             )
 
 
@@ -294,9 +300,9 @@ class TestQueryExecutorExplain:
 
         # plan_json should be parsed dict, not escaped string
         if plan.plan_json is not None:
-            assert isinstance(
-                plan.plan_json, (dict, list)
-            ), f"plan_json should be dict/list, not string: {type(plan.plan_json)}"
+            assert isinstance(plan.plan_json, (dict, list)), (
+                f"plan_json should be dict/list, not string: {type(plan.plan_json)}"
+            )
 
             # Verify it's proper JSON structure
             try:

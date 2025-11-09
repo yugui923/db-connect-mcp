@@ -72,9 +72,7 @@ class TestClickHouseConnection:
         except AttributeError as e:
             # Known issue with asynch driver compatibility
             if "asynch" in str(e) and "connect" in str(e):
-                pytest.skip(
-                    f"Known ClickHouse asynch driver compatibility issue: {e}"
-                )
+                pytest.skip(f"Known ClickHouse asynch driver compatibility issue: {e}")
             else:
                 raise
 

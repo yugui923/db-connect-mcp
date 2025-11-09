@@ -141,7 +141,32 @@ class PostgresAdapter(BaseAdapter):
         """Get comprehensive PostgreSQL column statistics."""
         table_ref = self._build_table_reference(table_name, schema)
 
-        # First, get the column data type to determine what statistics to compute
+        # First, verify the column exists
+        schema_name = schema or "public"
+        column_check_query = text("""
+            SELECT column_name, data_type
+            FROM information_schema.columns
+            WHERE table_schema = :schema_name
+            AND table_name = :table_name
+            AND column_name = :column_name
+        """)
+
+        check_result = await conn.execute(
+            column_check_query,
+            {
+                "schema_name": schema_name,
+                "table_name": table_name,
+                "column_name": column_name,
+            },
+        )
+        column_row = check_result.fetchone()
+
+        if not column_row:
+            raise ValueError(
+                f"Column '{column_name}' does not exist in table '{schema_name}.{table_name}'"
+            )
+
+        # Get the column data type to determine what statistics to compute
         type_query = text(f"""
             SELECT pg_typeof("{column_name}")::text as data_type
             FROM {table_ref}
@@ -152,9 +177,11 @@ class PostgresAdapter(BaseAdapter):
         try:
             type_result = await conn.execute(type_query)
             type_row = type_result.fetchone()
-            data_type = type_row[0] if type_row else "unknown"
+            data_type = (
+                type_row[0] if type_row else column_row[1]
+            )  # Use info schema type as fallback
         except Exception:
-            data_type = "unknown"
+            data_type = column_row[1]  # Use info schema type as fallback
 
         # Determine if this is a numeric type
         numeric_types = {

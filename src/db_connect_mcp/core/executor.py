@@ -31,6 +31,11 @@ def json_default(obj: Any) -> Any:
         return obj.isoformat()
     elif isinstance(obj, datetime.timedelta):
         return obj.total_seconds()
+    elif isinstance(obj, bytes):
+        # Convert bytes to base64 string for JSON serialization
+        import base64
+
+        return base64.b64encode(obj).decode("utf-8")
     # Fallback to string representation
     return str(obj)
 
@@ -90,8 +95,10 @@ class QueryExecutor:
             columns = list(result.keys())
             rows = [dict(zip(columns, row)) for row in rows_data]
 
-            # Pre-process rows to handle timezone-aware datetimes
-            # orjson doesn't support timezone-aware datetimes even with a default handler
+            # Pre-process rows to handle timezone-aware datetimes and bytes
+            # orjson doesn't support timezone-aware datetimes or bytes even with a default handler
+            import base64
+
             processed_rows = []
             for row in rows:
                 processed_row = {}
@@ -114,6 +121,9 @@ class QueryExecutor:
                     elif isinstance(value, datetime.date):
                         # datetime.date doesn't have tzinfo, let orjson handle it
                         processed_row[key] = value
+                    elif isinstance(value, bytes):
+                        # Convert bytes to base64 string
+                        processed_row[key] = base64.b64encode(value).decode("utf-8")
                     else:
                         processed_row[key] = value
                 processed_rows.append(processed_row)

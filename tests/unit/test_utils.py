@@ -8,8 +8,12 @@ from typing import Any, Optional
 import pytest
 
 
-class TestReporter:
-    """Generate comprehensive test reports."""
+class ReportGenerator:
+    """Generate comprehensive test reports.
+
+    Note: This class is not a pytest test class despite the utility name.
+    It's a helper for generating test reports and documentation.
+    """
 
     def __init__(self, output_dir: str = "test_reports"):
         self.output_dir = Path(output_dir)

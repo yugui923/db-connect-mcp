@@ -29,7 +29,9 @@ class TestDatabaseExplorationWorkflow:
     @pytest.mark.asyncio
     async def test_full_workflow_explore_database(self, pg_config: DatabaseConfig):
         """Test a complete workflow: get info -> list schemas -> list tables -> describe table."""
-        server, client = await MCPProtocolHelper.create_test_server_and_client(pg_config)
+        server, client = await MCPProtocolHelper.create_test_server_and_client(
+            pg_config
+        )
 
         try:
             # 1. Get database info
@@ -71,7 +73,9 @@ class TestDatabaseExplorationWorkflow:
     @pytest.mark.asyncio
     async def test_workflow_discover_relationships(self, pg_config: DatabaseConfig):
         """Test workflow for discovering table relationships."""
-        server, client = await MCPProtocolHelper.create_test_server_and_client(pg_config)
+        server, client = await MCPProtocolHelper.create_test_server_and_client(
+            pg_config
+        )
 
         try:
             # 1. List tables
@@ -84,7 +88,6 @@ class TestDatabaseExplorationWorkflow:
                 pytest.skip("No tables available for relationship testing")
 
             # 2. Check relationships for each table
-            found_relationship = False
             for table in tables[:5]:  # Check first 5 tables
                 table_name = table["name"]
 
@@ -102,7 +105,6 @@ class TestDatabaseExplorationWorkflow:
                     assert "to_table" in rel
                     assert "from_columns" in rel
                     assert "to_columns" in rel
-                    found_relationship = True
                     break
 
             # Note: Not all databases have relationships, so we just verify the workflow works
@@ -117,13 +119,18 @@ class TestQueryAndAnalysisWorkflow:
     @pytest.mark.asyncio
     async def test_full_workflow_query_and_analyze(self, pg_config: DatabaseConfig):
         """Test workflow: query data -> analyze results -> explain plan."""
-        server, client = await MCPProtocolHelper.create_test_server_and_client(pg_config)
+        server, client = await MCPProtocolHelper.create_test_server_and_client(
+            pg_config
+        )
 
         try:
             # 1. Execute a query
             query_response = await client.call_tool(
                 "execute_query",
-                arguments={"query": "SELECT 1 as num, 'text' as txt", "limit": 10},
+                arguments={
+                    "query": "SELECT 1 as num, 'text' as txt",
+                    "limit": 10,
+                },
             )
             result = MCPProtocolHelper.check_and_parse_response(query_response)
 
@@ -147,7 +154,9 @@ class TestQueryAndAnalysisWorkflow:
     @pytest.mark.asyncio
     async def test_workflow_sample_and_analyze_column(self, pg_config: DatabaseConfig):
         """Test workflow: sample data -> analyze column statistics."""
-        server, client = await MCPProtocolHelper.create_test_server_and_client(pg_config)
+        server, client = await MCPProtocolHelper.create_test_server_and_client(
+            pg_config
+        )
 
         try:
             # 1. Get tables
@@ -203,7 +212,9 @@ class TestDatabaseProfilingWorkflow:
     @pytest.mark.asyncio
     async def test_workflow_profile_database(self, pg_config: DatabaseConfig):
         """Test workflow: profile database -> identify large tables -> analyze them."""
-        server, client = await MCPProtocolHelper.create_test_server_and_client(pg_config)
+        server, client = await MCPProtocolHelper.create_test_server_and_client(
+            pg_config
+        )
 
         try:
             # Check if profiling is supported
@@ -211,9 +222,7 @@ class TestDatabaseProfilingWorkflow:
                 pytest.skip("Database doesn't support profiling")
 
             # 1. Profile the entire database
-            profile_response = await client.call_tool(
-                "profile_database", arguments={}
-            )
+            profile_response = await client.call_tool("profile_database", arguments={})
             profile = MCPProtocolHelper.check_and_parse_response(profile_response)
 
             # Validate profile structure
@@ -252,7 +261,9 @@ class TestErrorRecoveryWorkflow:
     @pytest.mark.asyncio
     async def test_workflow_invalid_query_recovery(self, pg_config: DatabaseConfig):
         """Test that invalid query doesn't break subsequent queries."""
-        server, client = await MCPProtocolHelper.create_test_server_and_client(pg_config)
+        server, client = await MCPProtocolHelper.create_test_server_and_client(
+            pg_config
+        )
 
         try:
             # 1. Try an invalid query (write operation)
@@ -276,21 +287,24 @@ class TestErrorRecoveryWorkflow:
     @pytest.mark.asyncio
     async def test_workflow_nonexistent_table_recovery(self, pg_config: DatabaseConfig):
         """Test that querying nonexistent table doesn't break server."""
-        server, client = await MCPProtocolHelper.create_test_server_and_client(pg_config)
+        server, client = await MCPProtocolHelper.create_test_server_and_client(
+            pg_config
+        )
 
         try:
             # 1. Try to describe nonexistent table
             invalid_response = await client.call_tool(
                 "describe_table",
-                arguments={"table": "nonexistent_table_xyz", "schema": "public"},
+                arguments={
+                    "table": "nonexistent_table_xyz",
+                    "schema": "public",
+                },
             )
             # Should return error
             assert invalid_response.isError
 
             # 2. Verify server still works
-            valid_response = await client.call_tool(
-                "list_schemas", arguments={}
-            )
+            valid_response = await client.call_tool("list_schemas", arguments={})
             schemas = MCPProtocolHelper.check_and_parse_response(valid_response)
             assert len(schemas) > 0
 
@@ -304,7 +318,9 @@ class TestComplexQueryWorkflow:
     @pytest.mark.asyncio
     async def test_workflow_complex_query_with_joins(self, pg_config: DatabaseConfig):
         """Test complex query workflow with CTEs and expressions."""
-        server, client = await MCPProtocolHelper.create_test_server_and_client(pg_config)
+        server, client = await MCPProtocolHelper.create_test_server_and_client(
+            pg_config
+        )
 
         try:
             # 1. Execute a CTE query
@@ -342,9 +358,13 @@ class TestComplexQueryWorkflow:
             await server.cleanup()
 
     @pytest.mark.asyncio
-    async def test_workflow_query_with_various_data_types(self, pg_config: DatabaseConfig):
+    async def test_workflow_query_with_various_data_types(
+        self, pg_config: DatabaseConfig
+    ):
         """Test query workflow with various PostgreSQL data types."""
-        server, client = await MCPProtocolHelper.create_test_server_and_client(pg_config)
+        server, client = await MCPProtocolHelper.create_test_server_and_client(
+            pg_config
+        )
 
         try:
             # Query with various data types

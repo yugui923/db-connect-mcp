@@ -11,7 +11,11 @@ import pytest
 from sqlalchemy import text
 
 from db_connect_mcp.adapters.base import BaseAdapter
-from db_connect_mcp.core import DatabaseConnection, MetadataInspector, StatisticsAnalyzer
+from db_connect_mcp.core import (
+    DatabaseConnection,
+    MetadataInspector,
+    StatisticsAnalyzer,
+)
 from db_connect_mcp.models.config import DatabaseConfig
 
 # Mark all tests in this module as PostgreSQL tests
