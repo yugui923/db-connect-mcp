@@ -469,11 +469,11 @@ class PostgresAdapter(BaseAdapter):
         self, conn: AsyncConnection, database_name: str
     ) -> DatabaseProfile:
         """Generate comprehensive PostgreSQL database profile."""
-        # Get database version
-        version_query = text("SELECT version()")
+        # Get database version (extract just the version number)
+        version_query = text("SHOW server_version")
         version_result = await conn.execute(version_query)
         version_row = version_result.fetchone()
-        version = version_row[0] if version_row else "Unknown"
+        version = f"PostgreSQL {version_row[0]}" if version_row else "Unknown"
 
         # Get total database size
         size_query = text("SELECT pg_database_size(current_database())::bigint")
@@ -499,10 +499,13 @@ class PostgresAdapter(BaseAdapter):
         schema_result = await conn.execute(schema_query)
         schema_rows = schema_result.fetchall()
 
+        # Calculate totals from all schemas
+        total_tables = sum(int(row[1]) if row[1] else 0 for row in schema_rows)
+        total_views = sum(int(row[2]) if row[2] else 0 for row in schema_rows)
+
+        # Limit to top 10 schemas by size for conciseness
         schemas = []
-        total_tables = 0
-        total_views = 0
-        for row in schema_rows:
+        for row in schema_rows[:10]:
             schema_profile = SchemaProfile(
                 name=row[0],
                 table_count=int(row[1]) if row[1] else 0,
@@ -511,10 +514,8 @@ class PostgresAdapter(BaseAdapter):
                 total_rows=int(row[4]) if row[4] else 0,
             )
             schemas.append(schema_profile)
-            total_tables += schema_profile.table_count
-            total_views += schema_profile.view_count or 0
 
-        # Get largest tables (top 20)
+        # Get largest tables (top 5 for conciseness)
         tables_query = text("""
             SELECT
                 n.nspname as schema_name,
@@ -533,7 +534,7 @@ class PostgresAdapter(BaseAdapter):
             WHERE c.relkind IN ('r', 'v', 'm')
               AND n.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
             ORDER BY total_size DESC
-            LIMIT 20
+            LIMIT 5
         """)
 
         tables_result = await conn.execute(tables_query)
