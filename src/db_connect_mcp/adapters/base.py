@@ -7,7 +7,6 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from db_connect_mcp.models.capabilities import DatabaseCapabilities
 from db_connect_mcp.models.database import SchemaInfo
-from db_connect_mcp.models.profile import DatabaseProfile
 from db_connect_mcp.models.statistics import ColumnStats, Distribution
 from db_connect_mcp.models.table import TableInfo
 
@@ -149,22 +148,6 @@ class BaseAdapter(ABC):
 
         Returns:
             Dictionary with parsed plan information
-        """
-        ...
-
-    @abstractmethod
-    async def profile_database(
-        self, conn: ConnectionType, database_name: str
-    ) -> DatabaseProfile:
-        """
-        Generate comprehensive database profiling information.
-
-        Args:
-            conn: Database connection
-            database_name: Name of the database
-
-        Returns:
-            Database profile with statistics
         """
         ...
 

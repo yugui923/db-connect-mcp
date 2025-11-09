@@ -80,9 +80,6 @@ class MCPProtocolHelper:
             if server.adapter.capabilities.explain_plans:
                 tools.append(server._create_explain_query_tool())
 
-            if server.adapter.capabilities.profiling:
-                tools.append(server._create_profile_database_tool())
-
             return tools
 
         @server.server.call_tool()
@@ -98,7 +95,6 @@ class MCPProtocolHelper:
                 "get_table_relationships": server.handle_get_relationships,
                 "analyze_column": server.handle_analyze_column,
                 "explain_query": server.handle_explain_query,
-                "profile_database": server.handle_profile_database,
             }
 
             handler = handlers.get(name)
@@ -281,7 +277,6 @@ class TestMCPToolRegistration:
             assert "get_table_relationships" in tool_names  # foreign_keys
             assert "analyze_column" in tool_names  # advanced_stats
             assert "explain_query" in tool_names  # explain_plans
-            assert "profile_database" in tool_names  # profiling
 
         finally:
             await server.cleanup()

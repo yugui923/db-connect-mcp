@@ -303,9 +303,6 @@ Get foreign key relationships in a schema.
 - Parameters:
   - `schema` (optional): Schema name (default: "public")
 
-### profile_database
-Get a high-level profile of the entire database.
-
 ## Example Usage in Claude
 
 Once configured, you can use the server in Claude:

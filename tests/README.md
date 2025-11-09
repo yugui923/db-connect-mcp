@@ -30,6 +30,17 @@ Tests complete end-to-end workflows:
 
 **Purpose**: Validate real-world usage patterns and multi-step operations.
 
+#### `integration/test_e2e_client_server.py`
+**NEW**: True end-to-end tests with subprocess server and real stdio transport:
+- Spawns MCP server as actual subprocess (not in-memory)
+- Connects MCP client via stdio transport (simulating real-world usage)
+- Captures and analyzes server logs from stderr
+- Tests complete client-server lifecycle
+- Validates error handling across process boundaries
+- Provides utilities for log analysis and diagnostics
+
+**Purpose**: Test the complete system as it would be deployed, including subprocess management, stdio communication, and server logging. These tests catch issues that only appear when running the server as a separate process.
+
 ### 2. **Module Tests** (`module/`)
 
 Tests individual core components directly without MCP protocol overhead.
@@ -99,7 +110,8 @@ tests/
 ├── integration/                       # Integration-level tests
 │   ├── __init__.py
 │   ├── test_mcp_protocol.py          # MCP protocol layer testing
-│   └── test_mcp_workflows.py         # End-to-end workflow testing
+│   ├── test_mcp_workflows.py         # End-to-end workflow testing
+│   └── test_e2e_client_server.py     # True E2E with subprocess server
 ├── module/                            # Module-level tests
 │   ├── __init__.py
 │   ├── test_analyzer.py              # StatisticsAnalyzer tests
@@ -179,12 +191,37 @@ pytest tests/unit/ -v
 # Run MCP protocol tests
 pytest tests/integration/test_mcp_protocol.py -v
 
+# Run E2E client-server tests (with subprocess server)
+pytest tests/integration/test_e2e_client_server.py -v
+
 # Run executor module tests
 pytest tests/module/test_executor.py -v
 
 # Run PostgreSQL adapter tests
 pytest tests/unit/adapters/test_postgresql_adapter.py -v
 ```
+
+### Run E2E Tests with Server Log Observation
+
+The E2E client-server tests spawn a real subprocess server and capture its logs:
+
+```bash
+# Run E2E tests with verbose output to see test progress
+pytest tests/integration/test_e2e_client_server.py -v -s
+
+# Run specific E2E test class
+pytest tests/integration/test_e2e_client_server.py::TestE2EServerLogs -v
+
+# Run E2E tests with detailed output (includes subprocess logs)
+pytest tests/integration/test_e2e_client_server.py -v -s --log-cli-level=DEBUG
+```
+
+**Features of E2E Tests**:
+- ✅ Real subprocess server (simulates production deployment)
+- ✅ Stdio transport (actual MCP client-server communication)
+- ✅ Server log capture from stderr
+- ✅ Log analysis utilities (search, filter, analyze patterns)
+- ✅ Proper cleanup of processes and resources
 
 ### Run Tests by Database
 

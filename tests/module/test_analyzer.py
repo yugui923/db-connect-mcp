@@ -128,47 +128,6 @@ class TestStatisticsAnalyzerText:
 class TestStatisticsAnalyzerProfiling:
     """Test database profiling functionality."""
 
-    @pytest.mark.asyncio
-    async def test_profile_database(
-        self, pg_connection: DatabaseConnection, pg_adapter: BaseAdapter
-    ):
-        """Test profile_database returns comprehensive stats."""
-        if not pg_adapter.capabilities.profiling:
-            pytest.skip("Database doesn't support profiling")
-
-        # Extract database name
-        database_name = "test_db"
-
-        async with pg_connection.get_connection() as conn:
-            profile = await pg_adapter.profile_database(conn, database_name)
-
-        # Validate profile structure
-        assert profile.database_name == database_name
-        assert profile.version is not None
-        assert len(profile.version) > 0
-
-        # Should have schema count
-        assert profile.total_schemas >= 0
-        assert profile.total_tables >= 0
-
-        # Should have schema breakdown
-        assert len(profile.schemas) >= 0
-
-        # Should have largest tables
-        assert isinstance(profile.largest_tables, list)
-
-        # If we have data, validate structure
-        if profile.largest_tables:
-            table = profile.largest_tables[0]
-            assert table.name is not None
-            assert table.size_bytes is not None
-
-        # Verify JSON serialization
-        try:
-            json.dumps(profile.model_dump())
-        except TypeError as e:
-            pytest.fail(f"Profile not JSON-safe: {e}")
-
 
 class TestStatisticsAnalyzerEdgeCases:
     """Test edge cases and error handling."""

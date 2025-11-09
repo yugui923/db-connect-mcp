@@ -144,7 +144,6 @@ Tools are registered in `src/server.py` and include:
 - `sample_data`: Preview table data
 - `execute_query`: Run read-only SQL
 - `get_table_relationships`: Foreign key relationships
-- `profile_database`: High-level database metrics
 
 Tools are conditionally registered based on database capabilities from the adapter.
 
