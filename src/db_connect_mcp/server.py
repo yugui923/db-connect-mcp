@@ -5,6 +5,7 @@ capabilities for PostgreSQL, MySQL, and ClickHouse databases.
 """
 
 import asyncio
+import base64
 import json
 import logging
 import os
@@ -30,61 +31,54 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+
+def json_serializer(obj: Any) -> Any:
+    """Custom JSON serializer that handles bytes and other non-standard types."""
+    if isinstance(obj, bytes):
+        return base64.b64encode(obj).decode("utf-8")
+    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
+
+
 # Response size limits (in characters) for MCP tool responses
 # These limits prevent context window exhaustion while preserving useful information
-MAX_RESPONSE_DATABASE_INFO = 2000  # Basic database metadata
-MAX_RESPONSE_PROFILE_DATABASE = 2000  # High-level database overview
-MAX_RESPONSE_LIST_SCHEMAS = 3000  # Schema listings
-MAX_RESPONSE_GET_RELATIONSHIPS = 3000  # Foreign key relationships
-MAX_RESPONSE_SAMPLE_DATA = 5000  # Table data preview
-MAX_RESPONSE_LIST_TABLES = 5000  # Table listings with metadata
-MAX_RESPONSE_ANALYZE_COLUMN = 5000  # Column statistics
-MAX_RESPONSE_DESCRIBE_TABLE = 8000  # Detailed table structure
-MAX_RESPONSE_EXPLAIN_QUERY = 8000  # Query execution plans
-MAX_RESPONSE_EXECUTE_QUERY = 10000  # Query results (up to 1000 rows)
+# Set high enough to avoid truncation in most cases - can be adjusted based on needs
+MAX_RESPONSE_DATABASE_INFO = 50000  # Basic database metadata
+MAX_RESPONSE_PROFILE_DATABASE = 100000  # High-level database overview
+MAX_RESPONSE_LIST_SCHEMAS = 100000  # Schema listings
+MAX_RESPONSE_GET_RELATIONSHIPS = 100000  # Foreign key relationships
+MAX_RESPONSE_SAMPLE_DATA = 100000  # Table data preview
+MAX_RESPONSE_LIST_TABLES = 100000  # Table listings with metadata
+MAX_RESPONSE_ANALYZE_COLUMN = 50000  # Column statistics
+MAX_RESPONSE_DESCRIBE_TABLE = 100000  # Detailed table structure
+MAX_RESPONSE_EXPLAIN_QUERY = 100000  # Query execution plans
+MAX_RESPONSE_EXECUTE_QUERY = 100000  # Query results (up to 1000 rows)
 
 
 def truncate_json_response(data: str, max_length: int) -> str:
     """
-    Truncate JSON response to a maximum length while preserving JSON structure.
+    Return JSON response with size limit check.
 
     Args:
-        data: JSON string to truncate
+        data: JSON string to return
         max_length: Maximum length in characters
 
     Returns:
-        Truncated JSON string with truncation notice if needed
+        JSON string (original or error message if too large)
     """
     if len(data) <= max_length:
         return data
 
-    # Calculate space for truncation message
-    truncation_msg = f"\n\n... [Response truncated: {len(data)} chars -> {max_length} chars to preserve context window]"
-    available_length = max_length - len(truncation_msg)
-
-    if available_length < 100:
-        # If we have very little space, just return a simple message
-        return json.dumps(
-            {
-                "error": "Response too large",
-                "original_size": len(data),
-                "limit": max_length,
-                "message": "Response exceeds size limit. Please use more specific filters or query directly.",
-            },
-            indent=2,
-        )
-
-    # Truncate the data and add message
-    truncated = data[:available_length]
-
-    # Try to truncate at a reasonable point (end of a line)
-    last_newline = truncated.rfind("\n")
-    if (
-        last_newline > available_length * 0.8
-    ):  # Only use newline if it's in the last 20%
-        truncated = truncated[:last_newline]
-
-    return truncated + truncation_msg
+    # If response is too large, return an error message instead
+    # This ensures we always return valid JSON
+    return json.dumps(
+        {
+            "error": "Response too large",
+            "original_size": len(data),
+            "limit": max_length,
+            "message": "Response exceeds size limit. Please use more specific filters or query parameters to reduce data size.",
+        },
+        indent=2,
+    )
 
 
 class DatabaseMCPServer:
@@ -339,7 +333,7 @@ class DatabaseMCPServer:
             read_only=self.config.read_only,
         )
 
-        response = json.dumps(db_info.model_dump(), indent=2)
+        response = json.dumps(db_info.model_dump(), indent=2, default=json_serializer)
         return [
             TextContent(
                 type="text",
@@ -352,9 +346,9 @@ class DatabaseMCPServer:
         assert self.inspector is not None
 
         schemas = await self.inspector.get_schemas()
-        schemas_data = [s.model_dump(mode='json') for s in schemas]
+        schemas_data = [s.model_dump(mode="json") for s in schemas]
 
-        response = json.dumps(schemas_data, indent=2)
+        response = json.dumps(schemas_data, indent=2, default=json_serializer)
         return [
             TextContent(
                 type="text",
@@ -370,9 +364,9 @@ class DatabaseMCPServer:
         include_views = arguments.get("include_views", True)
 
         tables = await self.inspector.get_tables(schema, include_views)
-        tables_data = [t.model_dump(mode='json') for t in tables]
+        tables_data = [t.model_dump(mode="json") for t in tables]
 
-        response = json.dumps(tables_data, indent=2)
+        response = json.dumps(tables_data, indent=2, default=json_serializer)
         return [
             TextContent(
                 type="text",
@@ -391,7 +385,9 @@ class DatabaseMCPServer:
 
         table_info = await self.inspector.describe_table(table, schema)
 
-        response = json.dumps(table_info.model_dump(), indent=2)
+        response = json.dumps(
+            table_info.model_dump(), indent=2, default=json_serializer
+        )
         return [
             TextContent(
                 type="text",
@@ -410,7 +406,7 @@ class DatabaseMCPServer:
 
         result = await self.executor.execute_query(query, limit=limit)
 
-        response = json.dumps(result.model_dump(), indent=2)
+        response = json.dumps(result.model_dump(), indent=2, default=json_serializer)
         return [
             TextContent(
                 type="text",
@@ -428,7 +424,7 @@ class DatabaseMCPServer:
 
         result = await self.executor.sample_data(table, schema, limit)
 
-        response = json.dumps(result.model_dump(), indent=2)
+        response = json.dumps(result.model_dump(), indent=2, default=json_serializer)
         return [
             TextContent(
                 type="text",
@@ -446,9 +442,9 @@ class DatabaseMCPServer:
         schema = arguments.get("schema")
 
         relationships = await self.inspector.get_relationships(table, schema)
-        relationships_data = [r.model_dump(mode='json') for r in relationships]
+        relationships_data = [r.model_dump(mode="json") for r in relationships]
 
-        response = json.dumps(relationships_data, indent=2)
+        response = json.dumps(relationships_data, indent=2, default=json_serializer)
         return [
             TextContent(
                 type="text",
@@ -468,7 +464,7 @@ class DatabaseMCPServer:
 
         stats = await self.analyzer.analyze_column(table, column, schema)
 
-        response = json.dumps(stats.model_dump(), indent=2)
+        response = json.dumps(stats.model_dump(), indent=2, default=json_serializer)
         return [
             TextContent(
                 type="text",
@@ -487,7 +483,7 @@ class DatabaseMCPServer:
 
         plan = await self.executor.explain_query(query, analyze)
 
-        response = json.dumps(plan.model_dump(), indent=2)
+        response = json.dumps(plan.model_dump(), indent=2, default=json_serializer)
         return [
             TextContent(
                 type="text",
@@ -508,7 +504,9 @@ class DatabaseMCPServer:
             # Use adapter to generate database profile
             profile = await self.adapter.profile_database(conn, database_name)
 
-            response = json.dumps(profile.model_dump(), indent=2)
+            response = json.dumps(
+                profile.model_dump(), indent=2, default=json_serializer
+            )
             return [
                 TextContent(
                     type="text",

@@ -1,4 +1,8 @@
-"""Pytest configuration and shared fixtures for database tests"""
+"""Pytest configuration and shared fixtures for database tests.
+
+This conftest.py is at the root of the tests/ directory and provides
+fixtures for all test subdirectories (integration/, module/, unit/).
+"""
 
 import os
 import sys
@@ -32,19 +36,19 @@ if sys.platform == "win32":
 
 @pytest.fixture(scope="session")
 def pg_database_url() -> Optional[str]:
-    """PostgreSQL test database URL from environment"""
+    """PostgreSQL test database URL from environment."""
     return os.getenv("PG_TEST_DATABASE_URL")
 
 
 @pytest.fixture(scope="session")
 def ch_database_url() -> Optional[str]:
-    """ClickHouse test database URL from environment"""
+    """ClickHouse test database URL from environment."""
     return os.getenv("CH_TEST_DATABASE_URL")
 
 
 @pytest.fixture(scope="session")
 def mysql_database_url() -> Optional[str]:
-    """MySQL test database URL from environment"""
+    """MySQL test database URL from environment."""
     return os.getenv("MYSQL_TEST_DATABASE_URL")
 
 
@@ -53,7 +57,7 @@ def mysql_database_url() -> Optional[str]:
 
 @pytest.fixture
 async def pg_config(pg_database_url: Optional[str]) -> DatabaseConfig:
-    """PostgreSQL database configuration"""
+    """PostgreSQL database configuration."""
     if not pg_database_url:
         pytest.skip("PG_TEST_DATABASE_URL not set in environment")
     return DatabaseConfig(url=pg_database_url)
@@ -61,7 +65,7 @@ async def pg_config(pg_database_url: Optional[str]) -> DatabaseConfig:
 
 @pytest.fixture
 async def pg_adapter(pg_config: DatabaseConfig) -> BaseAdapter:
-    """PostgreSQL adapter instance"""
+    """PostgreSQL adapter instance."""
     return create_adapter(pg_config)
 
 
@@ -69,7 +73,7 @@ async def pg_adapter(pg_config: DatabaseConfig) -> BaseAdapter:
 async def pg_connection(
     pg_config: DatabaseConfig,
 ) -> AsyncGenerator[DatabaseConnection, None]:
-    """PostgreSQL database connection with proper cleanup"""
+    """PostgreSQL database connection with proper cleanup."""
     connection = DatabaseConnection(pg_config)
     try:
         await connection.initialize()
@@ -77,7 +81,7 @@ async def pg_connection(
         async with connection.get_connection() as conn:
             await conn.execute(text("SELECT 1"))
     except Exception as e:
-        # Skip test if database connection fails (network, DNS, authentication, etc.)
+        # Skip test if database connection fails
         await connection.dispose()
         pytest.skip(f"PostgreSQL database connection failed: {e}")
     try:
@@ -90,7 +94,7 @@ async def pg_connection(
 async def pg_inspector(
     pg_connection: DatabaseConnection, pg_adapter: BaseAdapter
 ) -> MetadataInspector:
-    """PostgreSQL metadata inspector"""
+    """PostgreSQL metadata inspector."""
     return MetadataInspector(pg_connection, pg_adapter)
 
 
@@ -98,7 +102,7 @@ async def pg_inspector(
 async def pg_analyzer(
     pg_connection: DatabaseConnection, pg_adapter: BaseAdapter
 ) -> StatisticsAnalyzer:
-    """PostgreSQL statistics analyzer"""
+    """PostgreSQL statistics analyzer."""
     return StatisticsAnalyzer(pg_connection, pg_adapter)
 
 
@@ -106,17 +110,13 @@ async def pg_analyzer(
 async def pg_mcp_server(
     pg_config: DatabaseConfig,
 ) -> AsyncGenerator:
-    """PostgreSQL MCP server for protocol-level testing.
-
-    This fixture properly manages the lifecycle of an MCP server for testing.
-    """
+    """PostgreSQL MCP server for protocol-level testing."""
     from db_connect_mcp.server import DatabaseMCPServer
 
     server = DatabaseMCPServer(pg_config)
     try:
         await server.initialize()
     except Exception as e:
-        # Skip test if database connection fails (network, DNS, authentication, etc.)
         pytest.skip(f"MCP server initialization failed: {e}")
 
     try:
@@ -130,7 +130,7 @@ async def pg_mcp_server(
 
 @pytest.fixture
 async def ch_config(ch_database_url: Optional[str]) -> DatabaseConfig:
-    """ClickHouse database configuration"""
+    """ClickHouse database configuration."""
     if not ch_database_url:
         pytest.skip("CH_TEST_DATABASE_URL not set in environment")
     return DatabaseConfig(url=ch_database_url)
@@ -138,7 +138,7 @@ async def ch_config(ch_database_url: Optional[str]) -> DatabaseConfig:
 
 @pytest.fixture
 async def ch_adapter(ch_config: DatabaseConfig) -> BaseAdapter:
-    """ClickHouse adapter instance"""
+    """ClickHouse adapter instance."""
     return create_adapter(ch_config)
 
 
@@ -146,11 +146,11 @@ async def ch_adapter(ch_config: DatabaseConfig) -> BaseAdapter:
 async def ch_connection(
     ch_config: DatabaseConfig,
 ) -> AsyncGenerator[DatabaseConnection, None]:
-    """ClickHouse database connection with proper cleanup"""
+    """ClickHouse database connection with proper cleanup."""
     connection = DatabaseConnection(ch_config)
     try:
         await connection.initialize()
-        # Test actual connectivity (ClickHouse uses sync engine)
+        # Test actual connectivity
         if connection.sync_engine:
             with connection.sync_engine.connect() as conn:
                 conn.execute(text("SELECT 1"))
@@ -158,7 +158,6 @@ async def ch_connection(
             async with connection.get_connection() as conn:
                 await conn.execute(text("SELECT 1"))
     except Exception as e:
-        # Skip test if database connection fails (network, DNS, authentication, etc.)
         await connection.dispose()
         pytest.skip(f"ClickHouse database connection failed: {e}")
     try:
@@ -171,7 +170,7 @@ async def ch_connection(
 async def ch_inspector(
     ch_connection: DatabaseConnection, ch_adapter: BaseAdapter
 ) -> MetadataInspector:
-    """ClickHouse metadata inspector"""
+    """ClickHouse metadata inspector."""
     return MetadataInspector(ch_connection, ch_adapter)
 
 
@@ -179,7 +178,7 @@ async def ch_inspector(
 async def ch_analyzer(
     ch_connection: DatabaseConnection, ch_adapter: BaseAdapter
 ) -> StatisticsAnalyzer:
-    """ClickHouse statistics analyzer"""
+    """ClickHouse statistics analyzer."""
     return StatisticsAnalyzer(ch_connection, ch_adapter)
 
 
@@ -196,7 +195,7 @@ async def ch_analyzer(
 async def db_config(
     request, pg_database_url: Optional[str], ch_database_url: Optional[str]
 ) -> DatabaseConfig:
-    """Parametrized database configuration for all supported databases"""
+    """Parametrized database configuration for all supported databases."""
     db_type = request.param
 
     if db_type == "postgresql":
@@ -218,7 +217,7 @@ async def db_config(
 
 @pytest.fixture
 async def db_adapter(db_config: DatabaseConfig) -> BaseAdapter:
-    """Parametrized adapter for all supported databases"""
+    """Parametrized adapter for all supported databases."""
     return create_adapter(db_config)
 
 
@@ -226,7 +225,7 @@ async def db_adapter(db_config: DatabaseConfig) -> BaseAdapter:
 async def db_connection(
     db_config: DatabaseConfig,
 ) -> AsyncGenerator[DatabaseConnection, None]:
-    """Parametrized database connection for all supported databases"""
+    """Parametrized database connection for all supported databases."""
     connection = DatabaseConnection(db_config)
     try:
         await connection.initialize()
@@ -238,7 +237,6 @@ async def db_connection(
             async with connection.get_connection() as conn:
                 await conn.execute(text("SELECT 1"))
     except Exception as e:
-        # Skip test if database connection fails (network, DNS, authentication, etc.)
         await connection.dispose()
         pytest.skip(f"Database connection failed: {e}")
     try:
@@ -251,7 +249,7 @@ async def db_connection(
 
 
 def pytest_configure(config):
-    """Register custom markers"""
+    """Register custom markers."""
     config.addinivalue_line("markers", "postgresql: PostgreSQL-specific tests")
     config.addinivalue_line("markers", "clickhouse: ClickHouse-specific tests")
     config.addinivalue_line("markers", "mysql: MySQL-specific tests")

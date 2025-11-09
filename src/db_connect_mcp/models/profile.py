@@ -2,7 +2,7 @@
 
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class SchemaProfile(BaseModel):
@@ -19,6 +19,9 @@ class SchemaProfile(BaseModel):
 
 class TableProfile(BaseModel):
     """Table-level statistics for profiling."""
+
+    # Allow 'schema' field name (shadows BaseModel.schema() method)
+    model_config = ConfigDict(protected_namespaces=())
 
     schema: Optional[str] = Field(None, description="Schema name")
     name: str = Field(..., description="Table name")

@@ -4,63 +4,116 @@ This directory contains the comprehensive pytest-based test suite for the db-con
 
 ## Test Structure
 
-The test suite is organized into multiple layers:
+The test suite is organized into three main layers:
 
-### 1. **MCP Protocol-Level Tests** (`test_mcp_server.py`)
-Tests the full MCP server implementation including:
+### 1. **Integration Tests** (`integration/`)
+
+End-to-end tests that test the full MCP server implementation and complete workflows.
+
+#### `integration/test_mcp_protocol.py`
+Tests the MCP protocol layer including:
 - Server initialization and lifecycle
 - MCP tool registration based on database capabilities
 - Tool input validation via JSON schemas
 - Tool calls through the actual MCP protocol using ClientSession
 - Response serialization to MCP TextContent format
 - Error handling at the protocol layer
-- End-to-end workflows (explore database, query and analyze)
 
-**Purpose**: Catch errors that only appear when running the actual MCP server with a real MCP client.
+**Purpose**: Catch errors that only appear when running the actual MCP server with a real MCP client connection.
 
-### 2. **Component-Level Tests** (`test_components.py`)
-Tests the core database operation components directly:
-- `MetadataInspector` - Schema, table, and column metadata
-- `QueryExecutor` - Query execution and sampling
-- `StatisticsAnalyzer` - Column statistics and profiling
+#### `integration/test_mcp_workflows.py`
+Tests complete end-to-end workflows:
+- Multi-step database exploration (get info → list schemas → list tables → describe)
+- Query and analysis workflows
+- Database profiling workflows
+- Error recovery and handling
 
-**Purpose**: Test business logic and database interaction without MCP protocol overhead.
+**Purpose**: Validate real-world usage patterns and multi-step operations.
 
-### 3. **Adapter Tests** (`test_postgresql.py`, `test_clickhouse.py`, `test_mysql.py`)
-Tests database-specific adapter implementations:
+### 2. **Module Tests** (`module/`)
+
+Tests individual core components directly without MCP protocol overhead.
+
+#### `module/test_inspector.py`
+Tests `MetadataInspector` component:
+- Schema listing with metadata
+- Table listing with enriched metadata (row counts, sizes)
+- Table description with columns, indexes, constraints
+- Table relationship discovery (foreign keys)
+- Edge cases and error handling
+
+#### `module/test_executor.py`
+Tests `QueryExecutor` component:
+- Query execution with validation
+- Data sampling from tables
+- Read-only enforcement
+- Query result serialization (all data types)
+- EXPLAIN query functionality
+- Edge cases (empty results, NULL values, syntax errors)
+
+#### `module/test_analyzer.py`
+Tests `StatisticsAnalyzer` component:
+- Column statistics for numeric columns
+- Column statistics for text columns
+- Database profiling
+- Edge cases (non-existent columns, all-NULL columns)
+
+**Purpose**: Test business logic and database interaction without MCP protocol overhead. Fast, focused tests for core functionality.
+
+### 3. **Unit Tests** (`unit/`)
+
+Tests isolated components, utilities, and database adapters.
+
+#### `unit/adapters/`
+Database adapter tests:
+- `test_postgresql_adapter.py` - PostgreSQL-specific implementation
+- `test_clickhouse_adapter.py` - ClickHouse-specific implementation
+
+Tests:
 - Adapter configuration and capabilities
-- Database connections and connection pooling
-- Database-specific SQL query generation
+- Connection management
+- Database-specific SQL generation
 - Metadata enrichment
-- Statistics queries
 
-**Purpose**: Ensure each database adapter works correctly with its specific database.
-
-### 4. **Data Serialization Tests** (`test_serialization.py`)
-Tests JSON serialization of database-specific types:
+#### `unit/test_serialization.py`
+Tests JSON serialization for all database types:
 - Temporal types (TIMESTAMP, DATE, TIME, INTERVAL)
 - Network types (INET, CIDR, MACADDR)
 - Special types (UUID, JSON, JSONB, BYTEA)
-- Geometric types, arrays, etc.
+- Numeric types, geometric types, arrays
+- Edge cases and compatibility
 
 **Purpose**: Prevent JSON serialization errors when returning data to MCP clients.
 
-### 5. **Utility Tests** (`test_utils.py`)
-Tests supporting utilities like test reporters and helpers.
+#### `unit/test_utils.py`
+Tests supporting utilities:
+- Test reporters
+- Data type helpers
+- Performance benchmarking
 
-## File Structure
+## Directory Structure
 
 ```
 tests/
-├── conftest.py              # Shared fixtures and pytest configuration
-├── test_mcp_server.py       # MCP protocol-level tests (NEW)
-├── test_components.py       # Component-level tests (renamed from test_mcp_tools.py)
-├── test_postgresql.py       # PostgreSQL adapter tests
-├── test_clickhouse.py       # ClickHouse adapter tests
-├── test_serialization.py    # Data type serialization tests
-├── test_utils.py           # Test utility tests
-├── run_mcp_tests.py        # Test orchestration script
-└── README.md               # This file
+├── conftest.py                        # Shared fixtures and pytest configuration
+├── integration/                       # Integration-level tests
+│   ├── __init__.py
+│   ├── test_mcp_protocol.py          # MCP protocol layer testing
+│   └── test_mcp_workflows.py         # End-to-end workflow testing
+├── module/                            # Module-level tests
+│   ├── __init__.py
+│   ├── test_analyzer.py              # StatisticsAnalyzer tests
+│   ├── test_executor.py              # QueryExecutor tests
+│   └── test_inspector.py             # MetadataInspector tests
+├── unit/                              # Unit-level tests
+│   ├── __init__.py
+│   ├── adapters/                      # Database adapter tests
+│   │   ├── __init__.py
+│   │   ├── test_clickhouse_adapter.py
+│   │   └── test_postgresql_adapter.py
+│   ├── test_serialization.py          # JSON serialization tests
+│   └── test_utils.py                  # Utility tests
+└── README.md                          # This file
 ```
 
 ## Setup
@@ -97,14 +150,43 @@ MYSQL_TEST_DATABASE_URL=mysql+aiomysql://user:password@localhost:3306/testdb
 ### Run All Tests
 
 ```bash
-# Using uv
-uv run pytest
-
-# Using pytest directly
+# Run all tests
 pytest
+
+# Run with verbose output
+pytest -v
+
+# Run with coverage
+pytest --cov=src --cov-report=html
 ```
 
-### Run Specific Database Tests
+### Run Tests by Layer
+
+```bash
+# Run integration tests only
+pytest tests/integration/ -v
+
+# Run module tests only
+pytest tests/module/ -v
+
+# Run unit tests only
+pytest tests/unit/ -v
+```
+
+### Run Specific Test Files
+
+```bash
+# Run MCP protocol tests
+pytest tests/integration/test_mcp_protocol.py -v
+
+# Run executor module tests
+pytest tests/module/test_executor.py -v
+
+# Run PostgreSQL adapter tests
+pytest tests/unit/adapters/test_postgresql_adapter.py -v
+```
+
+### Run Tests by Database
 
 ```bash
 # PostgreSQL tests only
@@ -113,50 +195,26 @@ pytest -m postgresql
 # ClickHouse tests only
 pytest -m clickhouse
 
+# MySQL tests only
+pytest -m mysql
+```
+
+### Run Tests by Type
+
+```bash
+# Integration tests
+pytest -m integration
+
 # Exclude integration tests
 pytest -m "not integration"
-```
 
-### Run Specific Test Files
-
-```bash
-# Run PostgreSQL tests
-pytest tests/test_postgresql.py
-
-# Run ClickHouse tests
-pytest tests/test_clickhouse.py
-```
-
-### Run Specific Test Classes or Functions
-
-```bash
-# Run a specific test class
-pytest tests/test_postgresql.py::TestPostgreSQLConfiguration
-
-# Run a specific test function
-pytest tests/test_postgresql.py::TestPostgreSQLConfiguration::test_config_creation
-```
-
-### Verbose Output
-
-```bash
-# Show detailed output
-pytest -v
-
-# Show even more details (including local variables on failure)
-pytest -vv --showlocals
-```
-
-### Fast Mode (Skip Slow Tests)
-
-```bash
-# Skip tests marked as slow
+# Skip slow tests
 pytest -m "not slow"
 ```
 
 ## Test Markers
 
-Tests are organized using pytest markers:
+Tests use pytest markers for organization:
 
 - **`postgresql`**: PostgreSQL-specific tests
 - **`clickhouse`**: ClickHouse-specific tests
@@ -170,14 +228,108 @@ Tests are organized using pytest markers:
 # Run only PostgreSQL tests
 pytest -m postgresql
 
-# Run only integration tests
+# Run integration tests
 pytest -m integration
 
-# Run PostgreSQL tests but skip slow ones
-pytest -m "postgresql and not slow"
+# Run PostgreSQL integration tests
+pytest -m "postgresql and integration"
 
-# Run all tests except integration tests
-pytest -m "not integration"
+# Run fast tests only
+pytest -m "not slow"
+```
+
+## Test Fixtures
+
+Shared fixtures are defined in `conftest.py`:
+
+### Configuration Fixtures
+- `pg_config`, `ch_config`, `mysql_config` - Database configurations
+- `pg_database_url`, `ch_database_url`, `mysql_database_url` - Connection URLs
+
+### Component Fixtures
+- `pg_adapter`, `ch_adapter` - Database adapters
+- `pg_connection`, `ch_connection` - Database connections (with automatic cleanup)
+- `pg_inspector`, `ch_inspector` - Metadata inspectors
+- `pg_analyzer`, `ch_analyzer` - Statistics analyzers
+- `pg_mcp_server` - MCP server for protocol testing
+
+### Parametrized Fixtures
+- `db_config`, `db_adapter`, `db_connection` - Work across all databases
+
+## Best Practices
+
+### 1. Use Appropriate Test Layer
+
+- **Integration tests**: Test MCP protocol, end-to-end workflows, multi-tool interactions
+- **Module tests**: Test individual components, business logic, database operations
+- **Unit tests**: Test utilities, serialization, adapter-specific logic
+
+### 2. Use Fixtures for Setup
+
+✅ **Do**: Use fixtures for database connections and components
+```python
+async def test_something(pg_connection, pg_inspector):
+    schemas = await pg_inspector.get_schemas()
+    assert len(schemas) > 0
+```
+
+❌ **Don't**: Create connections manually in tests
+
+### 3. Use Descriptive Test Names
+
+```python
+async def test_execute_query_enforces_read_only_mode(self, pg_connection, pg_adapter):
+    """Test that write queries are rejected."""
+    ...
+```
+
+### 4. Skip When Necessary
+
+```python
+async def test_feature(ch_adapter):
+    if not ch_adapter.capabilities.foreign_keys:
+        pytest.skip("ClickHouse doesn't support foreign keys")
+```
+
+### 5. Test Edge Cases
+
+Always test:
+- Empty results
+- NULL values
+- Non-existent resources
+- Invalid inputs
+- Error conditions
+
+## Troubleshooting
+
+### Tests Skip Due to Missing Database URL
+
+If you see:
+```
+SKIPPED: PG_TEST_DATABASE_URL not set in environment
+```
+
+**Solution**: Create a `.env` file with the appropriate database URL.
+
+### Database Connection Failures
+
+If tests are skipped due to connection errors:
+```
+SKIPPED: PostgreSQL database connection failed: [Errno -3] Temporary failure in name resolution
+```
+
+**Solution**:
+1. Check that your database is running
+2. Verify the connection URL is correct
+3. Check network connectivity
+4. Ensure firewall rules allow connections
+
+### Windows Event Loop Issues
+
+The test suite handles Windows-specific event loop requirements automatically in `conftest.py`:
+```python
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 ```
 
 ## Test Coverage
@@ -193,483 +345,83 @@ pytest --cov=src --cov-report=html
 
 # Open HTML report
 open htmlcov/index.html  # macOS
+xdg-open htmlcov/index.html  # Linux
 start htmlcov/index.html  # Windows
 ```
 
-### Coverage Configuration
+### Coverage Goals
 
-Coverage settings are configured in `pyproject.toml` under `[tool.coverage.*]`.
+- **Integration tests**: 100% MCP tool coverage, key workflow paths
+- **Module tests**: >90% coverage of core components
+- **Unit tests**: >95% coverage of adapters, utilities, serialization
 
-## Test Structure
+## Writing New Tests
 
-### Fixtures (conftest.py)
-
-Shared fixtures are defined in `conftest.py`:
-
-- **Configuration fixtures**: `pg_config`, `ch_config`, `mysql_config`
-- **Adapter fixtures**: `pg_adapter`, `ch_adapter`
-- **Connection fixtures**: `pg_connection`, `ch_connection` (with automatic cleanup)
-- **Inspector fixtures**: `pg_inspector`, `ch_inspector`
-- **Analyzer fixtures**: `pg_analyzer`, `ch_analyzer`
-- **Parametrized fixtures**: `db_config`, `db_adapter`, `db_connection` (work across all databases)
-
-### Test Organization
-
-Tests are organized into classes by functionality:
+### Example Integration Test
 
 ```python
-class TestPostgreSQLConfiguration:
-    """Configuration and setup tests"""
+# tests/integration/test_mcp_protocol.py
 
-class TestPostgreSQLConnection:
-    """Connection and basic query tests"""
+@pytest.mark.asyncio
+async def test_new_mcp_tool(self, pg_config: DatabaseConfig):
+    """Test new MCP tool via protocol."""
+    server, client = await MCPProtocolHelper.create_test_server_and_client(pg_config)
 
-class TestPostgreSQLMetadata:
-    """Metadata inspection tests"""
+    try:
+        response = await client.call_tool("new_tool", arguments={})
+        data = MCPProtocolHelper.check_and_parse_response(response)
 
-class TestPostgreSQLStatistics:
-    """Statistics and analysis tests"""
-
-class TestPostgreSQLIntegration:
-    """End-to-end integration tests"""
+        assert "expected_field" in data
+    finally:
+        await server.cleanup()
 ```
 
-### Writing New Tests
-
-#### Basic Test Structure
+### Example Module Test
 
 ```python
-import pytest
+# tests/module/test_executor.py
 
-pytestmark = [pytest.mark.postgresql, pytest.mark.integration]
-
-class TestNewFeature:
-    async def test_something(self, pg_connection):
-        """Test description"""
-        # Arrange
-        ...
-
-        # Act
-        result = await some_function()
-
-        # Assert
-        assert result is not None
-        assert result.value == expected
-```
-
-#### Using Fixtures
-
-```python
-async def test_with_fixtures(
-    pg_connection: DatabaseConnection,
-    pg_inspector: MetadataInspector,
-    pg_analyzer: StatisticsAnalyzer,
+@pytest.mark.asyncio
+async def test_new_executor_feature(
+    self, pg_connection: DatabaseConnection, pg_adapter: BaseAdapter
 ):
-    """Fixtures are automatically injected"""
-    schemas = await pg_inspector.get_schemas()
-    assert len(schemas) > 0
-```
-
-#### Skipping Tests
-
-```python
-async def test_optional_feature(ch_adapter):
-    """Test optional feature"""
-    if not ch_adapter.capabilities.some_feature:
-        pytest.skip("Feature not supported by this database")
-
-    # Test code...
-```
-
-#### Parametrized Tests
-
-```python
-@pytest.mark.parametrize("schema_name", ["public", "test_schema"])
-async def test_multiple_schemas(pg_inspector, schema_name):
-    """Test runs once for each parameter value"""
-    tables = await pg_inspector.get_tables(schema_name)
-    assert tables is not None
-```
-
-## Best Practices
-
-### 1. Use Fixtures for Setup
-
-✅ **Do**: Use fixtures for database connections and components
-```python
-async def test_something(pg_connection):
-    async with pg_connection.get_connection() as conn:
-        result = await conn.execute(text("SELECT 1"))
-```
-
-❌ **Don't**: Create connections manually in tests
-```python
-async def test_something():
-    config = DatabaseConfig(url=os.getenv("PG_TEST_DATABASE_URL"))
-    connection = DatabaseConnection(config)
-    await connection.initialize()
-    # ... forgot to cleanup!
-```
-
-### 2. Use Descriptive Test Names
-
-✅ **Do**: Describe what the test verifies
-```python
-async def test_get_schemas_returns_list_with_public_schema(pg_inspector):
-    ...
-```
-
-❌ **Don't**: Use vague names
-```python
-async def test_schemas(pg_inspector):
-    ...
-```
-
-### 3. Use Proper Assertions
-
-✅ **Do**: Use pytest assertions with clear expectations
-```python
-assert result is not None
-assert result.total_rows >= 0
-assert len(schemas) > 0
-```
-
-❌ **Don't**: Use boolean checks or print statements
-```python
-if result:
-    print("[OK] Result exists")
-    return True
-```
-
-### 4. Mark Slow Tests
-
-```python
-@pytest.mark.slow
-async def test_analyze_large_table(pg_analyzer):
-    """This test takes >5 seconds"""
-    ...
-```
-
-### 5. Skip Unavailable Tests
-
-```python
-async def test_feature(ch_adapter):
-    if not ch_adapter.capabilities.foreign_keys:
-        pytest.skip("ClickHouse doesn't support foreign keys")
-```
-
-### 6. Group Related Tests
-
-```python
-class TestMetadataInspection:
-    """Group related tests in a class"""
-
-    async def test_get_schemas(self, pg_inspector):
-        ...
-
-    async def test_get_tables(self, pg_inspector):
-        ...
-```
-
-## Known Issues
-
-### ClickHouse asynch Driver Compatibility
-
-Some ClickHouse tests may skip due to known driver compatibility issues:
-```
-SKIPPED: Known ClickHouse asynch driver compatibility issue
-```
-
-This is expected and documented in the codebase. The error manifests as:
-```
-AttributeError: module 'asynch' has no attribute 'connect'
-```
-
-### Windows Event Loop Issues
-
-The test suite handles Windows-specific event loop requirements automatically in `conftest.py`:
-```python
-if sys.platform == "win32":
-    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-```
-
-## Troubleshooting
-
-### Tests Skip Due to Missing Database URL
-
-If you see:
-```
-SKIPPED [1] tests/conftest.py:XX: PG_TEST_DATABASE_URL not set in environment
-```
-
-Solution: Create a `.env` file with the appropriate database URL.
-
-## Running MCP Protocol Tests
-
-The MCP protocol-level tests require the MCP SDK's `ClientSession`:
-
-```bash
-# Run all MCP protocol tests
-pytest tests/test_mcp_server.py -v
-
-# Run specific test class
-pytest tests/test_mcp_server.py::TestMCPServerInitialization -v
-
-# Run specific test
-pytest tests/test_mcp_server.py::TestMCPToolCalls::test_execute_query_protocol -v
-```
-
-These tests create an in-memory connection between a `DatabaseMCPServer` and a `ClientSession` to test the full MCP protocol flow.
-
----
-
-## 🔬 Component & MCP Testing Framework
-
-A comprehensive testing framework with two layers:
-
-### 1. MCP Protocol Testing (`test_mcp_server.py`)
-Tests the full MCP server including tool registration, protocol handling, and end-to-end workflows.
-Uses the MCP SDK's `ClientSession` to simulate real MCP client interactions.
-
-**Key features:**
-- Tests actual MCP protocol messages (JSON-RPC)
-- Validates tool registration based on database capabilities
-- Tests input validation via JSON schemas
-- Catches protocol-level errors (serialization, tool routing, error handling)
-
-### 2. Component Testing (`test_components.py`)
-Tests individual database operation components directly without MCP protocol overhead.
-Validates business logic and database interaction.
-
-**Key features:**
-- Fast execution (no protocol overhead)
-- Direct testing of core logic
-- Easy debugging
-- Comprehensive data type coverage
-
-### Test Files
-
-- **`test_mcp_server.py`** - MCP protocol-level tests (NEW)
-- **`test_components.py`** - Component-level tests (renamed from test_mcp_tools.py)
-- **`test_utils.py`** - Testing utilities, report generation, helpers
-- **`run_mcp_tests.py`** - Orchestration script for running tests and generating reports
-
-### Quick Start
-
-```bash
-# Run MCP protocol-level tests
-pytest tests/test_mcp_server.py -v
-
-# Run component-level tests
-pytest tests/test_components.py -v
-
-# Run all tests with comprehensive reporting
-python tests/run_mcp_tests.py
-
-# Run PostgreSQL tests only
-python tests/run_mcp_tests.py --database postgresql
-
-# Generate report from last run
-python tests/run_mcp_tests.py --report-only
-
-# Verbose output
-python tests/run_mcp_tests.py --verbose
-```
-
-### What Gets Tested
-
-#### All 10 MCP Tool Functions
-
-1. **`get_database_info`** - Database metadata and capabilities
-2. **`list_schemas`** - Schema listing with sizes and counts
-3. **`list_tables`** - Table listing with row counts and sizes (Bug Fix #3)
-4. **`describe_table`** - Detailed table information with statistics (Bug Fix #4)
-5. **`execute_query`** - SQL query execution
-6. **`sample_data`** - Data sampling with JSON serialization (Bug Fix #1)
-7. **`get_table_relationships`** - Foreign key discovery
-8. **`analyze_column`** - Column statistics for numeric and text (Bug Fix #2)
-9. **`explain_query`** - Query execution plans with proper JSON format (Bug Fix #5)
-10. **`profile_database`** - Database-wide profiling (Bug Fix #6)
-
-#### Data Type Coverage
-
-Tests JSON serialization for all PostgreSQL types:
-- **Temporal**: TIMESTAMP, DATE, TIME, INTERVAL
-- **Network**: INET, CIDR, MACADDR
-- **Special**: UUID, JSON, JSONB, BYTEA, BOOLEAN
-- **Numeric**: INTEGER, BIGINT, NUMERIC, REAL, DOUBLE PRECISION
-- **Text**: TEXT, VARCHAR, CHAR
-- **Geometric**: POINT, LINE, POLYGON
-- **Arrays**: INTEGER[], TEXT[]
-
-### Test Reports
-
-Comprehensive Markdown reports are generated in `test_reports/`:
-
-```markdown
-# 🔬 MCP Server Comprehensive Test Report
-
-## Executive Summary
-
-| Metric | Count | Percentage |
-|--------|-------|------------|
-| Total Tests | 15 | 100% |
-| ✅ Passed | 15 | 100% |
-| ❌ Failed | 0 | 0.0% |
-
-## 🔧 Results by MCP Tool
-
-### ✅ Tool 1: get_database_info
-- ✅ test_get_database_info (0.15s)
-
-### ✅ Tool 6: sample_data
-- ✅ test_sample_data_json_serialization (0.23s)
-```
-
-### Example: Testing sample_data Bug Fix
-
-The `test_sample_data_json_serialization` test validates the fix for Bug #1:
-
-```python
-async def test_sample_data_json_serialization(pg_connection, pg_adapter):
-    """Test sample_data with various data types - was BROKEN."""
+    """Test new QueryExecutor feature."""
     executor = QueryExecutor(pg_connection, pg_adapter)
 
-    result = await executor.sample_data("gold_users", "public", limit=5)
+    result = await executor.new_feature()
 
-    # Critical: Verify JSON serialization works
-    # This was failing before the fix with:
-    # TypeError: Object of type IPv4Address is not JSON serializable
-    json_str = json.dumps(result.model_dump())
-    assert len(json_str) > 0
+    assert result is not None
+    assert result.field == expected_value
 ```
 
-### Example: Testing analyze_column Bug Fix
-
-The `test_analyze_column_numeric` and `test_analyze_column_text` tests validate Bug #2 fix:
+### Example Unit Test
 
 ```python
-async def test_analyze_column_text(pg_connection, pg_adapter):
-    """Test analyze_column with text columns - was BROKEN."""
-    analyzer = StatisticsAnalyzer(pg_connection, pg_adapter)
+# tests/unit/test_serialization.py
 
-    # This used to fail trying to compute AVG/STDDEV on text
-    # Error: column must appear in GROUP BY clause
-    stats = await analyzer.analyze_column("users", "country", "public")
+def test_new_data_type():
+    """Test serialization of new data type."""
+    data = {"field": NewDataType(...)}
 
-    # Text columns should work now
-    assert stats.data_type is not None
-    assert stats.total_rows >= 0
-    assert stats.warning is None  # No SQL errors
+    json_bytes = orjson.dumps(data, default=str)
+    result = orjson.loads(json_bytes)
+
+    assert result["field"] == expected_string
 ```
 
-### Running Specific MCP Tool Tests
+## Continuous Integration
 
-```bash
-# Test only sample_data function
-pytest tests/test_mcp_tools.py::TestMCPTools::test_sample_data_json_serialization -v
-
-# Test only analyze_column functions
-pytest tests/test_mcp_tools.py -k "analyze_column" -v
-
-# Test all data type coverage
-pytest tests/test_mcp_tools.py::TestDataTypeCoverage -v
-```
-
-### Test Utilities
-
-From `test_utils.py`:
-
-**`TestReporter`** - Generate comprehensive Markdown reports:
-```python
-reporter = TestReporter()
-reporter.add_result("sample_data", "test_json", passed=True)
-report_path = reporter.save_report("postgresql")
-```
-
-**`DataTypeTestHelper`** - Test all PostgreSQL types:
-```python
-query = DataTypeTestHelper.generate_type_test_query(["INTEGER", "TEXT", "TIMESTAMP"])
-# SELECT 42 as col_0, 'text' as col_1, TIMESTAMP '2024-01-15' as col_2
-```
-
-**`validate_json_serialization()`** - Check JSON safety:
-```python
-is_safe, error = validate_json_serialization(result.model_dump())
-assert is_safe, f"Not JSON-safe: {error}"
-```
-
-**`PerformanceBenchmark`** - Track performance:
-```python
-benchmark = PerformanceBenchmark()
-benchmark.record("sample_data", "5_rows", 123.45)
-stats = benchmark.get_stats("sample_data", "5_rows")
-```
-
-### Continuous Integration
-
-Add to your CI pipeline:
+The test suite is designed for CI/CD pipelines:
 
 ```yaml
 # .github/workflows/test.yml
-- name: Run MCP Tools Tests
+- name: Run Tests
   run: |
-    pip install pytest pytest-asyncio pytest-json-report
-    python tests/run_mcp_tests.py
+    uv sync --dev
+    pytest --cov=src --cov-report=xml
   env:
     PG_TEST_DATABASE_URL: ${{ secrets.PG_TEST_DATABASE_URL }}
 ```
-
-### Test Matrix for All Databases
-
-The framework supports testing across all database types:
-
-```bash
-# Test PostgreSQL
-python tests/run_mcp_tests.py --database postgresql
-
-# Test MySQL
-python tests/run_mcp_tests.py --database mysql
-
-# Test ClickHouse
-python tests/run_mcp_tests.py --database clickhouse
-
-# Test all configured databases
-python tests/run_mcp_tests.py
-```
-
-### Interpreting Test Failures
-
-#### JSON Serialization Failure
-```
-❌ test_sample_data_json_serialization
-   TypeError: Object of type IPv4Address is not JSON serializable
-```
-**Fix**: Add type conversion in `src/db_connect_mcp/utils/serialization.py`
-
-#### SQL Syntax Error
-```
-❌ test_analyze_column_numeric
-   ProgrammingError: column must appear in GROUP BY clause
-```
-**Fix**: Restructure SQL query in adapter's `get_column_statistics()` method
-
-#### Missing Metadata
-```
-❌ test_list_tables_with_metadata
-   AssertionError: row_count should not be NULL
-```
-**Fix**: Check table enrichment query in adapter's `enrich_table_info()` method
-
-### Coverage Goals
-
-The MCP tools testing framework aims for:
-- **100% MCP tool coverage** - All 10 tools tested
-- **100% critical data types** - TIMESTAMP, INET, UUID, JSONB, etc.
-- **>90% bug detection** - Catches serialization, SQL, metadata issues
-- **<2s per test** - Fast enough for CI/CD
-
----
 
 ## Additional Resources
 
