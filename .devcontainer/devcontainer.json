@@ -7,9 +7,6 @@
 	"features": {
 		"ghcr.io/devcontainers/features/docker-in-docker:2": {}
 	},
-	"mounts": [
-		"source=${localWorkspaceFolder},target=/workspace,type=bind"
-	],
 	"containerEnv": {
 		"ANTHROPIC_API_KEY": "${localEnv:ANTHROPIC_API_KEY}"
 	},
