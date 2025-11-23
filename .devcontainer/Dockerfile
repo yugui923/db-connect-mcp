@@ -13,11 +13,18 @@ RUN apt-get install -y \
     libbz2-dev libreadline-dev libsqlite3-dev \
     zlib1g-dev liblzma-dev \
     # Useful utilities
-    jq curl wget git unzip zip
+    jq curl wget git unzip zip \
+    # Shell
+    zsh
 RUN apt-get clean
+
 
 # Switch to vscode user for tool installation
 USER vscode
+
+# Set zsh as default shell for vscode user
+RUN sudo chsh -s $(which zsh) vscode
+
 
 # Install mise (runtime version manager)
 RUN curl https://mise.run | sh
@@ -27,9 +34,11 @@ ENV PATH="/home/vscode/.local/bin:${PATH}"
 RUN echo 'eval "$(~/.local/bin/mise activate bash)"' >> ~/.bashrc && \
     echo 'eval "$(~/.local/bin/mise activate zsh)"' >> ~/.zshrc
 
+
 # Install uv (fast Python package manager)
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 ENV PATH="/home/vscode/.cargo/bin:${PATH}"
+
 
 # Pre-install common Python and Node versions via mise
 RUN mise install python@3.13 && \
@@ -43,10 +52,19 @@ RUN mise exec node -- npm install -g \
     prettier \
     eslint
 
+    
 # Install global Python tools via uv
 RUN uv tool install ruff && \
     uv tool install black && \
     uv tool install mypy && \
     uv tool install pytest
+    
+
+# Install ZSH plugins and themes
+RUN git clone https://github.com/zsh-users/zsh-autosuggestions \
+  ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zsh-autosuggestions
+RUN git clone https://github.com/zsh-users/zsh-syntax-highlighting.git \
+  ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zsh-syntax-highlighting
+
 
 WORKDIR /workspace
