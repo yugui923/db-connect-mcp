@@ -1,0 +1,46 @@
+{
+    "id": "postgresql-17",
+    "version": "1.0.0",
+    "name": "PostgreSQL 17 Server",
+    "description": "Installs PostgreSQL 17 server and client from the official PostgreSQL apt repository",
+    "documentationURL": "https://www.postgresql.org/download/linux/ubuntu/",
+    "options": {
+        "installClient": {
+            "type": "boolean",
+            "default": true,
+            "description": "Install PostgreSQL client tools (psql, pg_dump, etc.)"
+        },
+        "installServer": {
+            "type": "boolean",
+            "default": true,
+            "description": "Install PostgreSQL server"
+        },
+        "createTestDb": {
+            "type": "boolean",
+            "default": true,
+            "description": "Create test database (db_connect_test) with dbconnect user"
+        },
+        "testDbUser": {
+            "type": "string",
+            "default": "dbconnect",
+            "description": "Username for test database"
+        },
+        "testDbPassword": {
+            "type": "string",
+            "default": "dbconnect_dev_password",
+            "description": "Password for test database user"
+        },
+        "testDbName": {
+            "type": "string",
+            "default": "db_connect_test",
+            "description": "Name of test database"
+        }
+    },
+    "installsAfter": [
+        "ghcr.io/devcontainers/features/common-utils"
+    ],
+    "containerEnv": {
+        "PGDATA": "/var/lib/postgresql/17/main",
+        "PATH": "/usr/lib/postgresql/17/bin:${PATH}"
+    }
+}
