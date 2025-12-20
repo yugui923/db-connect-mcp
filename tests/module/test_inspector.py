@@ -10,8 +10,7 @@ Validates:
 
 import pytest
 
-from db_connect_mcp.adapters.base import BaseAdapter
-from db_connect_mcp.core import DatabaseConnection, MetadataInspector
+from db_connect_mcp.core import MetadataInspector
 
 pytestmark = [pytest.mark.postgresql, pytest.mark.integration]
 
@@ -20,30 +19,25 @@ class TestMetadataInspectorSchemas:
     """Test schema listing functionality."""
 
     @pytest.mark.asyncio
-    async def test_list_schemas(
-        self, pg_connection: DatabaseConnection, pg_adapter: BaseAdapter
-    ):
+    async def test_list_schemas(self, pg_inspector: MetadataInspector):
         """Test list_schemas returns schema information with metadata."""
-        inspector = MetadataInspector(pg_connection, pg_adapter)
-
-        schemas = await inspector.get_schemas()
+        schemas = await pg_inspector.get_schemas()
 
         # Validate schemas returned
         assert len(schemas) > 0
 
-        for schema in schemas:
-            # Validate schema structure
-            assert schema.name is not None
-            assert len(schema.name) > 0
+        # Find public schema (guaranteed to exist)
+        public_schema = next((s for s in schemas if s.name == "public"), None)
+        assert public_schema is not None, "public schema should exist"
 
-            # Validate table count is populated
-            assert schema.table_count is not None
-            assert schema.table_count >= 0
+        # Validate schema structure
+        assert public_schema.table_count is not None
+        assert public_schema.table_count >= 5  # At least categories, products, users, orders, order_items
 
-            # Size might be available
-            if schema.size_bytes is not None:
-                assert isinstance(schema.size_bytes, int)
-                assert schema.size_bytes >= 0
+        # Size might be available
+        if public_schema.size_bytes is not None:
+            assert isinstance(public_schema.size_bytes, int)
+            assert public_schema.size_bytes > 0
 
 
 class TestMetadataInspectorTables:
@@ -51,69 +45,73 @@ class TestMetadataInspectorTables:
 
     @pytest.mark.asyncio
     async def test_list_tables_with_metadata(
-        self, pg_connection: DatabaseConnection, pg_adapter: BaseAdapter
+        self, pg_inspector: MetadataInspector, known_tables
     ):
         """Test list_tables returns tables with complete metadata."""
-        inspector = MetadataInspector(pg_connection, pg_adapter)
-
         # Get tables from public schema
-        tables = await inspector.get_tables("public", include_views=True)
+        tables = await pg_inspector.get_tables("public", include_views=True)
 
-        # Should have at least some tables
-        assert len(tables) > 0
+        # Should have at least the known tables
+        assert len(tables) >= len(known_tables)
 
-        # Find a base table to validate
-        base_table = None
-        for table in tables:
-            if table.table_type == "BASE TABLE":
-                base_table = table
-                break
+        # Verify known tables exist
+        table_names = {t.name for t in tables}
+        for table_name in known_tables.keys():
+            assert table_name in table_names, f"{table_name} should exist in local test database"
 
-        if base_table:
-            # Validate metadata fields exist and are properly typed
-            if base_table.row_count is not None:
-                assert isinstance(base_table.row_count, int)
-                # -1 is valid for PostgreSQL (means stats not gathered yet)
-                assert base_table.row_count >= -1
+        # Validate metadata for products table (guaranteed to have data)
+        products_table = next((t for t in tables if t.name == "products"), None)
+        assert products_table is not None
+        assert products_table.table_type == "BASE TABLE"
 
-            if base_table.size_bytes is not None:
-                assert isinstance(base_table.size_bytes, int)
-                assert base_table.size_bytes >= 0
+        # Verify row count metadata
+        if products_table.row_count is not None:
+            expected_min = known_tables["products"]["row_count_min"]
+            assert products_table.row_count >= expected_min, \
+                f"products should have at least {expected_min} rows"
+
+        # Verify size metadata
+        if products_table.size_bytes is not None:
+            assert isinstance(products_table.size_bytes, int)
+            assert products_table.size_bytes > 0
 
     @pytest.mark.asyncio
     async def test_describe_table_complete(
-        self, pg_connection: DatabaseConnection, pg_adapter: BaseAdapter
+        self, pg_inspector: MetadataInspector
     ):
-        """Test describe_table returns comprehensive table information."""
-        inspector = MetadataInspector(pg_connection, pg_adapter)
+        """Test describe_table returns complete table metadata."""
+        # Use products table (guaranteed to exist with known structure)
+        table_info = await pg_inspector.describe_table("products", "public")
 
-        # Get first table
-        tables = await inspector.get_tables("public")
-        assert len(tables) > 0
-
-        table_name = tables[0].name
-        table_info = await inspector.describe_table(table_name, "public")
-
-        # Validate basic info
-        assert table_info.name == table_name
+        # Validate basic table metadata
+        assert table_info.name == "products"
         assert table_info.schema == "public"
-
-        # Validate columns
         assert len(table_info.columns) > 0
-        for col in table_info.columns:
-            assert col.name is not None
-            assert col.data_type is not None
-            assert col.nullable is not None
 
-        # Validate statistics fields exist and are properly typed
-        if table_info.table_type == "BASE TABLE":
-            if table_info.row_count is not None:
-                assert isinstance(table_info.row_count, int)
-                assert table_info.row_count >= -1
+        # Validate known columns exist
+        column_names = {col.name for col in table_info.columns}
+        expected_columns = ["product_id", "name", "price", "category_id", "sku"]
+        for col_name in expected_columns:
+            assert col_name in column_names, f"products table should have {col_name} column"
 
-            if table_info.size_bytes is not None:
-                assert isinstance(table_info.size_bytes, int)
-                assert table_info.size_bytes >= 0
+        # Validate primary key
+        primary_keys = [col for col in table_info.columns if col.primary_key]
+        assert len(primary_keys) > 0, "products should have a primary key"
+        assert primary_keys[0].name == "product_id"
+
+        # Validate foreign keys (from constraints)
+        if table_info.constraints:
+            # products has FK to categories
+            fk_constraints = [c for c in table_info.constraints if c.constraint_type == "FOREIGN KEY"]
+            category_fk = next(
+                (fk for fk in fk_constraints if fk.referenced_table == "categories"),
+                None
+            )
+            assert category_fk is not None, "products should have FK to categories"
+
+        # Validate indexes
+        if table_info.indexes:
+            assert len(table_info.indexes) > 0, "products should have indexes"
 
 
 class TestMetadataInspectorRelationships:
@@ -121,53 +119,52 @@ class TestMetadataInspectorRelationships:
 
     @pytest.mark.asyncio
     async def test_get_table_relationships(
-        self, pg_connection: DatabaseConnection, pg_adapter: BaseAdapter
+        self, pg_inspector: MetadataInspector
     ):
-        """Test get_table_relationships finds foreign keys."""
-        if not pg_adapter.capabilities.foreign_keys:
-            pytest.skip("Database doesn't support foreign keys")
+        """Test get_relationships returns foreign key relationships."""
+        # Use products table (guaranteed to have FK to categories)
+        relationships = await pg_inspector.get_relationships("products", "public")
 
-        inspector = MetadataInspector(pg_connection, pg_adapter)
-        tables = await inspector.get_tables("public")
+        # Should have at least one relationship (to categories)
+        assert len(relationships) > 0
 
-        # Try to find a table with relationships
-        for table in tables[:10]:  # Check first 10 tables
-            relationships = await inspector.get_relationships(table.name, "public")
+        # Find the relationship to categories
+        category_rel = next(
+            (r for r in relationships if r.to_table == "categories"),
+            None
+        )
+        assert category_rel is not None, "products should reference categories"
+        assert category_rel.from_table == "products"
+        assert "category_id" in category_rel.from_columns
 
-            if relationships:
-                rel = relationships[0]
+    @pytest.mark.asyncio
+    async def test_self_referencing_relationship(
+        self, pg_inspector: MetadataInspector
+    ):
+        """Test self-referencing foreign keys (categories.parent_category_id)."""
+        relationships = await pg_inspector.get_relationships("categories", "public")
 
-                # Validate relationship structure
-                assert rel.from_table is not None
-                assert rel.to_table is not None
-                assert len(rel.from_columns) > 0
-                assert len(rel.to_columns) > 0
-                assert rel.constraint_name is not None
-                break
+        # categories has self-referencing FK
+        self_ref = next(
+            (r for r in relationships if r.to_table == "categories"),
+            None
+        )
+        assert self_ref is not None, "categories should have self-referencing FK"
+        assert self_ref.from_table == "categories"
+        assert "parent_category_id" in self_ref.from_columns
 
 
 class TestMetadataInspectorEdgeCases:
     """Test edge cases and error handling."""
 
     @pytest.mark.asyncio
-    async def test_list_tables_empty_schema(
-        self, pg_connection: DatabaseConnection, pg_adapter: BaseAdapter
-    ):
-        """Test listing tables from a schema with no tables."""
-        inspector = MetadataInspector(pg_connection, pg_adapter)
-
-        # Try to get tables from a schema that might not have tables
-        # This should not raise an error, just return empty list
-        tables = await inspector.get_tables("information_schema")
-        assert isinstance(tables, list)
+    async def test_list_tables_empty_schema(self, pg_inspector: MetadataInspector):
+        """Test list_tables with non-existent schema returns empty list."""
+        tables = await pg_inspector.get_tables("nonexistent_schema")
+        assert len(tables) == 0
 
     @pytest.mark.asyncio
-    async def test_describe_nonexistent_table(
-        self, pg_connection: DatabaseConnection, pg_adapter: BaseAdapter
-    ):
-        """Test describing a table that doesn't exist."""
-        inspector = MetadataInspector(pg_connection, pg_adapter)
-
-        # This should raise an appropriate error
-        with pytest.raises(Exception):
-            await inspector.describe_table("nonexistent_table_xyz", "public")
+    async def test_describe_nonexistent_table(self, pg_inspector: MetadataInspector):
+        """Test describe_table with non-existent table raises appropriate error."""
+        with pytest.raises(Exception):  # Exact exception type depends on adapter
+            await pg_inspector.describe_table("nonexistent_table", "public")

@@ -30,6 +30,17 @@ Tests complete end-to-end workflows:
 
 **Purpose**: Validate real-world usage patterns and multi-step operations.
 
+#### `integration/test_e2e_client_server.py`
+**NEW**: True end-to-end tests with subprocess server and real stdio transport:
+- Spawns MCP server as actual subprocess (not in-memory)
+- Connects MCP client via stdio transport (simulating real-world usage)
+- Captures and analyzes server logs from stderr
+- Tests complete client-server lifecycle
+- Validates error handling across process boundaries
+- Provides utilities for log analysis and diagnostics
+
+**Purpose**: Test the complete system as it would be deployed, including subprocess management, stdio communication, and server logging. These tests catch issues that only appear when running the server as a separate process.
+
 ### 2. **Module Tests** (`module/`)
 
 Tests individual core components directly without MCP protocol overhead.
@@ -99,7 +110,8 @@ tests/
 ├── integration/                       # Integration-level tests
 │   ├── __init__.py
 │   ├── test_mcp_protocol.py          # MCP protocol layer testing
-│   └── test_mcp_workflows.py         # End-to-end workflow testing
+│   ├── test_mcp_workflows.py         # End-to-end workflow testing
+│   └── test_e2e_client_server.py     # True E2E with subprocess server
 ├── module/                            # Module-level tests
 │   ├── __init__.py
 │   ├── test_analyzer.py              # StatisticsAnalyzer tests
@@ -147,69 +159,99 @@ MYSQL_TEST_DATABASE_URL=mysql+aiomysql://user:password@localhost:3306/testdb
 
 ## Running Tests
 
+**IMPORTANT:** Always use **6 parallel workers** (`-n 6`) for optimal performance when running the full test suite.
+
 ### Run All Tests
 
 ```bash
-# Run all tests
-pytest
+# Run all tests in parallel (preferred - 6 workers)
+pytest -n 6
 
-# Run with verbose output
-pytest -v
+# Run with verbose output and parallel execution
+pytest -v -n 6
 
-# Run with coverage
+# Run with coverage (sequential - coverage doesn't work well with parallel)
 pytest --cov=src --cov-report=html
+
+# Run without parallel (only when debugging specific tests)
+pytest
 ```
 
 ### Run Tests by Layer
 
 ```bash
-# Run integration tests only
-pytest tests/integration/ -v
+# Run integration tests only (with parallel execution)
+pytest tests/integration/ -v -n 6
 
-# Run module tests only
-pytest tests/module/ -v
+# Run module tests only (with parallel execution)
+pytest tests/module/ -v -n 6
 
-# Run unit tests only
-pytest tests/unit/ -v
+# Run unit tests only (with parallel execution)
+pytest tests/unit/ -v -n 6
 ```
 
 ### Run Specific Test Files
 
 ```bash
-# Run MCP protocol tests
-pytest tests/integration/test_mcp_protocol.py -v
+# Run MCP protocol tests (with parallel execution)
+pytest tests/integration/test_mcp_protocol.py -v -n 6
 
-# Run executor module tests
-pytest tests/module/test_executor.py -v
+# Run E2E client-server tests (with subprocess server)
+pytest tests/integration/test_e2e_client_server.py -v -n 6
 
-# Run PostgreSQL adapter tests
-pytest tests/unit/adapters/test_postgresql_adapter.py -v
+# Run executor module tests (with parallel execution)
+pytest tests/module/test_executor.py -v -n 6
+
+# Run PostgreSQL adapter tests (with parallel execution)
+pytest tests/unit/adapters/test_postgresql_adapter.py -v -n 6
 ```
+
+### Run E2E Tests with Server Log Observation
+
+The E2E client-server tests spawn a real subprocess server and capture its logs:
+
+```bash
+# Run E2E tests with verbose output (with parallel execution)
+pytest tests/integration/test_e2e_client_server.py -v -s -n 6
+
+# Run specific E2E test class (parallel execution)
+pytest tests/integration/test_e2e_client_server.py::TestE2EServerLogs -v -n 6
+
+# Run E2E tests with detailed output (includes subprocess logs)
+pytest tests/integration/test_e2e_client_server.py -v -s --log-cli-level=DEBUG -n 6
+```
+
+**Features of E2E Tests**:
+- ✅ Real subprocess server (simulates production deployment)
+- ✅ Stdio transport (actual MCP client-server communication)
+- ✅ Server log capture from stderr
+- ✅ Log analysis utilities (search, filter, analyze patterns)
+- ✅ Proper cleanup of processes and resources
 
 ### Run Tests by Database
 
 ```bash
-# PostgreSQL tests only
-pytest -m postgresql
+# PostgreSQL tests only (with parallel execution)
+pytest -m postgresql -n 6
 
-# ClickHouse tests only
-pytest -m clickhouse
+# ClickHouse tests only (with parallel execution)
+pytest -m clickhouse -n 6
 
-# MySQL tests only
-pytest -m mysql
+# MySQL tests only (with parallel execution)
+pytest -m mysql -n 6
 ```
 
 ### Run Tests by Type
 
 ```bash
-# Integration tests
-pytest -m integration
+# Integration tests (with parallel execution)
+pytest -m integration -n 6
 
-# Exclude integration tests
-pytest -m "not integration"
+# Exclude integration tests (with parallel execution)
+pytest -m "not integration" -n 6
 
-# Skip slow tests
-pytest -m "not slow"
+# Skip slow tests (with parallel execution)
+pytest -m "not slow" -n 6
 ```
 
 ## Test Markers
@@ -225,17 +267,17 @@ Tests use pytest markers for organization:
 ### Using Markers
 
 ```bash
-# Run only PostgreSQL tests
-pytest -m postgresql
+# Run only PostgreSQL tests (with parallel execution)
+pytest -m postgresql -n 6
 
-# Run integration tests
-pytest -m integration
+# Run integration tests (with parallel execution)
+pytest -m integration -n 6
 
-# Run PostgreSQL integration tests
-pytest -m "postgresql and integration"
+# Run PostgreSQL integration tests (with parallel execution)
+pytest -m "postgresql and integration" -n 6
 
-# Run fast tests only
-pytest -m "not slow"
+# Run fast tests only (with parallel execution)
+pytest -m "not slow" -n 6
 ```
 
 ## Test Fixtures

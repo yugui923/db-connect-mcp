@@ -204,8 +204,6 @@ class MCPTestRunner:
                 tool = "Tool 8: analyze_column"
             elif "test_explain_query" in nodeid:
                 tool = "Tool 9: explain_query"
-            elif "test_profile_database" in nodeid:
-                tool = "Tool 10: profile_database"
             else:
                 tool = "Other Tests"
 

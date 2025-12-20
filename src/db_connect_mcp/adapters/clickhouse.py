@@ -9,7 +9,6 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from db_connect_mcp.adapters.base import BaseAdapter
 from db_connect_mcp.models.capabilities import DatabaseCapabilities
 from db_connect_mcp.models.database import SchemaInfo
-from db_connect_mcp.models.profile import DatabaseProfile, SchemaProfile, TableProfile
 from db_connect_mcp.models.statistics import ColumnStats, Distribution
 from db_connect_mcp.models.table import TableInfo
 
@@ -308,90 +307,3 @@ class ClickHouseAdapter(BaseAdapter):
             )
 
         return result
-
-    async def profile_database(
-        self, conn: AsyncConnection, database_name: str
-    ) -> DatabaseProfile:
-        """Generate ClickHouse database profile (basic implementation)."""
-        # Get database version (extract just version number)
-        version_query = text("SELECT version()")
-        version_result = await conn.execute(version_query)
-        version_row = version_result.fetchone()
-        raw_version = version_row[0] if version_row else "Unknown"
-        version = f"ClickHouse {raw_version}" if raw_version != "Unknown" else "Unknown"
-
-        # Get database statistics from system tables
-        db_query = text("""
-            SELECT
-                database,
-                COUNT(*) as table_count,
-                SUM(bytes) as total_size,
-                SUM(rows) as total_rows
-            FROM system.tables
-            WHERE database NOT IN ('system', 'information_schema', 'INFORMATION_SCHEMA')
-            GROUP BY database
-            ORDER BY total_size DESC
-        """)
-
-        db_result = await conn.execute(db_query)
-        db_rows = db_result.fetchall()
-
-        # Calculate totals from all databases
-        total_tables = sum(int(row[1]) if row[1] else 0 for row in db_rows)
-        total_size = sum(int(row[2]) if row[2] else 0 for row in db_rows)
-
-        # Limit to top 10 databases by size for conciseness
-        schemas = []
-        for row in db_rows[:10]:
-            schema_profile = SchemaProfile(
-                name=row[0],
-                table_count=int(row[1]) if row[1] else 0,
-                view_count=None,
-                total_size_bytes=int(row[2]) if row[2] else 0,
-                total_rows=int(row[3]) if row[3] else 0,
-            )
-            schemas.append(schema_profile)
-
-        # Get largest tables (top 5 for conciseness)
-        tables_query = text("""
-            SELECT
-                database,
-                name,
-                engine,
-                bytes as total_size,
-                0 as index_size,
-                rows as row_count
-            FROM system.tables
-            WHERE database NOT IN ('system', 'information_schema', 'INFORMATION_SCHEMA')
-            ORDER BY bytes DESC
-            LIMIT 5
-        """)
-
-        tables_result = await conn.execute(tables_query)
-        tables_rows = tables_result.fetchall()
-
-        largest_tables = []
-        for row in tables_rows:
-            table_profile = TableProfile(
-                schema=row[0],
-                name=row[1],
-                table_type=row[2],  # Engine type
-                size_bytes=int(row[3]) if row[3] else 0,
-                index_size_bytes=int(row[4]) if row[4] else 0,
-                row_count=int(row[5]) if row[5] else 0,
-            )
-            largest_tables.append(table_profile)
-
-        return DatabaseProfile(
-            database_name=database_name,
-            version=version,
-            total_size_bytes=total_size if total_size > 0 else None,
-            total_schemas=len(schemas),
-            total_tables=total_tables,
-            total_views=None,
-            total_indexes=None,
-            schemas=schemas,
-            largest_tables=largest_tables,
-            total_index_size_bytes=None,
-            index_to_table_ratio=None,
-        )

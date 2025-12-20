@@ -43,7 +43,6 @@ def json_serializer(obj: Any) -> Any:
 # These limits prevent context window exhaustion while preserving useful information
 # Set high enough to avoid truncation in most cases - can be adjusted based on needs
 MAX_RESPONSE_DATABASE_INFO = 50000  # Basic database metadata
-MAX_RESPONSE_PROFILE_DATABASE = 100000  # High-level database overview
 MAX_RESPONSE_LIST_SCHEMAS = 100000  # Schema listings
 MAX_RESPONSE_GET_RELATIONSHIPS = 100000  # Foreign key relationships
 MAX_RESPONSE_SAMPLE_DATA = 100000  # Table data preview
@@ -289,18 +288,6 @@ class DatabaseMCPServer:
             },
         )
 
-    def _create_profile_database_tool(self) -> Tool:
-        """Create profile_database tool."""
-        return Tool(
-            name="profile_database",
-            description="Get database-wide profiling information (size, table counts, etc.)",
-            inputSchema={
-                "type": "object",
-                "properties": {},
-                "required": [],
-            },
-        )
-
     # Tool handlers
     async def handle_get_database_info(
         self, arguments: dict[str, Any]
@@ -491,31 +478,6 @@ class DatabaseMCPServer:
             )
         ]
 
-    async def handle_profile_database(
-        self, arguments: dict[str, Any]
-    ) -> list[TextContent]:
-        """Handle profile_database request."""
-        assert self.inspector is not None
-
-        # Extract database name from configuration
-        database_name = self.config.url.split("/")[-1].split("?")[0]
-
-        async with self.connection.get_connection() as conn:
-            # Use adapter to generate database profile
-            profile = await self.adapter.profile_database(conn, database_name)
-
-            response = json.dumps(
-                profile.model_dump(), indent=2, default=json_serializer
-            )
-            return [
-                TextContent(
-                    type="text",
-                    text=truncate_json_response(
-                        response, MAX_RESPONSE_PROFILE_DATABASE
-                    ),
-                )
-            ]
-
     async def cleanup(self) -> None:
         """Cleanup resources."""
         await self.connection.dispose()
@@ -561,9 +523,6 @@ async def main() -> None:
             if mcp_server.adapter.capabilities.explain_plans:
                 tools.append(mcp_server._create_explain_query_tool())
 
-            if mcp_server.adapter.capabilities.profiling:
-                tools.append(mcp_server._create_profile_database_tool())
-
             return tools
 
         # Register tool call handlers
@@ -580,7 +539,6 @@ async def main() -> None:
                 "get_table_relationships": mcp_server.handle_get_relationships,
                 "analyze_column": mcp_server.handle_analyze_column,
                 "explain_query": mcp_server.handle_explain_query,
-                "profile_database": mcp_server.handle_profile_database,
             }
 
             handler = handlers.get(name)

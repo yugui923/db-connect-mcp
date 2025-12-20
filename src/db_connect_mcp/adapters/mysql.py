@@ -11,7 +11,6 @@ import orjson
 
 from db_connect_mcp.models.capabilities import DatabaseCapabilities
 from db_connect_mcp.models.database import SchemaInfo
-from db_connect_mcp.models.profile import DatabaseProfile, SchemaProfile, TableProfile
 from db_connect_mcp.models.statistics import ColumnStats, Distribution
 from db_connect_mcp.models.table import TableInfo
 
@@ -299,94 +298,3 @@ class MySQLAdapter(BaseAdapter):
             "warnings": [],
             "recommendations": [],
         }
-
-    async def profile_database(
-        self, conn: AsyncConnection, database_name: str
-    ) -> DatabaseProfile:
-        """Generate MySQL database profile (basic implementation)."""
-        # Get database version (extract just version number)
-        version_query = text("SELECT VERSION()")
-        version_result = await conn.execute(version_query)
-        version_row = version_result.fetchone()
-        # Extract just the version number (e.g., "8.0.32" from "8.0.32-MariaDB")
-        raw_version = version_row[0] if version_row else "Unknown"
-        version = (
-            f"MySQL {raw_version.split('-')[0]}"
-            if raw_version != "Unknown"
-            else "Unknown"
-        )
-
-        # Get schema statistics from information_schema
-        schema_query = text("""
-            SELECT
-                table_schema,
-                COUNT(DISTINCT table_name) as table_count,
-                COALESCE(SUM(data_length + index_length), 0) as total_size
-            FROM information_schema.TABLES
-            WHERE table_schema NOT IN ('information_schema', 'mysql', 'performance_schema', 'sys')
-            GROUP BY table_schema
-            ORDER BY total_size DESC
-        """)
-
-        schema_result = await conn.execute(schema_query)
-        schema_rows = schema_result.fetchall()
-
-        # Calculate totals from all schemas
-        total_tables = sum(int(row[1]) if row[1] else 0 for row in schema_rows)
-        total_size = sum(int(row[2]) if row[2] else 0 for row in schema_rows)
-
-        # Limit to top 10 schemas by size for conciseness
-        schemas = []
-        for row in schema_rows[:10]:
-            schema_profile = SchemaProfile(
-                name=row[0],
-                table_count=int(row[1]) if row[1] else 0,
-                view_count=None,  # MySQL doesn't easily provide view count per schema
-                total_size_bytes=int(row[2]) if row[2] else 0,
-                total_rows=None,  # Would require additional queries
-            )
-            schemas.append(schema_profile)
-
-        # Get largest tables (top 5 for conciseness)
-        tables_query = text("""
-            SELECT
-                table_schema,
-                table_name,
-                table_type,
-                COALESCE(data_length + index_length, 0) as total_size,
-                COALESCE(index_length, 0) as index_size,
-                COALESCE(table_rows, 0) as row_count
-            FROM information_schema.TABLES
-            WHERE table_schema NOT IN ('information_schema', 'mysql', 'performance_schema', 'sys')
-            ORDER BY total_size DESC
-            LIMIT 5
-        """)
-
-        tables_result = await conn.execute(tables_query)
-        tables_rows = tables_result.fetchall()
-
-        largest_tables = []
-        for row in tables_rows:
-            table_profile = TableProfile(
-                schema=row[0],
-                name=row[1],
-                table_type=row[2],
-                size_bytes=int(row[3]) if row[3] else 0,
-                index_size_bytes=int(row[4]) if row[4] else 0,
-                row_count=int(row[5]) if row[5] else 0,
-            )
-            largest_tables.append(table_profile)
-
-        return DatabaseProfile(
-            database_name=database_name,
-            version=version,
-            total_size_bytes=total_size if total_size > 0 else None,
-            total_schemas=len(schemas),
-            total_tables=total_tables,
-            total_views=None,
-            total_indexes=None,
-            schemas=schemas,
-            largest_tables=largest_tables,
-            total_index_size_bytes=None,
-            index_to_table_ratio=None,
-        )

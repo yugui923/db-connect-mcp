@@ -209,51 +209,6 @@ class TestQueryAndAnalysisWorkflow:
 class TestDatabaseProfilingWorkflow:
     """Test database profiling workflows."""
 
-    @pytest.mark.asyncio
-    async def test_workflow_profile_database(self, pg_config: DatabaseConfig):
-        """Test workflow: profile database -> identify large tables -> analyze them."""
-        server, client = await MCPProtocolHelper.create_test_server_and_client(
-            pg_config
-        )
-
-        try:
-            # Check if profiling is supported
-            if not server.adapter.capabilities.profiling:
-                pytest.skip("Database doesn't support profiling")
-
-            # 1. Profile the entire database
-            profile_response = await client.call_tool("profile_database", arguments={})
-            profile = MCPProtocolHelper.check_and_parse_response(profile_response)
-
-            # Validate profile structure
-            assert "database_name" in profile
-            assert "version" in profile
-            assert "total_schemas" in profile
-            assert "total_tables" in profile
-
-            # 2. If we have large tables, describe the largest one
-            if "largest_tables" in profile and len(profile["largest_tables"]) > 0:
-                largest_table = profile["largest_tables"][0]
-                table_name = largest_table["name"]
-
-                # Get the schema for this table (usually in the table info)
-                schema_name = largest_table.get("schema", "public")
-
-                # 3. Describe the largest table
-                describe_response = await client.call_tool(
-                    "describe_table",
-                    arguments={"table": table_name, "schema": schema_name},
-                )
-                table_info = MCPProtocolHelper.parse_text_content(
-                    describe_response.content
-                )
-
-                assert table_info["name"] == table_name
-                assert "columns" in table_info
-
-        finally:
-            await server.cleanup()
-
 
 class TestErrorRecoveryWorkflow:
     """Test error handling and recovery in workflows."""
