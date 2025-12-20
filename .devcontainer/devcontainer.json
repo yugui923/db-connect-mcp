@@ -5,7 +5,8 @@
 		"context": ".."
 	},
 	"features": {
-		"ghcr.io/devcontainers/features/docker-in-docker:2": {}
+		// No Docker features - PostgreSQL runs on host via Docker Desktop
+		// This provides better security isolation for the dev container
 	},
 	"containerEnv": {
 		"ANTHROPIC_API_KEY": "${localEnv:ANTHROPIC_API_KEY}"
