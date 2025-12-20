@@ -35,31 +35,16 @@ if sys.platform == "win32":
 
 
 @pytest.fixture(scope="session")
-def local_database_url() -> str:
-    """Local development database URL (Docker Compose).
-
-    This is the default PostgreSQL database URL for the Docker Compose setup
-    in tests/docker/. Can be overridden with LOCAL_DATABASE_URL env var.
-    """
-    return os.getenv(
-        "LOCAL_DATABASE_URL",
-        "postgresql+asyncpg://dbconnect:dbconnect_dev_password@localhost:5432/db_connect_test"
-    )
-
-
-@pytest.fixture(scope="session")
-def pg_database_url(local_database_url: str) -> Optional[str]:
-    """PostgreSQL test database URL from environment.
+def pg_database_url() -> str:
+    """PostgreSQL test database URL.
 
     Priority:
-    1. PG_TEST_DATABASE_URL (explicit test database)
-    2. LOCAL_DATABASE_URL or default local Docker database
-    3. DATABASE_URL (fallback to main config)
+    1. PG_TEST_DATABASE_URL (explicit test database override)
+    2. Local Docker database (default: localhost:5432)
     """
-    return (
-        os.getenv("PG_TEST_DATABASE_URL")
-        or local_database_url
-        or os.getenv("DATABASE_URL")
+    return os.getenv(
+        "PG_TEST_DATABASE_URL",
+        "postgresql+asyncpg://dbconnect:dbconnect_dev_password@localhost:5432/db_connect_test"
     )
 
 
@@ -79,10 +64,8 @@ def mysql_database_url() -> Optional[str]:
 
 
 @pytest.fixture
-async def pg_config(pg_database_url: Optional[str]) -> DatabaseConfig:
+async def pg_config(pg_database_url: str) -> DatabaseConfig:
     """PostgreSQL database configuration."""
-    if not pg_database_url:
-        pytest.skip("PG_TEST_DATABASE_URL not set in environment")
     return DatabaseConfig(url=pg_database_url)
 
 
