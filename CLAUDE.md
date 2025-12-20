@@ -37,16 +37,18 @@ See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for detailed development setup.
 
 ### Testing
 
+**IMPORTANT:** Always run tests with **6 parallel workers** (`-n 6`) for optimal performance.
+
 ```bash
 # Start local test database (PostgreSQL 17 with sample data)
 cd tests/docker && docker-compose up -d && cd ../..
 
-# Run all tests (automatically uses local database)
-uv run pytest
+# Run all tests in parallel (preferred - 6 workers)
+uv run pytest -n 6
 
-# Run specific test modules
-uv run pytest tests/module/test_inspector.py -v
-uv run pytest tests/integration/ -v
+# Run specific test modules in parallel
+uv run pytest tests/module/test_inspector.py -v -n 6
+uv run pytest tests/integration/ -v -n 6
 
 # Stop test database
 cd tests/docker && docker-compose down && cd ../..
@@ -60,6 +62,11 @@ cd tests/docker && docker-compose down -v && docker-compose up -d && cd ../..
 - Automatically initialized via Docker Compose
 - No cloud database or .env configuration required
 - See `tests/docker/README.md` for details
+
+**Performance Notes:**
+- With database running: `-n 6` provides ~4-5x speedup
+- Without database (tests skipped): Sequential is faster due to worker overhead
+- Always use `-n 6` when running the full test suite with database
 
 ### Code Quality
 

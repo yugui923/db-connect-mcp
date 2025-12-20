@@ -197,6 +197,32 @@ class E2ETestHelper:
     """Helper class for end-to-end testing with subprocess server."""
 
     @staticmethod
+    async def check_database_connectivity(database_url: str) -> bool:
+        """Check if database is accessible before running E2E tests.
+
+        Args:
+            database_url: Database connection URL
+
+        Returns:
+            True if database is accessible, False otherwise
+        """
+        try:
+            from db_connect_mcp.core import DatabaseConnection
+            from db_connect_mcp.models.config import DatabaseConfig
+            from sqlalchemy import text
+
+            config = DatabaseConfig(url=database_url)
+            connection = DatabaseConnection(config)
+
+            await connection.initialize()
+            async with connection.get_connection() as conn:
+                await conn.execute(text("SELECT 1"))
+            await connection.dispose()
+            return True
+        except Exception:
+            return False
+
+    @staticmethod
     async def create_server_and_client(
         database_url: str,
     ) -> tuple[ClientSession, ServerLogCapture, Any]:
@@ -322,10 +348,10 @@ class TestE2EServerLifecycle:
     """Test end-to-end server lifecycle with subprocess."""
 
     @pytest.mark.asyncio
-    async def test_server_starts_and_responds(self, pg_database_url: Optional[str]):
+    async def test_server_starts_and_responds(self, pg_database_url: str):
         """Test that server starts as subprocess and responds to client."""
-        if not pg_database_url:
-            pytest.skip("PG_TEST_DATABASE_URL not set")
+        if not await E2ETestHelper.check_database_connectivity(pg_database_url):
+            pytest.skip("Database not accessible")
 
         # Create server and client
         (
@@ -351,10 +377,10 @@ class TestE2EServerLifecycle:
             )
 
     @pytest.mark.asyncio
-    async def test_server_logs_initialization(self, pg_database_url: Optional[str]):
+    async def test_server_logs_initialization(self, pg_database_url: str):
         """Test that server can initialize successfully (log capture is limited in stdio_client)."""
-        if not pg_database_url:
-            pytest.skip("PG_TEST_DATABASE_URL not set")
+        if not await E2ETestHelper.check_database_connectivity(pg_database_url):
+            pytest.skip("Database not accessible")
 
         (
             client,
@@ -381,10 +407,10 @@ class TestE2EToolExecution:
     """Test end-to-end tool execution with subprocess server."""
 
     @pytest.mark.asyncio
-    async def test_get_database_info_e2e(self, pg_database_url: Optional[str]):
+    async def test_get_database_info_e2e(self, pg_database_url: str):
         """Test get_database_info tool via subprocess server."""
-        if not pg_database_url:
-            pytest.skip("PG_TEST_DATABASE_URL not set")
+        if not await E2ETestHelper.check_database_connectivity(pg_database_url):
+            pytest.skip("Database not accessible")
 
         (
             client,
@@ -411,10 +437,10 @@ class TestE2EToolExecution:
             )
 
     @pytest.mark.asyncio
-    async def test_execute_query_e2e(self, pg_database_url: Optional[str]):
+    async def test_execute_query_e2e(self, pg_database_url: str):
         """Test execute_query tool via subprocess server."""
-        if not pg_database_url:
-            pytest.skip("PG_TEST_DATABASE_URL not set")
+        if not await E2ETestHelper.check_database_connectivity(pg_database_url):
+            pytest.skip("Database not accessible")
 
         (
             client,
@@ -444,10 +470,10 @@ class TestE2EToolExecution:
             )
 
     @pytest.mark.asyncio
-    async def test_list_schemas_e2e(self, pg_database_url: Optional[str]):
+    async def test_list_schemas_e2e(self, pg_database_url: str):
         """Test list_schemas tool via subprocess server."""
-        if not pg_database_url:
-            pytest.skip("PG_TEST_DATABASE_URL not set")
+        if not await E2ETestHelper.check_database_connectivity(pg_database_url):
+            pytest.skip("Database not accessible")
 
         (
             client,
@@ -480,10 +506,10 @@ class TestE2EErrorHandling:
     """Test end-to-end error handling with subprocess server."""
 
     @pytest.mark.asyncio
-    async def test_invalid_query_e2e(self, pg_database_url: Optional[str]):
+    async def test_invalid_query_e2e(self, pg_database_url: str):
         """Test that invalid queries return errors via subprocess."""
-        if not pg_database_url:
-            pytest.skip("PG_TEST_DATABASE_URL not set")
+        if not await E2ETestHelper.check_database_connectivity(pg_database_url):
+            pytest.skip("Database not accessible")
 
         (
             client,
@@ -515,10 +541,10 @@ class TestE2EErrorHandling:
             )
 
     @pytest.mark.asyncio
-    async def test_invalid_tool_e2e(self, pg_database_url: Optional[str]):
+    async def test_invalid_tool_e2e(self, pg_database_url: str):
         """Test calling non-existent tool via subprocess."""
-        if not pg_database_url:
-            pytest.skip("PG_TEST_DATABASE_URL not set")
+        if not await E2ETestHelper.check_database_connectivity(pg_database_url):
+            pytest.skip("Database not accessible")
 
         (
             client,
@@ -548,10 +574,10 @@ class TestE2EServerLogs:
     """
 
     @pytest.mark.asyncio
-    async def test_server_subprocess_execution(self, pg_database_url: Optional[str]):
+    async def test_server_subprocess_execution(self, pg_database_url: str):
         """Test that server runs as subprocess and executes successfully."""
-        if not pg_database_url:
-            pytest.skip("PG_TEST_DATABASE_URL not set")
+        if not await E2ETestHelper.check_database_connectivity(pg_database_url):
+            pytest.skip("Database not accessible")
 
         (
             client,
@@ -580,10 +606,10 @@ class TestE2EServerLogs:
             )
 
     @pytest.mark.asyncio
-    async def test_multiple_operations_subprocess(self, pg_database_url: Optional[str]):
+    async def test_multiple_operations_subprocess(self, pg_database_url: str):
         """Test multiple operations through subprocess server."""
-        if not pg_database_url:
-            pytest.skip("PG_TEST_DATABASE_URL not set")
+        if not await E2ETestHelper.check_database_connectivity(pg_database_url):
+            pytest.skip("Database not accessible")
 
         (
             client,
@@ -615,14 +641,14 @@ class TestE2EServerLogs:
 
     @pytest.mark.asyncio
     async def test_log_capture_framework_with_server_context(
-        self, pg_database_url: Optional[str]
+        self, pg_database_url: str
     ):
         """Test log capture framework using ServerContext directly.
 
         This demonstrates how to capture logs when you control the subprocess.
         """
-        if not pg_database_url:
-            pytest.skip("PG_TEST_DATABASE_URL not set")
+        if not await E2ETestHelper.check_database_connectivity(pg_database_url):
+            pytest.skip("Database not accessible")
 
         # Use ServerContext for direct subprocess control
         async with ServerContext(pg_database_url) as server_ctx:

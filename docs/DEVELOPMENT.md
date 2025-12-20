@@ -142,21 +142,29 @@ uv run ruff format . && uv run ruff check . && uv run pyright src/
 
 ### Running Tests
 
-```bash
-# Run all tests
-uv run pytest
+**IMPORTANT:** Always run tests with **6 parallel workers** (`-n 6`) for optimal performance.
 
-# Run with coverage
+```bash
+# Start local test database
+cd tests/docker && docker-compose up -d && cd ../..
+
+# Run all tests in parallel (preferred - 6 workers)
+uv run pytest -n 6
+
+# Run with verbose output and parallel execution
+uv run pytest -v -n 6
+
+# Run with coverage (sequential - coverage doesn't work well with parallel)
 uv run pytest --cov=src --cov-report=term-missing
 
-# Run specific test file
-uv run pytest tests/test_postgresql.py
+# Run specific test file with parallel execution
+uv run pytest tests/module/test_inspector.py -v -n 6
 
-# Run with verbose output
-uv run pytest -v
+# Run only PostgreSQL tests with parallel execution
+uv run pytest -m postgresql -n 6
 
-# Run only PostgreSQL tests
-uv run pytest -m postgresql
+# Stop test database
+cd tests/docker && docker-compose down && cd ../..
 ```
 
 See [tests/README.md](../tests/README.md) for detailed testing documentation.
