@@ -38,11 +38,28 @@ See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for detailed development setup.
 ### Testing
 
 ```bash
-# Run the PostgreSQL integration test
-uv run python tests/test_psql_server.py
+# Start local test database (PostgreSQL 17 with sample data)
+cd tests/docker && docker-compose up -d && cd ../..
 
-# Note: Requires PG_TEST_DATABASE_URL in .env file pointing to a test database
+# Run all tests (automatically uses local database)
+uv run pytest
+
+# Run specific test modules
+uv run pytest tests/module/test_inspector.py -v
+uv run pytest tests/integration/ -v
+
+# Stop test database
+cd tests/docker && docker-compose down && cd ../..
+
+# Reset database (clean slate with fresh data)
+cd tests/docker && docker-compose down -v && docker-compose up -d && cd ../..
 ```
+
+**Local Test Database:**
+- PostgreSQL 17 with 50K+ rows of sample data across 7 tables
+- Automatically initialized via Docker Compose
+- No cloud database or .env configuration required
+- See `tests/docker/README.md` for details
 
 ### Code Quality
 
