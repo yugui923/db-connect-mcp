@@ -7,8 +7,8 @@ RUN apt-get install -y \
     build-essential \
     # SSL/crypto libraries
     libssl-dev libffi-dev \
-    # Database clients (for MCP servers)
-    sqlite3 postgresql-client mysql-client \
+    # Database clients
+    sqlite3 mysql-client postgresql-client \
     # Python build dependencies
     libbz2-dev libreadline-dev libsqlite3-dev \
     zlib1g-dev liblzma-dev \
