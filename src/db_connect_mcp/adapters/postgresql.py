@@ -116,8 +116,13 @@ class PostgresAdapter(BaseAdapter):
             row = result.fetchone()
 
             if row:
-                table_info.extra_info["relkind"] = row[0]
-                table_info.extra_info["persistence"] = row[1]
+                # PostgreSQL "char" type comes back as bytes, decode to string
+                table_info.extra_info["relkind"] = (
+                    row[0].decode("utf-8") if isinstance(row[0], bytes) else row[0]
+                )
+                table_info.extra_info["persistence"] = (
+                    row[1].decode("utf-8") if isinstance(row[1], bytes) else row[1]
+                )
                 table_info.extra_info["is_partition"] = row[2]
 
         except Exception as e:
