@@ -491,7 +491,6 @@ db-connect-mcp/
 │   ├── conftest.py      # Test configuration
 │   └── test_server.py   # Integration tests
 ├── .env.example         # Example environment configuration
-├── main.py             # Legacy entry point (optional)
 ├── pyproject.toml      # Project dependencies and console scripts
 └── README.md          # This file
 ```
