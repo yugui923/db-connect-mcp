@@ -2,7 +2,7 @@
 	"name": "py-ts-dev",
 	"dockerComposeFile": "docker-compose.yml",
 	"service": "devcontainer",
-	"workspaceFolder": "/workspaces/db-connect-mcp",
+	"workspaceFolder": "/workspace",
 	"containerEnv": {
 		"ANTHROPIC_API_KEY": "${localEnv:ANTHROPIC_API_KEY}",
 		"PG_TEST_DATABASE_URL": "postgresql+asyncpg://devuser:devpassword@postgres:5432/devdb"
