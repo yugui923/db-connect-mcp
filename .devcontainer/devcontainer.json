@@ -1,5 +1,5 @@
 {
-	"name": "py-ts-dev",
+	"name": "db-connect-mcp-dev",
 	"dockerComposeFile": "docker-compose.yml",
 	"service": "devcontainer",
 	"workspaceFolder": "/workspace",
