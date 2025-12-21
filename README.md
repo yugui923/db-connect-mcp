@@ -245,6 +245,106 @@ Add the server to your Claude Desktop configuration (`claude_desktop_config.json
 }
 ```
 
+### Using with Claude Code
+
+[Claude Code](https://claude.ai/code) is the official CLI for Claude that provides better debugging visibility and faster iteration compared to Claude Desktop.
+
+**Quick Setup:**
+
+1. **Add the MCP server** to your project's `.mcp.json`:
+   ```bash
+   claude mcp add --transport stdio db-connect --scope project \
+     --env DATABASE_URL=postgresql://user:pass@host:5432/db \
+     -- python -m db_connect_mcp
+   ```
+
+2. **Or manually create** `.mcp.json` in your project root:
+   ```json
+   {
+     "mcpServers": {
+       "db-connect-mcp": {
+         "command": "python",
+         "args": ["-m", "db_connect_mcp"],
+         "env": {
+           "DATABASE_URL": "postgresql://user:pass@host:5432/db"
+         }
+       }
+     }
+   }
+   ```
+
+3. **Restart Claude Code**:
+   ```bash
+   # Exit current session (Ctrl+D)
+   claude
+   ```
+
+4. **Verify the server is loaded**:
+   ```
+   /mcp
+   ```
+   You should see `db-connect-mcp` listed with all available tools.
+
+5. **Start querying**:
+   ```
+   What tables are in my database?
+   ```
+
+**Configuration Scopes:**
+- **Project scope** (recommended): `.mcp.json` in project root - Shared with team via git
+- **User scope**: `~/.claude.json` - Available across all your projects
+- **Local scope**: `~/.claude.json` - Private to you in the current project
+
+**Development with uv:**
+
+If you're working with the source code in a dev container or using uv:
+
+```json
+{
+  "mcpServers": {
+    "db-connect-mcp": {
+      "command": "uv",
+      "args": ["run", "python", "-m", "db_connect_mcp"],
+      "env": {
+        "DATABASE_URL": "postgresql+asyncpg://user:pass@host:5432/db"
+      }
+    }
+  }
+}
+```
+
+**Docker/Dev Container Note:**
+
+When running inside a Docker container (like VS Code Dev Containers), use the appropriate hostname:
+- **Inside container**: Use Docker service names (e.g., `postgres:5432`)
+- **On host machine**: Use `localhost:5432`
+
+Example for dev container with PostgreSQL sidecar:
+```json
+{
+  "mcpServers": {
+    "db-connect-mcp": {
+      "command": "uv",
+      "args": ["run", "python", "-m", "db_connect_mcp"],
+      "env": {
+        "DATABASE_URL": "postgresql+asyncpg://devuser:devpass@postgres:5432/devdb"
+      }
+    }
+  }
+}
+```
+
+**Advantages of Claude Code:**
+- ✅ Better error visibility and debugging
+- ✅ Faster iteration (no app restart needed)
+- ✅ Direct access to server logs
+- ✅ Integration with development workflow
+- ✅ Use `/mcp` command to check server status
+
+**Learn more:**
+- [Claude Code Documentation](https://code.claude.com/docs)
+- [MCP Server Configuration](https://code.claude.com/docs/en/mcp)
+
 > **For development**: See [Development Guide](docs/DEVELOPMENT.md) for running from source with uv.
 
 ## Database Feature Support

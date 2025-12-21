@@ -1,45 +1,36 @@
-# Claude Code Integration Guide
+# Claude Code Integration Guide for Development
 
-This guide explains how to test the `db_connect_mcp` server using Claude Code instead of Claude Desktop.
+This guide is for **developers** testing the `db_connect_mcp` server using Claude Code. For end-user setup instructions, see the [README](../README.md#using-with-claude-code).
 
-## Why Claude Code for Testing?
+## Why Use Claude Code for MCP Development?
 
-Claude Code provides several advantages over Claude Desktop for MCP development:
+When developing MCP servers, Claude Code provides significant advantages:
 
-1. **Better debugging visibility**: See detailed error messages and tool outputs
-2. **Faster iteration**: Restart and reconfigure servers quickly
-3. **Direct CLI access**: Test your server from the command line
-4. **Integration with your development workflow**: Use the same environment you code in
+- **Real-time debugging**: See MCP protocol messages and server errors immediately
+- **Fast iteration**: Modify code, restart server, test - all without leaving the terminal
+- **Protocol inspection**: Use `/mcp` to verify tools are registered correctly
+- **Development workflow**: Test MCP integration while developing
 
-## Prerequisites
+## Development Setup
 
-1. **Start the local test database**:
-   ```bash
-   cd tests/docker && docker compose up -d && cd ../..
-   ```
+### 1. Start Test Database
 
-   This starts a PostgreSQL 17 database with:
-   - Database: `devdb`
-   - User: `devuser`
-   - Password: `devpassword`
-   - Port: `5432`
-   - Pre-loaded with 50K+ rows of sample data
+```bash
+cd tests/docker && docker compose up -d && cd ../..
+```
 
-2. **Install dependencies**:
-   ```bash
-   uv sync
-   ```
+This starts PostgreSQL 17 with 50K+ rows of sample data for testing.
 
-## Configuration
+### 2. Configure for Development
 
-The MCP server is configured in `.mcp.json` (project-scoped configuration):
+Create `.mcp.json` in project root with `uv run` for editable install:
 
 ```json
 {
   "mcpServers": {
     "db-connect-mcp": {
-      "command": "python",
-      "args": ["-m", "db_connect_mcp"],
+      "command": "uv",
+      "args": ["run", "python", "-m", "db_connect_mcp"],
       "env": {
         "DATABASE_URL": "postgresql+asyncpg://devuser:devpassword@localhost:5432/devdb"
       }
@@ -48,19 +39,15 @@ The MCP server is configured in `.mcp.json` (project-scoped configuration):
 }
 ```
 
-**Note**: This configuration uses the local test database. To test with a different database, update the `DATABASE_URL` environment variable.
+**Key difference from production**: Uses `uv run` to ensure dev dependencies are available and code changes are immediately reflected.
 
-## Restarting Claude Code
-
-After creating or modifying `.mcp.json`, you need to restart Claude Code:
+### 3. Start Claude Code
 
 ```bash
-# Exit current Claude Code session (Ctrl+D or type 'exit')
-# Then restart
 claude
 ```
 
-The MCP server will be automatically loaded on startup.
+The server auto-loads. Any code changes require restarting Claude Code to take effect.
 
 ## Verifying the MCP Server
 
@@ -105,104 +92,81 @@ The following MCP tools should be available:
 - `execute_query` - Execute read-only SQL queries
 - `get_table_relationships` - Get foreign key relationships
 
-## Troubleshooting
+## Development-Specific Troubleshooting
 
-### MCP Server Not Loading
+### Code Changes Not Reflected
 
-**Check the configuration file**:
+**Issue**: Modified code but server behaves the same
+
+**Solution**: Restart Claude Code (Ctrl+D, then `claude`)
+
+The `uv run` command uses editable install, but Claude Code caches the server process.
+
+### Database Connection Fails
+
+**Check test database**:
 ```bash
-cat .mcp.json
+cd tests/docker && docker compose ps
 ```
 
-**Verify Python can run the module**:
-```bash
-python -m db_connect_mcp --help
+**Verify connection in dev container**:
+If running in a dev container, use `postgres` hostname instead of `localhost`:
+```json
+"DATABASE_URL": "postgresql+asyncpg://devuser:devpassword@postgres:5432/devdb"
 ```
 
-**Check for syntax errors**:
+### MCP Tools Missing
+
+**Verify installation**:
 ```bash
-uv run python -m db_connect_mcp
+uv run python -c "import db_connect_mcp; print('OK')"
 ```
 
-### Database Connection Issues
-
-**Verify the database is running**:
-```bash
-docker compose ps
-# or
-docker ps | grep postgres
-```
-
-**Test the connection string directly**:
+**Check server output**:
+Start the server manually to see error messages:
 ```bash
 DATABASE_URL=postgresql+asyncpg://devuser:devpassword@localhost:5432/devdb \
-  python -m db_connect_mcp
+  uv run python -m db_connect_mcp
 ```
 
-**Check database logs**:
-```bash
-cd tests/docker && docker compose logs postgres
-```
+Press Ctrl+C to stop, then check for import or initialization errors.
 
-### MCP Tools Not Appearing
+## Development Testing Workflow
 
-If tools don't appear in `/mcp`:
+### 1. Make Code Changes
 
-1. **Check for errors in Claude Code startup**:
-   - Look for error messages when Claude Code starts
-   - Check if the server process started successfully
+Edit files in `src/db_connect_mcp/`
 
-2. **Verify asyncpg is installed**:
-   ```bash
-   uv pip list | grep asyncpg
-   ```
+### 2. Run Unit Tests
 
-3. **Test the server standalone**:
-   ```bash
-   # Should start and wait for stdio input
-   DATABASE_URL=postgresql+asyncpg://devuser:devpassword@localhost:5432/devdb \
-     python -m db_connect_mcp
-   ```
-
-### Permission Errors
-
-If you see "permission denied" or "read-only" errors:
-
-- This is **expected behavior** - the MCP server enforces read-only access
-- Only SELECT queries are allowed
-- INSERT, UPDATE, DELETE, and DDL statements will be rejected
-
-## Testing Workflow
-
-### 1. Automated Testing (Recommended)
-
-Run the full test suite:
 ```bash
 uv run pytest -n 6
 ```
 
-This tests the MCP server functionality programmatically.
-
-### 2. Interactive Testing with Claude Code
-
-Use Claude Code as an interactive testing environment:
-
-1. **Start Claude Code** with the MCP server loaded
-2. **Ask natural language questions** about your database
-3. **Verify the responses** match expected behavior
-4. **Test edge cases** like large result sets, complex queries, etc.
-
-### 3. Manual MCP Protocol Testing
-
-For low-level protocol testing, you can communicate with the server directly via stdin/stdout:
+### 3. Test with Claude Code
 
 ```bash
-# Start the server
-DATABASE_URL=postgresql+asyncpg://devuser:devpassword@localhost:5432/devdb \
-  python -m db_connect_mcp
+# Restart Claude Code to load changes
+claude
+```
 
-# Send MCP protocol messages (JSON-RPC format)
-# Example: list available tools
+Try the feature interactively:
+```
+/mcp
+```
+
+Then test with natural language queries.
+
+### 4. Test MCP Protocol Directly (Advanced)
+
+For protocol-level debugging:
+
+```bash
+# Run server manually
+DATABASE_URL=postgresql+asyncpg://devuser:devpassword@localhost:5432/devdb \
+  uv run python -m db_connect_mcp
+
+# Send MCP messages (JSON-RPC)
 {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}
 ```
 
@@ -221,35 +185,47 @@ DATABASE_URL=postgresql+asyncpg://devuser:devpassword@localhost:5432/devdb \
 - [ ] Large result sets are automatically limited
 - [ ] Error messages are clear and helpful
 
-## Comparing with Claude Desktop
+## Testing Different Scenarios
 
-### Claude Desktop Issues
+### Testing with Different Databases
 
-Common issues when testing with Claude Desktop:
-- Limited error visibility
-- Difficult to debug server startup issues
-- No direct access to server logs
-- Slower iteration cycle (requires app restart)
+Update `DATABASE_URL` in `.mcp.json`:
 
-### Claude Code Advantages
+```json
+"DATABASE_URL": "mysql+aiomysql://user:pass@localhost:3306/testdb"
+```
 
-- See server stdout/stderr directly
-- Quick configuration changes
-- Better error messages
-- Integration with development environment
-- Can combine MCP testing with code editing
+or
 
-## Next Steps
+```json
+"DATABASE_URL": "clickhouse+asynch://default:@localhost:9000/default"
+```
 
-1. **Test with different databases**: Update `DATABASE_URL` to test MySQL or ClickHouse
-2. **Test with production data**: Use a read-only replica connection string
-3. **Performance testing**: Test with large tables and complex queries
-4. **Error handling**: Verify error messages are helpful and accurate
-5. **Security testing**: Verify write operations are blocked
+Then restart Claude Code.
 
-## Additional Resources
+### Docker/Dev Container Testing
 
-- [Claude Code MCP Documentation](https://code.claude.com/docs/en/mcp)
-- [MCP Protocol Specification](https://spec.modelcontextprotocol.io/)
-- [Project README](/workspace/README.md)
-- [Development Guide](/workspace/docs/DEVELOPMENT.md)
+If testing in a dev container with PostgreSQL sidecar:
+
+```json
+{
+  "mcpServers": {
+    "db-connect-mcp": {
+      "command": "uv",
+      "args": ["run", "python", "-m", "db_connect_mcp"],
+      "env": {
+        "DATABASE_URL": "postgresql+asyncpg://devuser:devpass@postgres:5432/devdb"
+      }
+    }
+  }
+}
+```
+
+**Note**: Use service name (`postgres`) not `localhost` when inside containers.
+
+## Resources
+
+- [Main README](../README.md) - User documentation
+- [Development Guide](DEVELOPMENT.md) - Full development setup
+- [Test Guide](../tests/README.md) - Testing documentation
+- [Claude Code Docs](https://code.claude.com/docs/en/mcp) - Official MCP documentation

@@ -85,34 +85,22 @@ uv run python -m db_connect_mcp
 DATABASE_URL="postgresql://..." python -m db_connect_mcp
 ```
 
-### For Testing with Claude Desktop
+### For Testing with Claude Desktop or Claude Code
 
-Add to your `claude_desktop_config.json`:
+For production usage examples, see the [README](../README.md#using-with-claude-desktop).
 
-```json
-{
-  "mcpServers": {
-    "db-connect-dev": {
-      "command": "python",
-      "args": ["-m", "db_connect_mcp"],
-      "env": {
-        "DATABASE_URL": "postgresql://user:pass@localhost:5432/testdb"
-      }
-    }
-  }
-}
-```
+For development and testing with Claude Code, see [Claude Code Integration Guide](CLAUDE_CODE_INTEGRATION.md).
 
-Or using uv (ensures dependencies are available):
+**Quick Dev Config** - Add to `.mcp.json` in project root:
 
 ```json
 {
   "mcpServers": {
     "db-connect-dev": {
       "command": "uv",
-      "args": ["--directory", "C:/path/to/db-connect-mcp", "run", "python", "-m", "db_connect_mcp"],
+      "args": ["run", "python", "-m", "db_connect_mcp"],
       "env": {
-        "DATABASE_URL": "postgresql://user:pass@localhost:5432/testdb"
+        "DATABASE_URL": "postgresql+asyncpg://user:pass@localhost:5432/testdb"
       }
     }
   }
