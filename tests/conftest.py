@@ -44,7 +44,7 @@ def pg_database_url() -> str:
     """
     return os.getenv(
         "PG_TEST_DATABASE_URL",
-        "postgresql+asyncpg://dbconnect:dbconnect_dev_password@localhost:5432/db_connect_test"
+        "postgresql+asyncpg://devuser:devpassword@localhost:5432/devdb"
     )
 
 

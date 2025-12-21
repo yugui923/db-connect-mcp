@@ -19,16 +19,16 @@ This directory contains Docker Compose configuration for running a local Postgre
 3. **Connect to database**:
    ```bash
    # Using docker exec
-   docker exec -it db-connect-mcp-postgres psql -U dbconnect -d db_connect_test
+   docker exec -it db-connect-mcp-postgres psql -U devuser -d devdb
 
    # Using local psql client
-   psql -h localhost -U dbconnect -d db_connect_test
-   # Password: dbconnect_dev_password
+   psql -h localhost -U devuser -d devdb
+   # Password: devpassword
    ```
 
 4. **Update your .env file** (optional, uses this by default):
    ```bash
-   DATABASE_URL=postgresql+asyncpg://dbconnect:dbconnect_dev_password@localhost:5432/db_connect_test
+   DATABASE_URL=postgresql+asyncpg://devuser:devpassword@localhost:5432/devdb
    ```
 
 5. **Run tests**:
@@ -81,29 +81,29 @@ docker-compose logs -f postgres
 
 # Check health
 docker-compose ps
-docker-compose exec postgres pg_isready -U dbconnect
+docker-compose exec postgres pg_isready -U devuser
 ```
 
 ### Database Operations
 
 ```bash
 # Run SQL file
-docker exec -i db-connect-mcp-postgres psql -U dbconnect -d db_connect_test < your_file.sql
+docker exec -i db-connect-mcp-postgres psql -U devuser -d devdb < your_file.sql
 
 # Backup database
-docker exec db-connect-mcp-postgres pg_dump -U dbconnect db_connect_test > backup.sql
+docker exec db-connect-mcp-postgres pg_dump -U devuser devdb > backup.sql
 
 # Restore database
-docker exec -i db-connect-mcp-postgres psql -U dbconnect -d db_connect_test < backup.sql
+docker exec -i db-connect-mcp-postgres psql -U devuser -d devdb < backup.sql
 
 # Refresh materialized views
-docker exec db-connect-mcp-postgres psql -U dbconnect -d db_connect_test -c "REFRESH MATERIALIZED VIEW product_statistics; REFRESH MATERIALIZED VIEW user_activity_summary;"
+docker exec db-connect-mcp-postgres psql -U devuser -d devdb -c "REFRESH MATERIALIZED VIEW product_statistics; REFRESH MATERIALIZED VIEW user_activity_summary;"
 
 # List tables
-docker exec -it db-connect-mcp-postgres psql -U dbconnect -d db_connect_test -c "\dt"
+docker exec -it db-connect-mcp-postgres psql -U devuser -d devdb -c "\dt"
 
 # Get row counts
-docker exec -it db-connect-mcp-postgres psql -U dbconnect -d db_connect_test -c "
+docker exec -it db-connect-mcp-postgres psql -U devuser -d devdb -c "
 SELECT
   schemaname || '.' || tablename AS table,
   n_live_tup AS rows
@@ -129,7 +129,7 @@ The devcontainer uses `--network=host`, so the PostgreSQL database on `localhost
 
 Connection string:
 ```
-postgresql+asyncpg://dbconnect:dbconnect_dev_password@localhost:5432/db_connect_test
+postgresql+asyncpg://devuser:devpassword@localhost:5432/devdb
 ```
 
 ## Customization
@@ -222,10 +222,10 @@ docker-compose ps
 docker-compose logs postgres
 
 # Verify health
-docker-compose exec postgres pg_isready -U dbconnect -d db_connect_test
+docker-compose exec postgres pg_isready -U devuser -d devdb
 
 # Test connection manually
-docker exec -it db-connect-mcp-postgres psql -U dbconnect -d db_connect_test -c "SELECT version();"
+docker exec -it db-connect-mcp-postgres psql -U devuser -d devdb -c "SELECT version();"
 ```
 
 ### Database not initializing
@@ -257,7 +257,7 @@ To check progress:
 docker-compose logs -f postgres
 
 # Check if initialization is complete
-docker exec -it db-connect-mcp-postgres psql -U dbconnect -d db_connect_test -c "SELECT COUNT(*) FROM products;"
+docker exec -it db-connect-mcp-postgres psql -U devuser -d devdb -c "SELECT COUNT(*) FROM products;"
 # Should return 2000
 ```
 
@@ -268,7 +268,7 @@ Ensure database initialization completed:
 docker-compose logs postgres | grep "database system is ready"
 
 # Verify tables exist
-docker exec -it db-connect-mcp-postgres psql -U dbconnect -d db_connect_test -c "\dt"
+docker exec -it db-connect-mcp-postgres psql -U devuser -d devdb -c "\dt"
 ```
 
 ### Stale or incorrect data
@@ -300,7 +300,7 @@ environment:
 - Credentials are hardcoded (not suitable for production)
 - Database is exposed on localhost (accessible to all local processes)
 - No SSL/TLS encryption
-- Weak password (`dbconnect_dev_password`)
+- Weak password (`devpassword`)
 
 Never use this configuration in production or expose it to the internet.
 
@@ -314,9 +314,9 @@ services:
   postgres:
     image: postgres:17-alpine
     env:
-      POSTGRES_DB: db_connect_test
-      POSTGRES_USER: dbconnect
-      POSTGRES_PASSWORD: dbconnect_dev_password
+      POSTGRES_DB: devdb
+      POSTGRES_USER: devuser
+      POSTGRES_PASSWORD: devpassword
     ports:
       - 5432:5432
     options: >-
@@ -331,9 +331,9 @@ Then initialize manually in workflow steps:
 steps:
   - name: Initialize database
     run: |
-      PGPASSWORD=dbconnect_dev_password psql -h localhost -U dbconnect -d db_connect_test -f tests/docker/postgres/init/01-create-schema.sql
-      PGPASSWORD=dbconnect_dev_password psql -h localhost -U dbconnect -d db_connect_test -f tests/docker/postgres/init/02-seed-data.sql
-      PGPASSWORD=dbconnect_dev_password psql -h localhost -U dbconnect -d db_connect_test -f tests/docker/postgres/init/03-create-views.sql
+      PGPASSWORD=devpassword psql -h localhost -U devuser -d devdb -f tests/docker/postgres/init/01-create-schema.sql
+      PGPASSWORD=devpassword psql -h localhost -U devuser -d devdb -f tests/docker/postgres/init/02-seed-data.sql
+      PGPASSWORD=devpassword psql -h localhost -U devuser -d devdb -f tests/docker/postgres/init/03-create-views.sql
 ```
 
 ## Additional Resources

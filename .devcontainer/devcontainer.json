@@ -1,19 +1,12 @@
 {
-	"name": "py-ts-dev",
-	"build": {
-		"dockerfile": "Dockerfile",
-		"context": ".."
-	},
-	"features": {
-		// No Docker features - PostgreSQL runs on host via Docker Desktop
-		// This provides better security isolation for the dev container
-	},
+	"name": "db-connect-mcp-dev",
+	"dockerComposeFile": "docker-compose.yml",
+	"service": "devcontainer",
+	"workspaceFolder": "/workspace",
 	"containerEnv": {
-		"ANTHROPIC_API_KEY": "${localEnv:ANTHROPIC_API_KEY}"
+		"ANTHROPIC_API_KEY": "${localEnv:ANTHROPIC_API_KEY}",
+		"PG_TEST_DATABASE_URL": "postgresql+asyncpg://devuser:devpassword@postgres:5432/devdb"
 	},
-	"runArgs": [
-		"--network=host"
-	],
 	"customizations": {
 		"vscode": {
 			"extensions": [
@@ -21,31 +14,21 @@
 				"charliermarsh.ruff",
 				"davidanson.vscode-markdownlint",
 				"dbaeumer.vscode-eslint",
-				"docker.docker",
 				"eamodio.gitlens",
 				"esbenp.prettier-vscode",
 				"github.copilot",
 				"github.copilot-chat",
 				"gruntfuggly.todo-tree",
 				"mhutchie.git-graph",
-				"ms-azuretools.vscode-containers",
-				"ms-azuretools.vscode-docker",
-				"ms-mssql.data-workspace-vscode",
-				"ms-mssql.mssql",
-				"ms-mssql.sql-bindings-vscode",
-				"ms-mssql.sql-database-projects-vscode",
 				"ms-ossdata.vscode-pgsql",
 				"ms-python.debugpy",
 				"ms-python.python",
 				"ms-python.vscode-pylance",
 				"ms-python.vscode-python-envs",
 				"ms-vscode-remote.remote-containers",
-				"ms-vscode-remote.remote-wsl",
 				"redhat.vscode-xml",
 				"rust-lang.rust-analyzer",
-				"tamasfe.even-better-toml",
-				"tomoki1207.pdf",
-				"vue.volar"
+				"tamasfe.even-better-toml"
 			],
 			"settings": {
 				"[javascript]": {
@@ -112,11 +95,12 @@
 			}
 		}
 	},
-	"postCreateCommand": "echo 'Dev container ready!'",
+	"postCreateCommand": "echo 'Dev container ready! PostgreSQL 17 available at postgres:5432'",
 	"remoteUser": "vscode",
 	"forwardPorts": [
 		3000,
 		5173,
+		5432,
 		8000,
 		8080
 	]
