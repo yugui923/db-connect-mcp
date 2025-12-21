@@ -5,7 +5,6 @@ capabilities for PostgreSQL, MySQL, and ClickHouse databases.
 """
 
 import asyncio
-import base64
 import json
 import logging
 import os
@@ -30,13 +29,6 @@ load_dotenv()
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-
-def json_serializer(obj: Any) -> Any:
-    """Custom JSON serializer that handles bytes and other non-standard types."""
-    if isinstance(obj, bytes):
-        return base64.b64encode(obj).decode("utf-8")
-    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
 
 
 # Response size limits (in characters) for MCP tool responses
@@ -320,7 +312,7 @@ class DatabaseMCPServer:
             read_only=self.config.read_only,
         )
 
-        response = json.dumps(db_info.model_dump(), indent=2, default=json_serializer)
+        response = json.dumps(db_info.model_dump(mode="json"), indent=2)
         return [
             TextContent(
                 type="text",
@@ -335,7 +327,7 @@ class DatabaseMCPServer:
         schemas = await self.inspector.get_schemas()
         schemas_data = [s.model_dump(mode="json") for s in schemas]
 
-        response = json.dumps(schemas_data, indent=2, default=json_serializer)
+        response = json.dumps(schemas_data, indent=2)
         return [
             TextContent(
                 type="text",
@@ -353,7 +345,7 @@ class DatabaseMCPServer:
         tables = await self.inspector.get_tables(schema, include_views)
         tables_data = [t.model_dump(mode="json") for t in tables]
 
-        response = json.dumps(tables_data, indent=2, default=json_serializer)
+        response = json.dumps(tables_data, indent=2)
         return [
             TextContent(
                 type="text",
@@ -372,9 +364,7 @@ class DatabaseMCPServer:
 
         table_info = await self.inspector.describe_table(table, schema)
 
-        response = json.dumps(
-            table_info.model_dump(), indent=2, default=json_serializer
-        )
+        response = json.dumps(table_info.model_dump(mode="json"), indent=2)
         return [
             TextContent(
                 type="text",
@@ -393,7 +383,7 @@ class DatabaseMCPServer:
 
         result = await self.executor.execute_query(query, limit=limit)
 
-        response = json.dumps(result.model_dump(), indent=2, default=json_serializer)
+        response = json.dumps(result.model_dump(mode="json"), indent=2)
         return [
             TextContent(
                 type="text",
@@ -411,7 +401,7 @@ class DatabaseMCPServer:
 
         result = await self.executor.sample_data(table, schema, limit)
 
-        response = json.dumps(result.model_dump(), indent=2, default=json_serializer)
+        response = json.dumps(result.model_dump(mode="json"), indent=2)
         return [
             TextContent(
                 type="text",
@@ -431,7 +421,7 @@ class DatabaseMCPServer:
         relationships = await self.inspector.get_relationships(table, schema)
         relationships_data = [r.model_dump(mode="json") for r in relationships]
 
-        response = json.dumps(relationships_data, indent=2, default=json_serializer)
+        response = json.dumps(relationships_data, indent=2)
         return [
             TextContent(
                 type="text",
@@ -451,7 +441,7 @@ class DatabaseMCPServer:
 
         stats = await self.analyzer.analyze_column(table, column, schema)
 
-        response = json.dumps(stats.model_dump(), indent=2, default=json_serializer)
+        response = json.dumps(stats.model_dump(mode="json"), indent=2)
         return [
             TextContent(
                 type="text",
@@ -470,7 +460,7 @@ class DatabaseMCPServer:
 
         plan = await self.executor.explain_query(query, analyze)
 
-        response = json.dumps(plan.model_dump(), indent=2, default=json_serializer)
+        response = json.dumps(plan.model_dump(mode="json"), indent=2)
         return [
             TextContent(
                 type="text",
