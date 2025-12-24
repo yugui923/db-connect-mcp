@@ -19,14 +19,17 @@ pip install -e ".[dev]"
 ## Prerequisites
 
 ### Python Version
+
 - **Python 3.10 or higher** (tested on 3.10, 3.11, 3.12, 3.13)
 
 ### Database Systems (for testing)
+
 - **PostgreSQL 9.6+** (optional)
 - **MySQL/MariaDB 5.7+/10.2+** (optional)
 - **ClickHouse** (optional)
 
 ### Development Tools
+
 - [uv](https://github.com/astral-sh/uv) - Fast Python package installer (recommended)
 - Git for version control
 
@@ -239,6 +242,7 @@ The adapter is selected automatically based on the `DATABASE_URL` dialect.
 ### MCP Server Integration
 
 **DatabaseMCPServer** (`server.py`):
+
 - Initializes core components with selected adapter
 - Registers MCP tools based on database capabilities
 - Routes tool calls to appropriate components

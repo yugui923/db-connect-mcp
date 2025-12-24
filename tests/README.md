@@ -11,7 +11,9 @@ The test suite is organized into three main layers:
 End-to-end tests that test the full MCP server implementation and complete workflows.
 
 #### `integration/test_mcp_protocol.py`
+
 Tests the MCP protocol layer including:
+
 - Server initialization and lifecycle
 - MCP tool registration based on database capabilities
 - Tool input validation via JSON schemas
@@ -22,7 +24,9 @@ Tests the MCP protocol layer including:
 **Purpose**: Catch errors that only appear when running the actual MCP server with a real MCP client connection.
 
 #### `integration/test_mcp_workflows.py`
+
 Tests complete end-to-end workflows:
+
 - Multi-step database exploration (get info → list schemas → list tables → describe)
 - Query and analysis workflows
 - Database profiling workflows
@@ -31,7 +35,9 @@ Tests complete end-to-end workflows:
 **Purpose**: Validate real-world usage patterns and multi-step operations.
 
 #### `integration/test_e2e_client_server.py`
+
 **NEW**: True end-to-end tests with subprocess server and real stdio transport:
+
 - Spawns MCP server as actual subprocess (not in-memory)
 - Connects MCP client via stdio transport (simulating real-world usage)
 - Captures and analyzes server logs from stderr
@@ -46,7 +52,9 @@ Tests complete end-to-end workflows:
 Tests individual core components directly without MCP protocol overhead.
 
 #### `module/test_inspector.py`
+
 Tests `MetadataInspector` component:
+
 - Schema listing with metadata
 - Table listing with enriched metadata (row counts, sizes)
 - Table description with columns, indexes, constraints
@@ -54,7 +62,9 @@ Tests `MetadataInspector` component:
 - Edge cases and error handling
 
 #### `module/test_executor.py`
+
 Tests `QueryExecutor` component:
+
 - Query execution with validation
 - Data sampling from tables
 - Read-only enforcement
@@ -63,7 +73,9 @@ Tests `QueryExecutor` component:
 - Edge cases (empty results, NULL values, syntax errors)
 
 #### `module/test_analyzer.py`
+
 Tests `StatisticsAnalyzer` component:
+
 - Column statistics for numeric columns
 - Column statistics for text columns
 - Database profiling
@@ -76,18 +88,23 @@ Tests `StatisticsAnalyzer` component:
 Tests isolated components, utilities, and database adapters.
 
 #### `unit/adapters/`
+
 Database adapter tests:
+
 - `test_postgresql_adapter.py` - PostgreSQL-specific implementation
 - `test_clickhouse_adapter.py` - ClickHouse-specific implementation
 
 Tests:
+
 - Adapter configuration and capabilities
 - Connection management
 - Database-specific SQL generation
 - Metadata enrichment
 
 #### `unit/test_serialization.py`
+
 Tests JSON serialization for all database types:
+
 - Temporal types (TIMESTAMP, DATE, TIME, INTERVAL)
 - Network types (INET, CIDR, MACADDR)
 - Special types (UUID, JSON, JSONB, BYTEA)
@@ -97,7 +114,9 @@ Tests JSON serialization for all database types:
 **Purpose**: Prevent JSON serialization errors when returning data to MCP clients.
 
 #### `unit/test_utils.py`
+
 Tests supporting utilities:
+
 - Test reporters
 - Data type helpers
 - Performance benchmarking
@@ -222,6 +241,7 @@ pytest tests/integration/test_e2e_client_server.py -v -s --log-cli-level=DEBUG -
 ```
 
 **Features of E2E Tests**:
+
 - ✅ Real subprocess server (simulates production deployment)
 - ✅ Stdio transport (actual MCP client-server communication)
 - ✅ Server log capture from stderr
@@ -285,10 +305,12 @@ pytest -m "not slow" -n 6
 Shared fixtures are defined in `conftest.py`:
 
 ### Configuration Fixtures
+
 - `pg_config`, `ch_config`, `mysql_config` - Database configurations
 - `pg_database_url`, `ch_database_url`, `mysql_database_url` - Connection URLs
 
 ### Component Fixtures
+
 - `pg_adapter`, `ch_adapter` - Database adapters
 - `pg_connection`, `ch_connection` - Database connections (with automatic cleanup)
 - `pg_inspector`, `ch_inspector` - Metadata inspectors
@@ -296,6 +318,7 @@ Shared fixtures are defined in `conftest.py`:
 - `pg_mcp_server` - MCP server for protocol testing
 
 ### Parametrized Fixtures
+
 - `db_config`, `db_adapter`, `db_connection` - Work across all databases
 
 ## Best Practices
@@ -309,6 +332,7 @@ Shared fixtures are defined in `conftest.py`:
 ### 2. Use Fixtures for Setup
 
 ✅ **Do**: Use fixtures for database connections and components
+
 ```python
 async def test_something(pg_connection, pg_inspector):
     schemas = await pg_inspector.get_schemas()
@@ -336,6 +360,7 @@ async def test_feature(ch_adapter):
 ### 5. Test Edge Cases
 
 Always test:
+
 - Empty results
 - NULL values
 - Non-existent resources
@@ -347,6 +372,7 @@ Always test:
 ### Tests Skip Due to Missing Database URL
 
 If you see:
+
 ```
 SKIPPED: PG_TEST_DATABASE_URL not set in environment
 ```
@@ -356,11 +382,13 @@ SKIPPED: PG_TEST_DATABASE_URL not set in environment
 ### Database Connection Failures
 
 If tests are skipped due to connection errors:
+
 ```
 SKIPPED: PostgreSQL database connection failed: [Errno -3] Temporary failure in name resolution
 ```
 
 **Solution**:
+
 1. Check that your database is running
 2. Verify the connection URL is correct
 3. Check network connectivity
@@ -369,6 +397,7 @@ SKIPPED: PostgreSQL database connection failed: [Errno -3] Temporary failure in 
 ### Windows Event Loop Issues
 
 The test suite handles Windows-specific event loop requirements automatically in `conftest.py`:
+
 ```python
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())

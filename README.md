@@ -5,11 +5,13 @@ A read-only MCP (Model Context Protocol) server for exploratory data analysis ac
 ## Quick Start
 
 1. **Install:**
+
    ```bash
    pip install db-connect-mcp
    ```
 
 2. **Add to Claude Desktop** `claude_desktop_config.json`:
+
    ```json
    {
      "mcpServers": {
@@ -31,17 +33,20 @@ A read-only MCP (Model Context Protocol) server for exploratory data analysis ac
 ## Features
 
 ### 🗄️ Multi-Database Support
+
 - **PostgreSQL** - Full support with advanced metadata and statistics
 - **MySQL** - Complete support for MySQL and MariaDB databases
 - **ClickHouse** - Support for analytical workloads and columnar storage
 
 ### 🔍 Database Exploration
+
 - **List schemas** - View all schemas in the database
 - **List tables** - See all tables with metadata (size, row counts, comments)
 - **Describe tables** - Get detailed column information, indexes, and constraints
 - **View relationships** - Understand foreign key relationships between tables
 
 ### 📊 Data Analysis
+
 - **Column profiling** - Statistical analysis of column data
   - Basic statistics (count, unique values, nulls)
   - Numeric statistics (mean, median, std dev, quartiles)
@@ -52,6 +57,7 @@ A read-only MCP (Model Context Protocol) server for exploratory data analysis ac
 - **Database profiling** - Get high-level database metrics and largest tables
 
 ### 🔒 Safety Features
+
 - **Read-only enforcement** - All connections are read-only at multiple levels
 - **Query validation** - Only SELECT and WITH queries are allowed
 - **Automatic limits** - Queries are automatically limited to prevent large result sets
@@ -61,6 +67,7 @@ A read-only MCP (Model Context Protocol) server for exploratory data analysis ac
 ## Installation
 
 ### Prerequisites
+
 - **Python 3.10 or higher**
 - **A database**: PostgreSQL (9.6+), MySQL/MariaDB (5.7+/10.2+), or ClickHouse
 
@@ -87,6 +94,7 @@ The server automatically detects the database type and adds appropriate read-onl
 ### Connection String Examples
 
 The server now provides more flexible and secure URL handling:
+
 - **Automatic driver detection**: Async drivers are automatically added if not specified
 - **JDBC URL support**: JDBC prefixes are automatically handled
   - `jdbc:postgresql://...` → `postgresql+asyncpg://...`
@@ -101,6 +109,7 @@ The server now provides more flexible and secure URL handling:
 - **Robust parsing**: Handles various URL formats gracefully
 
 **PostgreSQL:**
+
 ```
 # Simple URL (driver automatically added)
 DATABASE_URL=postgresql://user:password@localhost:5432/mydb
@@ -122,6 +131,7 @@ DATABASE_URL=postgres://user:pass@host:5432/db?application_name=myapp&connect_ti
 ```
 
 **Supported PostgreSQL Parameters:**
+
 - `application_name` - Identifies your app in pg_stat_activity (useful for monitoring)
 - `connect_timeout` - Connection timeout in seconds
 - `command_timeout` - Default timeout for operations
@@ -131,6 +141,7 @@ DATABASE_URL=postgres://user:pass@host:5432/db?application_name=myapp&connect_ti
 - Performance tuning: `prepared_statement_cache_size`, `max_cached_statement_lifetime`, etc.
 
 **MySQL/MariaDB:**
+
 ```
 # Simple URL (driver automatically added)
 DATABASE_URL=mysql://root:password@localhost:3306/mydb
@@ -151,6 +162,7 @@ DATABASE_URL=mariadb://user:pass@remote.host:3306/db?charset=utf8mb4
 ```
 
 **Supported MySQL Parameters:**
+
 - `charset` - Character encoding (e.g., utf8mb4) - **critical for data integrity**
 - `use_unicode` - Enable Unicode support
 - `connect_timeout`, `read_timeout`, `write_timeout` - Various timeouts
@@ -160,6 +172,7 @@ DATABASE_URL=mariadb://user:pass@remote.host:3306/db?charset=utf8mb4
 - `time_zone` - Time zone setting
 
 **ClickHouse:**
+
 ```
 # Simple URL (driver automatically added)
 DATABASE_URL=clickhouse://default:@localhost:9000/default
@@ -180,12 +193,14 @@ DATABASE_URL=ch://user:pass@host:9000/db?timeout=60&max_threads=4
 ```
 
 **Supported ClickHouse Parameters:**
+
 - `database` - Default database selection
 - `timeout`, `connect_timeout`, `send_receive_timeout` - Various timeouts
 - `compress`, `compression` - Enable compression
 - `max_block_size`, `max_threads` - Performance tuning
 
 **Note:**
+
 - SSL parameters (`ssl`, `sslmode`) are automatically converted to the correct format for asyncpg
 - Certificate file parameters (`sslcert`, `sslkey`, `sslrootcert`) are filtered out as they can cause compatibility issues
 - Only parameters known to work with async drivers are preserved
@@ -252,6 +267,7 @@ Add the server to your Claude Desktop configuration (`claude_desktop_config.json
 **Quick Setup:**
 
 1. **Add the MCP server** to your project's `.mcp.json`:
+
    ```bash
    claude mcp add --transport stdio db-connect --scope project \
      --env DATABASE_URL=postgresql://user:pass@host:5432/db \
@@ -259,6 +275,7 @@ Add the server to your Claude Desktop configuration (`claude_desktop_config.json
    ```
 
 2. **Or manually create** `.mcp.json` in your project root:
+
    ```json
    {
      "mcpServers": {
@@ -274,15 +291,18 @@ Add the server to your Claude Desktop configuration (`claude_desktop_config.json
    ```
 
 3. **Restart Claude Code**:
+
    ```bash
    # Exit current session (Ctrl+D)
    claude
    ```
 
 4. **Verify the server is loaded**:
+
    ```
    /mcp
    ```
+
    You should see `db-connect-mcp` listed with all available tools.
 
 5. **Start querying**:
@@ -291,6 +311,7 @@ Add the server to your Claude Desktop configuration (`claude_desktop_config.json
    ```
 
 **Configuration Scopes:**
+
 - **Project scope** (recommended): `.mcp.json` in project root - Shared with team via git
 - **User scope**: `~/.claude.json` - Available across all your projects
 - **Local scope**: `~/.claude.json` - Private to you in the current project
@@ -316,10 +337,12 @@ If you're working with the source code in a dev container or using uv:
 **Docker/Dev Container Note:**
 
 When running inside a Docker container (like VS Code Dev Containers), use the appropriate hostname:
+
 - **Inside container**: Use Docker service names (e.g., `postgres:5432`)
 - **On host machine**: Use `localhost:5432`
 
 Example for dev container with PostgreSQL sidecar:
+
 ```json
 {
   "mcpServers": {
@@ -335,6 +358,7 @@ Example for dev container with PostgreSQL sidecar:
 ```
 
 **Advantages of Claude Code:**
+
 - ✅ Better error visibility and debugging
 - ✅ Faster iteration (no app restart needed)
 - ✅ Direct access to server logs
@@ -342,6 +366,7 @@ Example for dev container with PostgreSQL sidecar:
 - ✅ Use `/mcp` command to check server status
 
 **Learn more:**
+
 - [Claude Code Documentation](https://code.claude.com/docs)
 - [MCP Server Configuration](https://code.claude.com/docs/en/mcp)
 
@@ -349,57 +374,70 @@ Example for dev container with PostgreSQL sidecar:
 
 ## Database Feature Support
 
-| Feature | PostgreSQL | MySQL | ClickHouse |
-|---------|------------|-------|------------|
-| Schemas | ✅ Full | ✅ Full | ✅ Full |
-| Tables | ✅ Full | ✅ Full | ✅ Full |
-| Views | ✅ Full | ✅ Full | ✅ Full |
-| Indexes | ✅ Full | ✅ Full | ⚠️ Limited |
-| Foreign Keys | ✅ Full | ✅ Full | ❌ No |
-| Constraints | ✅ Full | ✅ Full | ⚠️ Limited |
-| Table Size | ✅ Exact | ✅ Exact | ✅ Exact |
-| Row Count | ✅ Exact | ✅ Exact | ✅ Exact |
-| Column Stats | ✅ Full | ✅ Full | ✅ Full |
-| Sampling | ✅ Full | ✅ Full | ✅ Full |
+| Feature      | PostgreSQL | MySQL    | ClickHouse |
+| ------------ | ---------- | -------- | ---------- |
+| Schemas      | ✅ Full    | ✅ Full  | ✅ Full    |
+| Tables       | ✅ Full    | ✅ Full  | ✅ Full    |
+| Views        | ✅ Full    | ✅ Full  | ✅ Full    |
+| Indexes      | ✅ Full    | ✅ Full  | ⚠️ Limited |
+| Foreign Keys | ✅ Full    | ✅ Full  | ❌ No      |
+| Constraints  | ✅ Full    | ✅ Full  | ⚠️ Limited |
+| Table Size   | ✅ Exact   | ✅ Exact | ✅ Exact   |
+| Row Count    | ✅ Exact   | ✅ Exact | ✅ Exact   |
+| Column Stats | ✅ Full    | ✅ Full  | ✅ Full    |
+| Sampling     | ✅ Full    | ✅ Full  | ✅ Full    |
 
 ## Available Tools
 
 ### list_schemas
+
 List all schemas in the database.
 
 ### list_tables
+
 List all tables in a schema with metadata.
+
 - Parameters:
   - `schema` (optional): Schema name (default: "public")
 
 ### describe_table
+
 Get detailed information about a table.
+
 - Parameters:
   - `table_name`: Name of the table
   - `schema` (optional): Schema name (default: "public")
 
 ### analyze_column
+
 Analyze a column with statistics and distribution.
+
 - Parameters:
   - `table_name`: Name of the table
   - `column_name`: Name of the column
   - `schema` (optional): Schema name (default: "public")
 
 ### sample_data
+
 Get a sample of data from a table.
+
 - Parameters:
   - `table_name`: Name of the table
   - `schema` (optional): Schema name (default: "public")
   - `limit` (optional): Number of rows (default: 100, max: 1000)
 
 ### execute_query
+
 Execute a read-only SQL query.
+
 - Parameters:
   - `query`: SQL query (must be SELECT or WITH)
   - `limit` (optional): Maximum rows (default: 1000, max: 10000)
 
 ### get_table_relationships
+
 Get foreign key relationships in a schema.
+
 - Parameters:
   - `schema` (optional): Schema name (default: "public")
 
@@ -422,6 +460,7 @@ Once configured, you can use the server in Claude:
 ### Database-Specific Examples
 
 **Working with PostgreSQL:**
+
 ```
 "List all schemas except system ones"
 "Show me the foreign key relationships in the sales schema"
@@ -429,6 +468,7 @@ Once configured, you can use the server in Claude:
 ```
 
 **Working with MySQL:**
+
 ```
 "What storage engines are being used in my database?"
 "Show me all tables in the information_schema"
@@ -436,6 +476,7 @@ Once configured, you can use the server in Claude:
 ```
 
 **Working with ClickHouse:**
+
 ```
 "Show me the partitions for the events table"
 "What's the compression ratio for the analytics.clicks table?"
@@ -460,6 +501,7 @@ Once configured, you can use the server in Claude:
 For detailed development setup, testing, and contribution guidelines, see the [Development Guide](docs/DEVELOPMENT.md).
 
 ### Project Structure
+
 ```
 db-connect-mcp/
 ├── src/
@@ -525,6 +567,7 @@ cd tests/docker && docker-compose down -v && docker-compose up -d && cd ../..
 ```
 
 **Local Test Database:**
+
 - PostgreSQL 17 with 50K+ rows of sample data across 7 tables
 - Automatically initialized via Docker Compose
 - No cloud database or .env configuration required
@@ -535,6 +578,7 @@ See the [Development Guide](docs/DEVELOPMENT.md#running-tests) and [Test Guide](
 ## Troubleshooting
 
 ### Connection Issues
+
 - Verify your DATABASE_URL is correct and includes the appropriate driver
 - Check network connectivity to the database
 - Ensure the database user has appropriate read permissions
@@ -545,25 +589,30 @@ See the [Development Guide](docs/DEVELOPMENT.md#running-tests) and [Test Guide](
 ### Database-Specific Issues
 
 **PostgreSQL:**
+
 - Ensure `asyncpg` driver is specified for async operations
 - SSL certificates may be required for cloud databases
 
 **MySQL/MariaDB:**
+
 - Use `aiomysql` driver for async support
 - Check MySQL version compatibility (5.7+ or MariaDB 10.2+)
 - Verify charset and collation settings
 
 **ClickHouse:**
+
 - Use `asynch` driver for async operations
 - Note that ClickHouse has limited support for foreign keys and constraints
 - Some statistical functions may not be available
 
 ### Permission Errors
+
 - The database user needs at least SELECT permissions on the schemas/tables you want to analyze
 - Some statistical functions may require additional permissions
 - ClickHouse may require specific permissions for system tables
 
 ### Large Result Sets
+
 - Use the `limit` parameter to control result size
 - The server automatically limits results to prevent memory issues
 - For large analyses, consider using more specific queries

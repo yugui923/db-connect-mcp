@@ -11,18 +11,19 @@
 
 All 9 MCP tools provided by db-connect-mcp were tested against a PostgreSQL 17 development database containing 50K+ rows across 7 tables and 3 views. **All capabilities passed functional testing** with minor observations noted for future improvement.
 
-| Category | Tools Tested | Pass Rate |
-|----------|--------------|-----------|
-| Metadata Discovery | 4 | 4/4 (100%) |
-| Data Sampling & Analysis | 3 | 3/3 (100%) |
-| Query Execution | 2 | 2/2 (100%) |
-| **Total** | **9** | **9/9 (100%)** |
+| Category                 | Tools Tested | Pass Rate      |
+| ------------------------ | ------------ | -------------- |
+| Metadata Discovery       | 4            | 4/4 (100%)     |
+| Data Sampling & Analysis | 3            | 3/3 (100%)     |
+| Query Execution          | 2            | 2/2 (100%)     |
+| **Total**                | **9**        | **9/9 (100%)** |
 
 ---
 
 ## Test Environment
 
 ### Database Configuration
+
 - **Dialect:** PostgreSQL 17.7 (Alpine Linux build)
 - **Database Name:** devdb
 - **Schema:** public (~15.6 MB)
@@ -30,17 +31,18 @@ All 9 MCP tools provided by db-connect-mcp were tested against a PostgreSQL 17 d
 
 ### Test Data
 
-| Table | Rows | Description |
-|-------|------|-------------|
-| users | 5,000 | User accounts with UUID, JSONB preferences |
-| products | 2,000 | Product catalog with arrays, inet types |
-| orders | 10,000 | Orders with complex CHECK constraints |
-| order_items | 25,000 | Composite primary key |
-| product_reviews | 8,000 | Rating distributions |
-| categories | 50 | Hierarchical structure |
-| data_type_examples | 110 | 29 PostgreSQL data types |
+| Table              | Rows   | Description                                |
+| ------------------ | ------ | ------------------------------------------ |
+| users              | 5,000  | User accounts with UUID, JSONB preferences |
+| products           | 2,000  | Product catalog with arrays, inet types    |
+| orders             | 10,000 | Orders with complex CHECK constraints      |
+| order_items        | 25,000 | Composite primary key                      |
+| product_reviews    | 8,000  | Rating distributions                       |
+| categories         | 50     | Hierarchical structure                     |
+| data_type_examples | 110    | 29 PostgreSQL data types                   |
 
 ### Views
+
 - `product_summary` - Aggregated product info with ratings
 - `order_details` - Complete order with customer details
 - `active_products` - Currently available products
@@ -71,6 +73,7 @@ All 9 MCP tools provided by db-connect-mcp were tested against a PostgreSQL 17 d
 | capabilities.advanced_stats | true | OK |
 
 **Notes:**
+
 - `size_bytes`, `schema_count`, `table_count` returned as null (could be populated)
 - `server_encoding` and `collation` not populated
 
@@ -83,6 +86,7 @@ All 9 MCP tools provided by db-connect-mcp were tested against a PostgreSQL 17 d
 **Result:** PASS
 
 **Response:**
+
 ```json
 {
   "name": "public",
@@ -95,6 +99,7 @@ All 9 MCP tools provided by db-connect-mcp were tested against a PostgreSQL 17 d
 ```
 
 **Notes:**
+
 - Correctly identifies table vs view counts
 - Size calculation accurate
 - Schema comments properly retrieved
@@ -117,6 +122,7 @@ All 9 MCP tools provided by db-connect-mcp were tested against a PostgreSQL 17 d
 | product_summary | VIEW | -1 | null | OK |
 
 **Notes:**
+
 - Views correctly show `row_count: -1` and `size_bytes: null`
 - `extra_info` contains useful PostgreSQL-specific fields (`relkind`, `persistence`, `is_partition`)
 - `columns`, `indexes`, `constraints` arrays empty (populated by `describe_table`)
@@ -132,34 +138,38 @@ All 9 MCP tools provided by db-connect-mcp were tested against a PostgreSQL 17 d
 **Tables Tested:** orders, products, data_type_examples
 
 #### Column Detection
-| Data Type | Detected | Nullable | Default | FK | Notes |
-|-----------|----------|----------|---------|-----|-------|
-| INTEGER (PK) | OK | OK | sequence | - | Auto-increment detected |
-| VARCHAR(n) | OK | OK | OK | - | Length in type name |
-| NUMERIC(p,s) | OK | OK | OK | - | Precision/scale in type |
-| TIMESTAMP | OK | OK | CURRENT_TIMESTAMP | - | Default functions work |
-| BOOLEAN | OK | OK | false | - | Literal defaults work |
-| UUID | OK | OK | gen_random_uuid() | - | Function defaults work |
-| ARRAY | OK | OK | - | - | Shows as "ARRAY" |
-| INET | OK | OK | - | - | Network types work |
-| JSON/JSONB | OK | OK | - | - | Both variants detected |
+
+| Data Type    | Detected | Nullable | Default           | FK  | Notes                   |
+| ------------ | -------- | -------- | ----------------- | --- | ----------------------- |
+| INTEGER (PK) | OK       | OK       | sequence          | -   | Auto-increment detected |
+| VARCHAR(n)   | OK       | OK       | OK                | -   | Length in type name     |
+| NUMERIC(p,s) | OK       | OK       | OK                | -   | Precision/scale in type |
+| TIMESTAMP    | OK       | OK       | CURRENT_TIMESTAMP | -   | Default functions work  |
+| BOOLEAN      | OK       | OK       | false             | -   | Literal defaults work   |
+| UUID         | OK       | OK       | gen_random_uuid() | -   | Function defaults work  |
+| ARRAY        | OK       | OK       | -                 | -   | Shows as "ARRAY"        |
+| INET         | OK       | OK       | -                 | -   | Network types work      |
+| JSON/JSONB   | OK       | OK       | -                 | -   | Both variants detected  |
 
 #### Index Detection
-| Index Type | Detected | Columns | Unique |
-|------------|----------|---------|--------|
-| B-tree (default) | OK | Single/Multi | OK |
-| GIN (arrays) | OK | OK | N/A |
-| Unique constraint | OK | OK | true |
+
+| Index Type        | Detected | Columns      | Unique |
+| ----------------- | -------- | ------------ | ------ |
+| B-tree (default)  | OK       | Single/Multi | OK     |
+| GIN (arrays)      | OK       | OK           | N/A    |
+| Unique constraint | OK       | OK           | true   |
 
 #### Constraint Detection
-| Constraint Type | Detected | Definition |
-|-----------------|----------|------------|
-| PRIMARY KEY | OK | Via column.primary_key |
-| FOREIGN KEY | OK | Full reference info |
-| UNIQUE | OK | Columns listed |
-| CHECK | OK | Definition string parsed |
+
+| Constraint Type | Detected | Definition               |
+| --------------- | -------- | ------------------------ |
+| PRIMARY KEY     | OK       | Via column.primary_key   |
+| FOREIGN KEY     | OK       | Full reference info      |
+| UNIQUE          | OK       | Columns listed           |
+| CHECK           | OK       | Definition string parsed |
 
 **Sample CHECK Constraints Verified:**
+
 - `orders_subtotal_check`: `subtotal >= 0::numeric`
 - `valid_status`: `status = ANY (ARRAY['pending', ...])`
 - `valid_total`: `total_amount = (subtotal + tax_amount + shipping_amount)`
@@ -175,13 +185,14 @@ All 9 MCP tools provided by db-connect-mcp were tested against a PostgreSQL 17 d
 
 **Test Cases:**
 
-| From Table | From Column | To Table | To Column | ON DELETE |
-|------------|-------------|----------|-----------|-----------|
-| orders | user_id | users | user_id | RESTRICT |
-| order_items | order_id | orders | order_id | CASCADE |
-| order_items | product_id | products | product_id | RESTRICT |
+| From Table  | From Column | To Table | To Column  | ON DELETE |
+| ----------- | ----------- | -------- | ---------- | --------- |
+| orders      | user_id     | users    | user_id    | RESTRICT  |
+| order_items | order_id    | orders   | order_id   | CASCADE   |
+| order_items | product_id  | products | product_id | RESTRICT  |
 
 **Notes:**
+
 - Correctly identifies relationship direction
 - ON DELETE actions properly captured
 - ON UPDATE returned as null (not defined on these FKs)
@@ -196,35 +207,37 @@ All 9 MCP tools provided by db-connect-mcp were tested against a PostgreSQL 17 d
 
 **Data Type Serialization Testing:**
 
-| PostgreSQL Type | Serialized Format | Status |
-|-----------------|-------------------|--------|
-| INTEGER | Number | OK |
-| BIGINT | Number | OK |
-| NUMERIC/DECIMAL | String (preserves precision) | OK |
-| REAL/DOUBLE | Number | OK |
-| VARCHAR/TEXT | String | OK |
-| BOOLEAN | Boolean | OK |
-| DATE | "YYYY-MM-DD" | OK |
-| TIME | "HH:MM:SS" | OK |
-| TIMESTAMP | ISO 8601 | OK |
-| TIMESTAMPTZ | ISO 8601 with offset | OK |
-| INTERVAL | Human-readable string | OK |
-| UUID | UUID string | OK |
-| JSON | Parsed object | OK |
-| JSONB | Parsed object | OK |
-| INTEGER[] | JSON array | OK |
-| TEXT[] | JSON array | OK |
-| INET | IP string | OK |
-| CIDR | CIDR notation string | OK |
-| MACADDR | MAC address string | OK |
-| BYTEA | Base64 encoded | OK |
-| MONEY | Currency string ($X.XX) | OK |
-| POINT | Python repr string | ISSUE |
+| PostgreSQL Type | Serialized Format            | Status |
+| --------------- | ---------------------------- | ------ |
+| INTEGER         | Number                       | OK     |
+| BIGINT          | Number                       | OK     |
+| NUMERIC/DECIMAL | String (preserves precision) | OK     |
+| REAL/DOUBLE     | Number                       | OK     |
+| VARCHAR/TEXT    | String                       | OK     |
+| BOOLEAN         | Boolean                      | OK     |
+| DATE            | "YYYY-MM-DD"                 | OK     |
+| TIME            | "HH:MM:SS"                   | OK     |
+| TIMESTAMP       | ISO 8601                     | OK     |
+| TIMESTAMPTZ     | ISO 8601 with offset         | OK     |
+| INTERVAL        | Human-readable string        | OK     |
+| UUID            | UUID string                  | OK     |
+| JSON            | Parsed object                | OK     |
+| JSONB           | Parsed object                | OK     |
+| INTEGER[]       | JSON array                   | OK     |
+| TEXT[]          | JSON array                   | OK     |
+| INET            | IP string                    | OK     |
+| CIDR            | CIDR notation string         | OK     |
+| MACADDR         | MAC address string           | OK     |
+| BYTEA           | Base64 encoded               | OK     |
+| MONEY           | Currency string ($X.XX)      | OK     |
+| POINT           | Python repr string           | ISSUE  |
 
 **Issue Identified:**
+
 - POINT type serializes as `"asyncpg.pgproto.types.Point((1.0, 2.0))"` instead of a clean format like `{"x": 1.0, "y": 2.0}` or `[1.0, 2.0]`
 
 **Performance:**
+
 - 5 rows from users: 6.5ms
 - 3 rows from data_type_examples (29 columns): 8.7ms
 
@@ -237,6 +250,7 @@ All 9 MCP tools provided by db-connect-mcp were tested against a PostgreSQL 17 d
 **Result:** PASS
 
 **Numeric Column Test (products.price):**
+
 ```json
 {
   "total_rows": 2000,
@@ -256,25 +270,28 @@ All 9 MCP tools provided by db-connect-mcp were tested against a PostgreSQL 17 d
 ```
 
 **String Column Test (orders.status):**
+
 ```json
 {
   "total_rows": 10000,
   "distinct_count": 5,
   "most_common_values": [
-    {"value": "delivered", "count": 5000},
-    {"value": "cancelled", "count": 1250},
-    {"value": "pending", "count": 1250},
-    {"value": "processing", "count": 1250},
-    {"value": "shipped", "count": 1250}
+    { "value": "delivered", "count": 5000 },
+    { "value": "cancelled", "count": 1250 },
+    { "value": "pending", "count": 1250 },
+    { "value": "processing", "count": 1250 },
+    { "value": "shipped", "count": 1250 }
   ]
 }
 ```
 
 **Timestamp Column Test (users.registered_at):**
+
 - min/max values correctly returned
 - Numeric stats (avg, percentiles) correctly null for non-numeric types
 
 **Notes:**
+
 - Percentile calculations use appropriate PostgreSQL functions
 - Most common values limited to top 10
 - Warning field available for edge cases
@@ -289,15 +306,16 @@ All 9 MCP tools provided by db-connect-mcp were tested against a PostgreSQL 17 d
 
 **Query Patterns Tested:**
 
-| Pattern | Query Example | Result |
-|---------|---------------|--------|
-| Simple SELECT | `SELECT ... WHERE status = 'shipped' LIMIT 5` | OK |
-| JOIN | `SELECT ... FROM orders o JOIN users u ON ...` | OK |
-| Aggregate | `SELECT COUNT(*), AVG(price) ... GROUP BY ...` | OK |
-| CTE | `WITH order_totals AS (...) SELECT ...` | OK |
-| View | `SELECT * FROM product_summary` | OK |
+| Pattern       | Query Example                                  | Result |
+| ------------- | ---------------------------------------------- | ------ |
+| Simple SELECT | `SELECT ... WHERE status = 'shipped' LIMIT 5`  | OK     |
+| JOIN          | `SELECT ... FROM orders o JOIN users u ON ...` | OK     |
+| Aggregate     | `SELECT COUNT(*), AVG(price) ... GROUP BY ...` | OK     |
+| CTE           | `WITH order_totals AS (...) SELECT ...`        | OK     |
+| View          | `SELECT * FROM product_summary`                | OK     |
 
 **Response Metadata:**
+
 - `query`: Original query echoed back
 - `rows`: Array of result objects
 - `row_count`: Number of rows returned
@@ -324,6 +342,7 @@ All 9 MCP tools provided by db-connect-mcp were tested against a PostgreSQL 17 d
 **Result:** PASS
 
 **Test Query:**
+
 ```sql
 SELECT o.order_id, u.username, o.total_amount
 FROM orders o
@@ -332,17 +351,20 @@ WHERE o.status = 'shipped'
 ```
 
 **EXPLAIN (analyze=false):**
+
 - Node types detected: Hash Join, Seq Scan, Bitmap Heap Scan, Bitmap Index Scan
 - Cost estimates: Startup 398.22, Total 689.72
 - Row estimates: 1250
 
 **EXPLAIN ANALYZE (analyze=true):**
+
 - Actual execution time: 1.676ms
 - Actual rows: 1250 (matches estimate)
 - Buffer hits: 310 shared blocks
 - Index used: `idx_orders_status`
 
 **Issue Identified:**
+
 - Warning: "Could not parse EXPLAIN output as JSON" - the plan is returned as a Python dict repr string rather than proper JSON
 - Plan data is still accessible but requires additional parsing
 
@@ -350,11 +372,11 @@ WHERE o.status = 'shipped'
 
 ## Summary of Issues
 
-| Issue | Severity | Tool | Description |
-|-------|----------|------|-------------|
-| POINT serialization | Low | sample_data | Returns Python repr instead of clean format |
-| EXPLAIN JSON parsing | Low | explain_query | Plan returned as Python dict string |
-| Missing metadata | Low | get_database_info | size_bytes, schema_count, etc. are null |
+| Issue                | Severity | Tool              | Description                                 |
+| -------------------- | -------- | ----------------- | ------------------------------------------- |
+| POINT serialization  | Low      | sample_data       | Returns Python repr instead of clean format |
+| EXPLAIN JSON parsing | Low      | explain_query     | Plan returned as Python dict string         |
+| Missing metadata     | Low      | get_database_info | size_bytes, schema_count, etc. are null     |
 
 ---
 
@@ -476,6 +498,7 @@ def build_query(
 ```
 
 **Benefits:**
+
 - Prevents SQL injection by design
 - Easier for LLMs to construct valid queries
 - Automatic query optimization hints
@@ -527,6 +550,7 @@ def get_schema_graph() -> dict:
 ```
 
 **Benefits:**
+
 - Consistent error handling
 - Predictable response structure
 - Easier client-side processing

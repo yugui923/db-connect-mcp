@@ -26,16 +26,19 @@ This directory contains documentation for db-connect-mcp developers and contribu
 ## Quick Links
 
 ### Getting Started
+
 1. [Installation](../README.md#installation) - Install via pip
 2. [Configuration](../README.md#configuration) - Set up DATABASE_URL
 3. [Usage Examples](../README.md#usage) - Basic usage
 
 ### Development Setup
+
 1. [Prerequisites](DEVELOPMENT.md#prerequisites) - Python, uv, databases
 2. [Installation](DEVELOPMENT.md#quick-setup) - Clone and install
 3. [Running Tests](DEVELOPMENT.md#running-tests) - Test with pytest
 
 ### Testing with Claude Code
+
 1. [Setup](CLAUDE_CODE_INTEGRATION.md#development-setup) - Configure .mcp.json
 2. [Workflow](CLAUDE_CODE_INTEGRATION.md#development-testing-workflow) - Development testing cycle
 3. [Troubleshooting](CLAUDE_CODE_INTEGRATION.md#development-specific-troubleshooting) - Common issues
@@ -52,6 +55,7 @@ For understanding the codebase architecture:
 ## Contributing
 
 See [Development Guide - Contributing](DEVELOPMENT.md#contributing) for:
+
 - Pull request process
 - Commit message format
 - Code style guidelines

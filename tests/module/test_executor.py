@@ -171,7 +171,11 @@ class TestQueryExecutorDataTypes:
             (
                 "SELECT 1::INTEGER as int_col, 3.14::NUMERIC as num_col, 2.718::REAL as real_col",
                 ["int_col", "num_col", "real_col"],
-                {"int_col": (int, float, str), "num_col": (int, float, str), "real_col": (int, float, str)},
+                {
+                    "int_col": (int, float, str),
+                    "num_col": (int, float, str),
+                    "real_col": (int, float, str),
+                },
             ),
             # Boolean type
             (
@@ -187,7 +191,7 @@ class TestQueryExecutorDataTypes:
             ),
             # JSON types
             (
-                "SELECT '{\"key\": \"value\"}'::json as json_col, '{\"key\": \"value\"}'::jsonb as jsonb_col",
+                'SELECT \'{"key": "value"}\'::json as json_col, \'{"key": "value"}\'::jsonb as jsonb_col',
                 ["json_col", "jsonb_col"],
                 {"json_col": (dict, str), "jsonb_col": (dict, str)},
             ),
@@ -218,8 +222,9 @@ class TestQueryExecutorDataTypes:
 
         # Verify value types
         for col, expected_type in value_checks.items():
-            assert isinstance(row[col], expected_type), \
+            assert isinstance(row[col], expected_type), (
                 f"Column {col} should be {expected_type}, got {type(row[col])}"
+            )
 
         # Verify full JSON serialization works
         assert_json_serializable(result.model_dump())
@@ -240,7 +245,7 @@ class TestQueryExecutorDataTypes:
             FROM products
             LIMIT 5
             """,
-            limit=5
+            limit=5,
         )
 
         assert len(result.rows) > 0
@@ -271,12 +276,15 @@ class TestQueryExecutorExplain:
 
         # plan_json should be parsed dict, not escaped string
         if plan.plan_json is not None:
-            assert isinstance(plan.plan_json, (dict, list)), \
+            assert isinstance(plan.plan_json, (dict, list)), (
                 f"plan_json should be dict/list, not string: {type(plan.plan_json)}"
+            )
             assert_json_serializable(plan.plan_json)
 
     @pytest.mark.asyncio
-    async def test_explain_query_with_analyze(self, pg_executor: QueryExecutor, pg_adapter):
+    async def test_explain_query_with_analyze(
+        self, pg_executor: QueryExecutor, pg_adapter
+    ):
         """Test EXPLAIN ANALYZE (actual query execution)."""
         if not pg_adapter.capabilities.explain_plans:
             pytest.skip("Database doesn't support EXPLAIN")
@@ -295,8 +303,7 @@ class TestQueryExecutorExplain:
             pytest.skip("Database doesn't support EXPLAIN")
 
         plan = await pg_executor.explain_query(
-            "SELECT * FROM products WHERE price > 100",
-            analyze=False
+            "SELECT * FROM products WHERE price > 100", analyze=False
         )
 
         assert plan.plan is not None
@@ -333,8 +340,7 @@ class TestQueryExecutorEdgeCases:
     async def test_query_with_many_nulls(self, pg_executor: QueryExecutor):
         """Test query with data_type_examples table that has NULL values."""
         result = await pg_executor.execute_query(
-            "SELECT * FROM data_type_examples WHERE id BETWEEN 101 AND 110",
-            limit=10
+            "SELECT * FROM data_type_examples WHERE id BETWEEN 101 AND 110", limit=10
         )
 
         # Verify NULL handling works
@@ -350,7 +356,9 @@ class TestQueryExecutorEdgeCases:
     async def test_nonexistent_table(self, pg_executor: QueryExecutor):
         """Test querying non-existent table raises error."""
         with pytest.raises(Exception):
-            await pg_executor.execute_query("SELECT * FROM nonexistent_table_xyz", limit=10)
+            await pg_executor.execute_query(
+                "SELECT * FROM nonexistent_table_xyz", limit=10
+            )
 
     @pytest.mark.asyncio
     async def test_complex_join_query(self, pg_executor: QueryExecutor):

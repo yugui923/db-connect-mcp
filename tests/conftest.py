@@ -44,7 +44,7 @@ def pg_database_url() -> str:
     """
     return os.getenv(
         "PG_TEST_DATABASE_URL",
-        "postgresql+asyncpg://devuser:devpassword@localhost:5432/devdb"
+        "postgresql+asyncpg://devuser:devpassword@localhost:5432/devdb",
     )
 
 
@@ -113,9 +113,7 @@ async def pg_analyzer(
 
 
 @pytest.fixture
-async def pg_executor(
-    pg_connection: DatabaseConnection, pg_adapter: BaseAdapter
-):
+async def pg_executor(pg_connection: DatabaseConnection, pg_adapter: BaseAdapter):
     """PostgreSQL query executor."""
     from db_connect_mcp.core import QueryExecutor
 
@@ -142,7 +140,14 @@ def known_tables():
         },
         "products": {
             "columns": {
-                "numeric": ["product_id", "category_id", "price", "cost", "stock_quantity", "weight_kg"],
+                "numeric": [
+                    "product_id",
+                    "category_id",
+                    "price",
+                    "cost",
+                    "stock_quantity",
+                    "weight_kg",
+                ],
                 "text": ["name", "description", "sku"],
                 "uuid": ["product_uuid"],
                 "json": ["specifications"],
@@ -156,7 +161,14 @@ def known_tables():
         "users": {
             "columns": {
                 "numeric": ["user_id"],
-                "text": ["username", "email", "first_name", "last_name", "city", "country"],
+                "text": [
+                    "username",
+                    "email",
+                    "first_name",
+                    "last_name",
+                    "city",
+                    "country",
+                ],
                 "inet": ["ip_address"],
                 "timestamp": ["created_at", "last_login_at"],
                 "json": ["preferences"],
@@ -167,7 +179,14 @@ def known_tables():
         },
         "orders": {
             "columns": {
-                "numeric": ["order_id", "user_id", "subtotal", "tax", "shipping_cost", "total"],
+                "numeric": [
+                    "order_id",
+                    "user_id",
+                    "subtotal",
+                    "tax",
+                    "shipping_cost",
+                    "total",
+                ],
                 "text": ["status", "shipping_address", "billing_address"],
                 "timestamp": ["order_date"],
             },
@@ -178,9 +197,20 @@ def known_tables():
         "data_type_examples": {
             "columns": {
                 "all_types": True,  # Has all PostgreSQL data types
-                "numeric": ["smallint_col", "integer_col", "bigint_col", "decimal_col", "numeric_col"],
+                "numeric": [
+                    "smallint_col",
+                    "integer_col",
+                    "bigint_col",
+                    "decimal_col",
+                    "numeric_col",
+                ],
                 "text": ["varchar_col", "text_col", "char_col"],
-                "timestamp": ["timestamp_col", "timestamptz_col", "date_col", "time_col"],
+                "timestamp": [
+                    "timestamp_col",
+                    "timestamptz_col",
+                    "date_col",
+                    "time_col",
+                ],
                 "boolean": ["boolean_col"],
                 "uuid": ["uuid_col"],
                 "json": ["json_col", "jsonb_col"],

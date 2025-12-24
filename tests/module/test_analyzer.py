@@ -260,10 +260,10 @@ class TestStatisticsAnalyzerEdgeCases:
         # Test a few columns with different types
         test_columns = [
             "integer_col",  # INTEGER
-            "text_col",     # TEXT
+            "text_col",  # TEXT
             "timestamp_col",  # TIMESTAMP
             "boolean_col",  # BOOLEAN
-            "uuid_col",     # UUID
+            "uuid_col",  # UUID
         ]
 
         for column in test_columns:

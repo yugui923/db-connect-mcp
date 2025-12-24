@@ -1,0 +1,53 @@
+# EditorConfig - https://editorconfig.org
+
+
+# Top-most EditorConfig file
+root = true
+
+
+# =========================
+# Global defaults
+# =========================
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 2
+
+
+# =========================
+# Language-specific overrides
+# =========================
+
+# Python
+[*.py]
+indent_size = 4
+
+# Shell scripts (bash, sh)
+[*.{sh,bash}]
+indent_size = 2
+
+# YAML (indentation-sensitive)
+[*.{yml,yaml}]
+indent_size = 2
+
+# JSON / TOML
+[*.{json,toml}]
+indent_size = 2
+
+# Makefiles MUST use tabs
+[Makefile]
+indent_style = tab
+
+# Windows batch files
+[*.{bat,cmd}]
+end_of_line = crlf
+
+
+# =========================
+# Markdown
+# =========================
+[*.md]
+trim_trailing_whitespace = false

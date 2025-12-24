@@ -58,12 +58,14 @@ cd tests/docker && docker-compose down -v && docker-compose up -d && cd ../..
 ```
 
 **Local Test Database:**
+
 - PostgreSQL 17 with 50K+ rows of sample data across 7 tables
 - Automatically initialized via Docker Compose
 - No cloud database or .env configuration required
 - See `tests/docker/README.md` for details
 
 **Performance Notes:**
+
 - With database running: `-n 6` provides ~4-5x speedup
 - Without database (tests skipped): Sequential is faster due to worker overhead
 - Always use `-n 6` when running the full test suite with database

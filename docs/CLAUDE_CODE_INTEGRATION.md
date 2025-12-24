@@ -54,11 +54,13 @@ The server auto-loads. Any code changes require restarting Claude Code to take e
 ### 1. Check MCP Server Status
 
 In Claude Code, run:
+
 ```
 /mcp
 ```
 
 You should see:
+
 - `db-connect-mcp` listed as a connected server
 - Status showing available tools
 - List of tools like `get_database_info`, `list_tables`, `execute_query`, etc.
@@ -105,12 +107,14 @@ The `uv run` command uses editable install, but Claude Code caches the server pr
 ### Database Connection Fails
 
 **Check test database**:
+
 ```bash
 cd tests/docker && docker compose ps
 ```
 
 **Verify connection in dev container**:
 If running in a dev container, use `postgres` hostname instead of `localhost`:
+
 ```json
 "DATABASE_URL": "postgresql+asyncpg://devuser:devpassword@postgres:5432/devdb"
 ```
@@ -118,12 +122,14 @@ If running in a dev container, use `postgres` hostname instead of `localhost`:
 ### MCP Tools Missing
 
 **Verify installation**:
+
 ```bash
 uv run python -c "import db_connect_mcp; print('OK')"
 ```
 
 **Check server output**:
 Start the server manually to see error messages:
+
 ```bash
 DATABASE_URL=postgresql+asyncpg://devuser:devpassword@localhost:5432/devdb \
   uv run python -m db_connect_mcp
@@ -151,6 +157,7 @@ claude
 ```
 
 Try the feature interactively:
+
 ```
 /mcp
 ```

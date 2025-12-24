@@ -5,18 +5,21 @@ This directory contains Docker Compose configuration for running a local Postgre
 ## Quick Start
 
 1. **Start the database**:
+
    ```bash
    cd tests/docker
    docker-compose up -d
    ```
 
 2. **Verify it's running**:
+
    ```bash
    docker-compose ps
    docker-compose logs postgres
    ```
 
 3. **Connect to database**:
+
    ```bash
    # Using docker exec
    docker exec -it db-connect-mcp-postgres psql -U devuser -d devdb
@@ -27,6 +30,7 @@ This directory contains Docker Compose configuration for running a local Postgre
    ```
 
 4. **Update your .env file** (optional, uses this by default):
+
    ```bash
    DATABASE_URL=postgresql+asyncpg://devuser:devpassword@localhost:5432/devdb
    ```
@@ -128,6 +132,7 @@ docker-compose logs -f postgres
 The devcontainer uses `--network=host`, so the PostgreSQL database on `localhost:5432` is directly accessible.
 
 Connection string:
+
 ```
 postgresql+asyncpg://devuser:devpassword@localhost:5432/devdb
 ```
@@ -137,9 +142,10 @@ postgresql+asyncpg://devuser:devpassword@localhost:5432/devdb
 ### Change Port
 
 Edit `docker-compose.yml`:
+
 ```yaml
 ports:
-  - "5433:5432"  # Maps host 5433 to container 5432
+  - "5433:5432" # Maps host 5433 to container 5432
 ```
 
 Then update connection URLs to use port 5433.
@@ -147,6 +153,7 @@ Then update connection URLs to use port 5433.
 ### Change Credentials
 
 Edit `docker-compose.yml` environment variables:
+
 ```yaml
 environment:
   POSTGRES_DB: your_db_name
@@ -159,12 +166,14 @@ environment:
 ### Add Custom Initialization
 
 Add SQL files to `postgres/init/` directory. They run in alphabetical order:
+
 - `01-*.sql`: Schema creation
 - `02-*.sql`: Data seeding
 - `03-*.sql`: Views and indexes
 - `99-*.sql`: Custom scripts
 
 Example:
+
 ```bash
 # Create custom initialization script
 cat > postgres/init/99-custom.sql << 'EOF'
@@ -184,17 +193,20 @@ docker-compose down -v && docker-compose up -d
 Database data is stored in a **Docker-managed named volume** (`db-connect-mcp-postgres-data`). This persists across container restarts but doesn't clutter your project directory.
 
 **Advantages:**
+
 - ✅ No local directory clutter
 - ✅ No gitignore needed
 - ✅ Docker manages storage location
 - ✅ No permission issues
 
 **To view volume info:**
+
 ```bash
 docker volume inspect db-connect-mcp-postgres-data
 ```
 
 **To completely reset:**
+
 ```bash
 docker-compose down -v  # -v flag removes volumes
 docker-compose up -d
@@ -247,11 +259,13 @@ docker-compose logs -f postgres
 ### Slow initialization
 
 The initialization process inserts ~27,000 rows across multiple tables. On most systems this takes 10-30 seconds. Factors affecting speed:
+
 - Disk I/O performance
 - Available RAM
 - CPU speed
 
 To check progress:
+
 ```bash
 # Monitor logs
 docker-compose logs -f postgres
@@ -264,6 +278,7 @@ docker exec -it db-connect-mcp-postgres psql -U devuser -d devdb -c "SELECT COUN
 ### Tests fail with "relation does not exist"
 
 Ensure database initialization completed:
+
 ```bash
 docker-compose logs postgres | grep "database system is ready"
 
@@ -274,6 +289,7 @@ docker exec -it db-connect-mcp-postgres psql -U devuser -d devdb -c "\dt"
 ### Stale or incorrect data
 
 Reset the database:
+
 ```bash
 docker-compose down -v
 docker-compose up -d
@@ -327,6 +343,7 @@ services:
 ```
 
 Then initialize manually in workflow steps:
+
 ```yaml
 steps:
   - name: Initialize database
