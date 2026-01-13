@@ -4,11 +4,105 @@ import logging
 from typing import Optional
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy.engine.url import make_url
 
 
 logger = logging.getLogger(__name__)
+
+
+class SSHTunnelConfig(BaseModel):
+    """Configuration for SSH tunnel connection."""
+
+    # SSH Server
+    ssh_host: str = Field(
+        ...,
+        description="SSH server hostname or IP address",
+    )
+    ssh_port: int = Field(
+        default=22,
+        ge=1,
+        le=65535,
+        description="SSH server port",
+    )
+
+    # Authentication - Username (required)
+    ssh_username: str = Field(
+        ...,
+        description="SSH username for authentication",
+    )
+
+    # Authentication - Password (optional)
+    ssh_password: Optional[str] = Field(
+        default=None,
+        description="SSH password for authentication",
+    )
+
+    # Authentication - Private Key (optional)
+    ssh_private_key_path: Optional[str] = Field(
+        default=None,
+        description="Path to SSH private key file",
+    )
+    ssh_private_key_passphrase: Optional[str] = Field(
+        default=None,
+        description="Passphrase for encrypted private key",
+    )
+
+    # Remote bind (the database server as seen from SSH server)
+    remote_host: str = Field(
+        default="127.0.0.1",
+        description="Remote host to connect to (from SSH server's perspective)",
+    )
+    remote_port: int = Field(
+        default=5432,
+        ge=1,
+        le=65535,
+        description="Remote port to connect to (database port)",
+    )
+
+    # Local bind (where tunnel listens locally)
+    local_host: str = Field(
+        default="127.0.0.1",
+        description="Local host to bind tunnel listener",
+    )
+    local_port: Optional[int] = Field(
+        default=None,
+        ge=1,
+        le=65535,
+        description="Local port for tunnel (None = auto-assign)",
+    )
+
+    # Tunnel behavior
+    tunnel_timeout: int = Field(
+        default=10,
+        ge=1,
+        le=300,
+        description="SSH connection timeout in seconds",
+    )
+
+    @model_validator(mode="after")
+    def validate_authentication(self) -> "SSHTunnelConfig":
+        """Validate that at least one authentication method is provided."""
+        if not self.ssh_password and not self.ssh_private_key_path:
+            raise ValueError(
+                "SSH authentication requires either ssh_password or ssh_private_key_path"
+            )
+        return self
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "ssh_host": "bastion.example.com",
+                    "ssh_port": 22,
+                    "ssh_username": "dbuser",
+                    "ssh_private_key_path": "/home/user/.ssh/id_rsa",
+                    "remote_host": "db.internal",
+                    "remote_port": 5432,
+                }
+            ]
+        }
+    }
 
 
 class DatabaseConfig(BaseModel):
@@ -49,6 +143,10 @@ class DatabaseConfig(BaseModel):
     echo_sql: bool = Field(
         default=False,
         description="Echo SQL statements to stdout",
+    )
+    ssh_tunnel: Optional[SSHTunnelConfig] = Field(
+        default=None,
+        description="SSH tunnel configuration for connecting through bastion hosts",
     )
 
     @field_validator("url")

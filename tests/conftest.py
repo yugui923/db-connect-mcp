@@ -402,3 +402,4 @@ def pytest_configure(config):
         "markers", "integration: Integration tests requiring database"
     )
     config.addinivalue_line("markers", "slow: Slow-running tests")
+    config.addinivalue_line("markers", "ssh_tunnel: SSH tunnel integration tests")

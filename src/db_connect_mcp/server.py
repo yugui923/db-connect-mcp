@@ -21,7 +21,7 @@ from db_connect_mcp.core import (
     QueryExecutor,
     StatisticsAnalyzer,
 )
-from db_connect_mcp.models.config import DatabaseConfig
+from db_connect_mcp.models.config import DatabaseConfig, SSHTunnelConfig
 
 # Load environment variables
 load_dotenv()
@@ -474,6 +474,48 @@ class DatabaseMCPServer:
         logger.info("Database MCP server cleaned up")
 
 
+def _load_ssh_tunnel_config() -> Optional[SSHTunnelConfig]:
+    """
+    Load SSH tunnel configuration from environment variables.
+
+    Returns:
+        SSHTunnelConfig if SSH_HOST is set, None otherwise
+    """
+    ssh_host = os.getenv("SSH_HOST")
+
+    if not ssh_host:
+        return None  # SSH tunnel not configured
+
+    ssh_username = os.getenv("SSH_USERNAME")
+    if not ssh_username:
+        raise ValueError("SSH_USERNAME must be set when SSH_HOST is configured")
+
+    # Get optional SSH config values
+    ssh_port_str = os.getenv("SSH_PORT", "22")
+    ssh_password = os.getenv("SSH_PASSWORD")
+    ssh_private_key_path = os.getenv("SSH_PRIVATE_KEY_PATH")
+    ssh_private_key_passphrase = os.getenv("SSH_PRIVATE_KEY_PASSPHRASE")
+    remote_host = os.getenv("SSH_REMOTE_HOST", "127.0.0.1")
+    remote_port_str = os.getenv("SSH_REMOTE_PORT", "5432")
+    local_host = os.getenv("SSH_LOCAL_HOST", "127.0.0.1")
+    local_port_str = os.getenv("SSH_LOCAL_PORT")
+    tunnel_timeout_str = os.getenv("SSH_TUNNEL_TIMEOUT", "10")
+
+    return SSHTunnelConfig(
+        ssh_host=ssh_host,
+        ssh_port=int(ssh_port_str),
+        ssh_username=ssh_username,
+        ssh_password=ssh_password,
+        ssh_private_key_path=ssh_private_key_path,
+        ssh_private_key_passphrase=ssh_private_key_passphrase,
+        remote_host=remote_host,
+        remote_port=int(remote_port_str),
+        local_host=local_host,
+        local_port=int(local_port_str) if local_port_str else None,
+        tunnel_timeout=int(tunnel_timeout_str),
+    )
+
+
 async def main() -> None:
     """Main entry point for the MCP server."""
     # Get database URL from environment
@@ -481,8 +523,17 @@ async def main() -> None:
     if not database_url:
         raise ValueError("DATABASE_URL environment variable must be set")
 
+    # Load SSH tunnel config if present
+    ssh_tunnel_config = _load_ssh_tunnel_config()
+
+    # Log tunnel status
+    if ssh_tunnel_config:
+        logger.info(
+            f"SSH tunnel configured: {ssh_tunnel_config.ssh_host}:{ssh_tunnel_config.ssh_port}"
+        )
+
     # Create configuration
-    config = DatabaseConfig(url=database_url)
+    config = DatabaseConfig(url=database_url, ssh_tunnel=ssh_tunnel_config)
 
     # Create and initialize server
     mcp_server = DatabaseMCPServer(config)
