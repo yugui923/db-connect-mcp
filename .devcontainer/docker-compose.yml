@@ -7,6 +7,7 @@ services:
       dockerfile: .devcontainer/Dockerfile
     volumes:
       - ..:/workspace:cached
+    network_mode: host
     command: sleep infinity
     environment:
       # PostgreSQL connection for development/tests
