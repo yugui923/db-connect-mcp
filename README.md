@@ -301,9 +301,7 @@ Or manually create `.mcp.json` in your project root. Below are examples for each
         "SSH_HOST": "bastion.example.com",
         "SSH_PORT": "22",
         "SSH_USERNAME": "deployer",
-        "SSH_PRIVATE_KEY_PATH": "/home/user/.ssh/id_rsa",
-        "SSH_REMOTE_HOST": "db-internal",
-        "SSH_REMOTE_PORT": "5432"
+        "SSH_PRIVATE_KEY_PATH": "/home/user/.ssh/id_rsa"
       }
     }
   }
@@ -354,6 +352,8 @@ Or manually create `.mcp.json` in your project root. Below are examples for each
 ```
 
 After creating `.mcp.json`, restart Claude Code and verify with `/mcp`. You should see `db-connect-mcp` listed with all available tools.
+
+> **Tip:** Instead of `SSH_PRIVATE_KEY_PATH`, you can use `SSH_PRIVATE_KEY` to pass the private key content directly as a string (raw PEM or base64-encoded PEM). This is useful in CI/CD or cloud environments where mounting key files is impractical.
 
 See the [SSH Tunnel Guide](docs/guides/SSH_TUNNEL.md) for full tunnel configuration reference.
 

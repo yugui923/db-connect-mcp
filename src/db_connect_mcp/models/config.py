@@ -39,6 +39,10 @@ class SSHTunnelConfig(BaseModel):
     )
 
     # Authentication - Private Key (optional)
+    ssh_private_key: Optional[str] = Field(
+        default=None,
+        description="SSH private key content (raw PEM or base64-encoded PEM)",
+    )
     ssh_private_key_path: Optional[str] = Field(
         default=None,
         description="Path to SSH private key file",
@@ -49,15 +53,18 @@ class SSHTunnelConfig(BaseModel):
     )
 
     # Remote bind (the database server as seen from SSH server)
-    remote_host: str = Field(
-        default="127.0.0.1",
-        description="Remote host to connect to (from SSH server's perspective)",
+    # If not set, these are automatically derived from the DATABASE_URL
+    remote_host: Optional[str] = Field(
+        default=None,
+        description="Remote host to connect to (from SSH server's perspective). "
+        "Auto-derived from DATABASE_URL if not set.",
     )
-    remote_port: int = Field(
-        default=5432,
+    remote_port: Optional[int] = Field(
+        default=None,
         ge=1,
         le=65535,
-        description="Remote port to connect to (database port)",
+        description="Remote port to connect to (database port). "
+        "Auto-derived from DATABASE_URL if not set.",
     )
 
     # Local bind (where tunnel listens locally)
@@ -83,9 +90,9 @@ class SSHTunnelConfig(BaseModel):
     @model_validator(mode="after")
     def validate_authentication(self) -> "SSHTunnelConfig":
         """Validate that at least one authentication method is provided."""
-        if not self.ssh_password and not self.ssh_private_key_path:
+        if not self.ssh_password and not self.ssh_private_key_path and not self.ssh_private_key:
             raise ValueError(
-                "SSH authentication requires either ssh_password or ssh_private_key_path"
+                "SSH authentication requires either ssh_password, ssh_private_key_path, or ssh_private_key"
             )
         return self
 

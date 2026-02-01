@@ -221,10 +221,31 @@ class DatabaseConnection:
             SSHTunnelManager as TunnelManager,
             rewrite_database_url,
         )
+        from sqlalchemy.engine.url import make_url
 
         ssh_tunnel_config = self.config.ssh_tunnel
         if ssh_tunnel_config is None:
             return
+
+        # Auto-derive remote_host/remote_port from DATABASE_URL if not set
+        if ssh_tunnel_config.remote_host is None or ssh_tunnel_config.remote_port is None:
+            url_obj = make_url(self.config.url)
+            if ssh_tunnel_config.remote_host is None:
+                ssh_tunnel_config.remote_host = url_obj.host or "127.0.0.1"
+                logger.info(
+                    f"SSH tunnel remote_host derived from DATABASE_URL: {ssh_tunnel_config.remote_host}"
+                )
+            if ssh_tunnel_config.remote_port is None:
+                default_ports = {
+                    "postgresql": 5432,
+                    "mysql": 3306,
+                    "clickhouse": 9000,
+                }
+                fallback_port = default_ports.get(self._dialect, 5432)
+                ssh_tunnel_config.remote_port = url_obj.port or fallback_port
+                logger.info(
+                    f"SSH tunnel remote_port derived from DATABASE_URL: {ssh_tunnel_config.remote_port}"
+                )
 
         try:
             self._tunnel_manager = TunnelManager(ssh_tunnel_config)

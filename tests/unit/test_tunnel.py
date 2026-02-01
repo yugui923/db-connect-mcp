@@ -1,7 +1,9 @@
 """Unit tests for SSH tunnel configuration and URL rewriting."""
 
+import base64
 from unittest.mock import MagicMock, patch
 
+import paramiko
 import pytest
 from pydantic import ValidationError
 
@@ -56,6 +58,17 @@ class TestSSHTunnelConfig:
         assert config.ssh_password is not None
         assert config.ssh_private_key_path is not None
 
+    def test_valid_inline_key_auth(self):
+        """Inline private key authentication should be valid."""
+        config = SSHTunnelConfig(
+            ssh_host="bastion.example.com",
+            ssh_username="user",
+            ssh_private_key="-----BEGIN RSA PRIVATE KEY-----\nfake\n-----END RSA PRIVATE KEY-----",
+        )
+        assert config.ssh_private_key is not None
+        assert config.ssh_private_key_path is None
+        assert config.ssh_password is None
+
     def test_no_auth_method_invalid(self):
         """Must provide at least one authentication method."""
         with pytest.raises(ValidationError) as exc_info:
@@ -63,7 +76,7 @@ class TestSSHTunnelConfig:
                 ssh_host="bastion.example.com",
                 ssh_username="user",
             )
-        assert "ssh_password or ssh_private_key_path" in str(exc_info.value)
+        assert "ssh_password" in str(exc_info.value)
 
     def test_missing_username_invalid(self):
         """Username is required."""
@@ -89,8 +102,8 @@ class TestSSHTunnelConfig:
             ssh_password="secret",
         )
         assert config.ssh_port == 22
-        assert config.remote_host == "127.0.0.1"
-        assert config.remote_port == 5432
+        assert config.remote_host is None
+        assert config.remote_port is None
         assert config.local_host == "127.0.0.1"
         assert config.local_port is None
         assert config.tunnel_timeout == 10
@@ -319,6 +332,111 @@ class TestSSHTunnelManagerMocked:
         assert result is True
         # Should have been started twice (initial + restart)
         assert mock_instance.start.call_count == 2
+
+    def test_tunnel_passes_inline_key_auth(self, mock_tunnel_forwarder):
+        """Inline key auth should parse key and pass PKey object to forwarder."""
+        mock_class, mock_instance = mock_tunnel_forwarder
+
+        # Generate a real RSA key for testing
+        from io import StringIO
+
+        rsa_key = paramiko.RSAKey.generate(2048)
+        key_io = StringIO()
+        rsa_key.write_private_key(key_io)
+        pem_content = key_io.getvalue()
+
+        config = SSHTunnelConfig(
+            ssh_host="bastion.example.com",
+            ssh_username="user",
+            ssh_private_key=pem_content,
+        )
+
+        manager = SSHTunnelManager(config)
+        manager.start()
+
+        call_kwargs = mock_class.call_args[1]
+        assert isinstance(call_kwargs["ssh_pkey"], paramiko.PKey)
+
+    def test_inline_key_takes_precedence_over_file_path(self, mock_tunnel_forwarder):
+        """Inline key should take precedence over file path when both are set."""
+        mock_class, mock_instance = mock_tunnel_forwarder
+
+        from io import StringIO
+
+        rsa_key = paramiko.RSAKey.generate(2048)
+        key_io = StringIO()
+        rsa_key.write_private_key(key_io)
+        pem_content = key_io.getvalue()
+
+        config = SSHTunnelConfig(
+            ssh_host="bastion.example.com",
+            ssh_username="user",
+            ssh_private_key=pem_content,
+            ssh_private_key_path="/path/to/key",
+        )
+
+        manager = SSHTunnelManager(config)
+        manager.start()
+
+        call_kwargs = mock_class.call_args[1]
+        # Should be a PKey object (from inline), not a string path
+        assert isinstance(call_kwargs["ssh_pkey"], paramiko.PKey)
+
+    def test_invalid_inline_key_raises_error(self, mock_tunnel_forwarder):
+        """Invalid inline key content should raise SSHTunnelError."""
+        config = SSHTunnelConfig(
+            ssh_host="bastion.example.com",
+            ssh_username="user",
+            ssh_private_key="not-a-valid-key",
+        )
+
+        manager = SSHTunnelManager(config)
+
+        with pytest.raises(SSHTunnelError):
+            manager.start()
+
+    def test_base64_encoded_inline_key(self, mock_tunnel_forwarder):
+        """Base64-encoded PEM key should be decoded and parsed."""
+        mock_class, mock_instance = mock_tunnel_forwarder
+
+        from io import StringIO
+
+        rsa_key = paramiko.RSAKey.generate(2048)
+        key_io = StringIO()
+        rsa_key.write_private_key(key_io)
+        pem_content = key_io.getvalue()
+
+        # Base64-encode the PEM content
+        b64_content = base64.b64encode(pem_content.encode("utf-8")).decode("utf-8")
+
+        config = SSHTunnelConfig(
+            ssh_host="bastion.example.com",
+            ssh_username="user",
+            ssh_private_key=b64_content,
+        )
+
+        manager = SSHTunnelManager(config)
+        manager.start()
+
+        call_kwargs = mock_class.call_args[1]
+        assert isinstance(call_kwargs["ssh_pkey"], paramiko.PKey)
+
+    def test_invalid_base64_not_pem_raises_error(self, mock_tunnel_forwarder):
+        """Base64 content that doesn't decode to PEM should raise SSHTunnelError."""
+        b64_content = base64.b64encode(b"this is not a PEM key").decode("utf-8")
+
+        config = SSHTunnelConfig(
+            ssh_host="bastion.example.com",
+            ssh_username="user",
+            ssh_private_key=b64_content,
+        )
+
+        manager = SSHTunnelManager(config)
+
+        with pytest.raises(SSHTunnelError) as exc_info:
+            manager.start()
+
+        assert "not a valid PEM" in str(exc_info.value)
 
 
 class TestDatabaseConfigWithSSHTunnel:

@@ -1,10 +1,13 @@
 """SSH tunnel management for secure database connections."""
 
+import base64
 import logging
+from io import StringIO
 from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse, urlunparse
 
+import paramiko
 from sshtunnel import SSHTunnelForwarder
 
 from db_connect_mcp.models.config import SSHTunnelConfig
@@ -51,11 +54,14 @@ class SSHTunnelManager:
             # Build authentication parameters
             auth_params = self._build_auth_params()
 
+            remote_host = self.config.remote_host or "127.0.0.1"
+            remote_port = self.config.remote_port or 5432
+
             # Create tunnel
             tunnel = SSHTunnelForwarder(
                 ssh_address_or_host=(self.config.ssh_host, self.config.ssh_port),
                 ssh_username=self.config.ssh_username,
-                remote_bind_address=(self.config.remote_host, self.config.remote_port),
+                remote_bind_address=(remote_host, remote_port),
                 local_bind_address=(
                     self.config.local_host,
                     self.config.local_port or 0,  # 0 = auto-assign
@@ -120,7 +126,14 @@ class SSHTunnelManager:
         if self.config.ssh_password:
             params["ssh_password"] = self.config.ssh_password
 
-        if self.config.ssh_private_key_path:
+        if self.config.ssh_private_key:
+            # Inline key takes precedence over file path
+            passphrase = self.config.ssh_private_key_passphrase
+            pkey = self._parse_private_key(self.config.ssh_private_key, passphrase)
+            params["ssh_pkey"] = pkey
+            if passphrase:
+                params["ssh_private_key_password"] = passphrase
+        elif self.config.ssh_private_key_path:
             key_path = Path(self.config.ssh_private_key_path)
             if not key_path.exists():
                 raise SSHTunnelError(
@@ -134,6 +147,61 @@ class SSHTunnelManager:
                 )
 
         return params
+
+    @staticmethod
+    def _decode_key_content(key_content: str) -> str:
+        """
+        Decode key content, handling both raw PEM and base64-encoded PEM.
+
+        If the content starts with '-----BEGIN', it is treated as raw PEM.
+        Otherwise, it is base64-decoded first.
+
+        Raises:
+            SSHTunnelError: If base64 decoding fails
+        """
+        stripped = key_content.strip()
+        if stripped.startswith("-----BEGIN"):
+            return stripped
+        try:
+            decoded = base64.b64decode(stripped).decode("utf-8")
+        except Exception as e:
+            raise SSHTunnelError(
+                f"SSH private key is not valid PEM and could not be base64-decoded: {e}"
+            ) from e
+        if not decoded.strip().startswith("-----BEGIN"):
+            raise SSHTunnelError(
+                "SSH private key: base64-decoded content is not a valid PEM key"
+            )
+        return decoded.strip()
+
+    @staticmethod
+    def _parse_private_key(
+        key_content: str, passphrase: Optional[str] = None
+    ) -> paramiko.PKey:
+        """
+        Parse a private key string into a paramiko PKey object.
+
+        Accepts raw PEM or base64-encoded PEM content.
+        Tries RSA, Ed25519, ECDSA, and DSS key types in order.
+
+        Raises:
+            SSHTunnelError: If the key cannot be parsed as any supported type
+        """
+        pem = SSHTunnelManager._decode_key_content(key_content)
+        key_classes = [
+            paramiko.RSAKey,
+            paramiko.Ed25519Key,
+            paramiko.ECDSAKey,
+            paramiko.DSSKey,
+        ]
+        for key_class in key_classes:
+            try:
+                return key_class.from_private_key(StringIO(pem), password=passphrase)
+            except Exception:
+                continue
+        raise SSHTunnelError(
+            "Failed to parse inline SSH private key: unsupported key type or invalid key content"
+        )
 
     def ensure_active(self) -> bool:
         """

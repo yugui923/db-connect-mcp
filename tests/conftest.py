@@ -54,6 +54,7 @@ def _build_ssh_tunnel_config(
         ssh_port=int(os.getenv("SSH_PORT", "22")),
         ssh_username=ssh_username,
         ssh_password=os.getenv("SSH_PASSWORD"),
+        ssh_private_key=os.getenv("SSH_PRIVATE_KEY"),
         remote_host=remote_host,
         remote_port=remote_port,
     )

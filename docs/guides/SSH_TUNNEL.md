@@ -10,7 +10,8 @@ The SSH tunnel feature establishes an encrypted SSH connection to a bastion/jump
 Application                 Bastion Host              Database Server
 ┌──────────┐   SSH tunnel   ┌──────────┐   private    ┌──────────┐
 │ MCP      │───────────────>│ SSH      │─────────────>│ PostgreSQL│
-│ Server   │  localhost:N   │ Server   │  db:5432     │ or MySQL  │
+│ Server   │  localhost:N   │ Server   │  db:PORT     │ MySQL, or │
+│          │                │          │              │ ClickHouse│
 └──────────┘                └──────────┘              └──────────┘
 ```
 
@@ -63,15 +64,16 @@ Application                 Bastion Host              Database Server
 | `ssh_port` | `int` | `22` | SSH server port |
 | `ssh_username` | `str` | (required) | SSH login username |
 | `ssh_password` | `str` | (optional) | Password-based authentication |
+| `ssh_private_key` | `str` | (optional) | SSH private key content (raw PEM or base64-encoded PEM) |
 | `ssh_private_key_path` | `str` | (optional) | Path to private key file |
 | `ssh_private_key_passphrase` | `str` | (optional) | Passphrase for encrypted private key |
-| `remote_host` | `str` | `127.0.0.1` | Database host as seen from the SSH server |
-| `remote_port` | `int` | `5432` | Database port as seen from the SSH server |
+| `remote_host` | `str` | (auto from URL) | Database host as seen from the SSH server. Auto-derived from `DATABASE_URL` if not set. |
+| `remote_port` | `int` | (auto from URL) | Database port as seen from the SSH server. Auto-derived from `DATABASE_URL` if not set. |
 | `local_host` | `str` | `127.0.0.1` | Local address to bind the tunnel |
 | `local_port` | `int` | `None` (auto) | Local port to bind (auto-assigned if not set) |
 | `tunnel_timeout` | `int` | `10` | SSH connection timeout in seconds |
 
-At least one of `ssh_password` or `ssh_private_key_path` must be provided.
+At least one of `ssh_password`, `ssh_private_key`, or `ssh_private_key_path` must be provided. If both `ssh_private_key` (inline) and `ssh_private_key_path` (file) are set, the inline key takes precedence.
 
 ## Usage Examples
 
@@ -80,15 +82,25 @@ At least one of `ssh_password` or `ssh_private_key_path` must be provided.
 ```python
 from db_connect_mcp.models.config import DatabaseConfig, SSHTunnelConfig
 
+# remote_host and remote_port are auto-derived from the DATABASE_URL
 config = DatabaseConfig(
-    database_url="postgresql+asyncpg://user:pass@db-internal:5432/mydb",
+    url="postgresql+asyncpg://user:pass@db-internal:5432/mydb",
     ssh_tunnel=SSHTunnelConfig(
         ssh_host="bastion.example.com",
-        ssh_port=22,
         ssh_username="deployer",
         ssh_private_key_path="/home/user/.ssh/id_rsa",
-        remote_host="db-internal",
-        remote_port=5432,
+    ),
+)
+
+# You can override remote_host/remote_port if they differ from the URL
+config = DatabaseConfig(
+    url="mysql+aiomysql://user:pass@placeholder:3306/mydb",
+    ssh_tunnel=SSHTunnelConfig(
+        ssh_host="bastion.example.com",
+        ssh_username="deployer",
+        ssh_password="secret",
+        remote_host="mysql-internal",
+        remote_port=3306,
     ),
 )
 ```

@@ -212,10 +212,11 @@ SSH tunnel is configured via `SSHTunnelConfig` on `DatabaseConfig.ssh_tunnel`:
 | `ssh_port` | `22` | SSH server port |
 | `ssh_username` | (required) | SSH username |
 | `ssh_password` | (optional) | Password authentication |
+| `ssh_private_key` | (optional) | SSH private key content (raw PEM or base64-encoded PEM) |
 | `ssh_private_key_path` | (optional) | Path to private key file |
 | `ssh_private_key_passphrase` | (optional) | Passphrase for encrypted key |
-| `remote_host` | `127.0.0.1` | Database host as seen from SSH server |
-| `remote_port` | `5432` | Database port as seen from SSH server |
+| `remote_host` | (auto from URL) | Database host as seen from SSH server |
+| `remote_port` | (auto from URL) | Database port as seen from SSH server |
 | `local_host` | `127.0.0.1` | Local bind host |
 | `local_port` | `None` (auto) | Local bind port |
 | `tunnel_timeout` | `10` | SSH connection timeout (seconds) |
