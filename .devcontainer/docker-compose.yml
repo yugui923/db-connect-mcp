@@ -11,7 +11,7 @@ services:
     command: sleep infinity
     environment:
       # PostgreSQL connection for development/tests
-      PG_TEST_DATABASE_URL: postgresql+asyncpg://devuser:devpassword@postgres:5432/devdb
+      PG_TEST_DATABASE_URL: postgresql+asyncpg://devuser:devpassword@localhost:5432/devdb
     depends_on:
       postgres:
         condition: service_healthy
