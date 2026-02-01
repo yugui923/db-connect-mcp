@@ -66,7 +66,7 @@ class SSHTunnelManager:
                     self.config.local_host,
                     self.config.local_port or 0,  # 0 = auto-assign
                 ),
-                set_keepalive=30,  # Send keepalive every 30 seconds
+                set_keepalive=self.config.tunnel_timeout,
                 **auth_params,
             )
 
@@ -128,11 +128,10 @@ class SSHTunnelManager:
 
         if self.config.ssh_private_key:
             # Inline key takes precedence over file path
+            # Key is fully decrypted during parsing, so no need to pass passphrase
             passphrase = self.config.ssh_private_key_passphrase
             pkey = self._parse_private_key(self.config.ssh_private_key, passphrase)
             params["ssh_pkey"] = pkey
-            if passphrase:
-                params["ssh_private_key_password"] = passphrase
         elif self.config.ssh_private_key_path:
             key_path = Path(self.config.ssh_private_key_path)
             if not key_path.exists():

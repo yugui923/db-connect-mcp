@@ -221,40 +221,46 @@ class DatabaseConnection:
             SSHTunnelManager as TunnelManager,
             rewrite_database_url,
         )
+        from db_connect_mcp.models.config import SSHTunnelConfig
         from sqlalchemy.engine.url import make_url
 
         ssh_tunnel_config = self.config.ssh_tunnel
         if ssh_tunnel_config is None:
             return
 
+        # Copy config to avoid mutating the caller's object
+        tunnel_kwargs = ssh_tunnel_config.model_dump()
+
         # Auto-derive remote_host/remote_port from DATABASE_URL if not set
-        if ssh_tunnel_config.remote_host is None or ssh_tunnel_config.remote_port is None:
+        if tunnel_kwargs["remote_host"] is None or tunnel_kwargs["remote_port"] is None:
             url_obj = make_url(self.config.url)
-            if ssh_tunnel_config.remote_host is None:
-                ssh_tunnel_config.remote_host = url_obj.host or "127.0.0.1"
+            if tunnel_kwargs["remote_host"] is None:
+                tunnel_kwargs["remote_host"] = url_obj.host or "127.0.0.1"
                 logger.info(
-                    f"SSH tunnel remote_host derived from DATABASE_URL: {ssh_tunnel_config.remote_host}"
+                    f"SSH tunnel remote_host derived from DATABASE_URL: {tunnel_kwargs['remote_host']}"
                 )
-            if ssh_tunnel_config.remote_port is None:
+            if tunnel_kwargs["remote_port"] is None:
                 default_ports = {
                     "postgresql": 5432,
                     "mysql": 3306,
                     "clickhouse": 9000,
                 }
                 fallback_port = default_ports.get(self._dialect, 5432)
-                ssh_tunnel_config.remote_port = url_obj.port or fallback_port
+                tunnel_kwargs["remote_port"] = url_obj.port or fallback_port
                 logger.info(
-                    f"SSH tunnel remote_port derived from DATABASE_URL: {ssh_tunnel_config.remote_port}"
+                    f"SSH tunnel remote_port derived from DATABASE_URL: {tunnel_kwargs['remote_port']}"
                 )
 
+        effective_config = SSHTunnelConfig(**tunnel_kwargs)
+
         try:
-            self._tunnel_manager = TunnelManager(ssh_tunnel_config)
-            local_port = self._tunnel_manager.start()
+            self._tunnel_manager = TunnelManager(effective_config)
+            local_port = await asyncio.to_thread(self._tunnel_manager.start)
 
             # Rewrite URL to use tunnel
             self._tunneled_url = rewrite_database_url(
                 self.config.url,
-                ssh_tunnel_config.local_host,
+                effective_config.local_host,
                 local_port,
             )
 
@@ -266,19 +272,20 @@ class DatabaseConnection:
 
     async def dispose(self) -> None:
         """Dispose of the connection pool and cleanup resources."""
-        # Dispose engine first
-        if self.engine is not None:
-            await self.engine.dispose()
-            self.engine = None
-        if self.sync_engine is not None:
-            self.sync_engine.dispose()
-            self.sync_engine = None
-
-        # Then stop SSH tunnel
-        if self._tunnel_manager is not None:
-            self._tunnel_manager.stop()
-            self._tunnel_manager = None
-            self._tunneled_url = None
+        try:
+            # Dispose engine first
+            if self.engine is not None:
+                await self.engine.dispose()
+                self.engine = None
+            if self.sync_engine is not None:
+                self.sync_engine.dispose()
+                self.sync_engine = None
+        finally:
+            # Always stop SSH tunnel, even if engine dispose fails
+            if self._tunnel_manager is not None:
+                self._tunnel_manager.stop()
+                self._tunnel_manager = None
+                self._tunneled_url = None
 
     @asynccontextmanager
     async def get_connection(

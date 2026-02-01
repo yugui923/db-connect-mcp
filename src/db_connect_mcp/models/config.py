@@ -35,12 +35,14 @@ class SSHTunnelConfig(BaseModel):
     # Authentication - Password (optional)
     ssh_password: Optional[str] = Field(
         default=None,
+        repr=False,
         description="SSH password for authentication",
     )
 
     # Authentication - Private Key (optional)
     ssh_private_key: Optional[str] = Field(
         default=None,
+        repr=False,
         description="SSH private key content (raw PEM or base64-encoded PEM)",
     )
     ssh_private_key_path: Optional[str] = Field(
@@ -49,6 +51,7 @@ class SSHTunnelConfig(BaseModel):
     )
     ssh_private_key_passphrase: Optional[str] = Field(
         default=None,
+        repr=False,
         description="Passphrase for encrypted private key",
     )
 
@@ -315,7 +318,6 @@ class DatabaseConfig(BaseModel):
                     "write_timeout",  # Write timeout
                     # Transaction control
                     "autocommit",  # Autocommit mode
-                    "init_command",  # Initial SQL command to run
                     # Other useful settings
                     "sql_mode",  # SQL mode settings
                     "time_zone",  # Time zone setting

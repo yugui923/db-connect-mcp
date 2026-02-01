@@ -538,8 +538,10 @@ db-connect-mcp/
 │       ├── __main__.py      # Module entry point
 │       └── server.py        # Main MCP server implementation
 ├── tests/
-│   ├── conftest.py      # Test configuration
-│   └── test_server.py   # Integration tests
+│   ├── unit/            # Unit tests (mocked)
+│   ├── module/          # Module tests (single component + DB)
+│   ├── integration/     # Integration tests (full stack)
+│   └── conftest.py      # Shared fixtures
 ├── .env.example         # Example environment configuration
 ├── pyproject.toml      # Project dependencies and console scripts
 └── README.md          # This file
@@ -579,7 +581,7 @@ cd tests/docker && docker-compose down -v && docker-compose up -d && cd ../..
 - PostgreSQL 17 with 50K+ rows of sample data across 7 tables
 - Automatically initialized via Docker Compose
 - No cloud database or .env configuration required
-- See `tests/docker/README.md` for details
+- See [Docker Setup](docs/guides/DOCKER.md) for details
 
 See the [Development Guide](docs/guides/DEVELOPMENT.md#running-tests) and [Testing Guide](docs/guides/TESTING.md) for detailed testing instructions.
 
