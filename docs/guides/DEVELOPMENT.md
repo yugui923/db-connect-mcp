@@ -1,6 +1,10 @@
 # Development Guide
 
-This guide covers setting up a development environment for contributing to db-connect-mcp.
+## Summary
+
+This guide covers setting up a development environment for db-connect-mcp. Install with `uv sync --dev`, run the server with `python -m db_connect_mcp`, run tests with `uv run pytest -n 6`, and lint with `uv run ruff check .`. The project uses an adapter pattern supporting PostgreSQL, MySQL, and ClickHouse, with SSH tunnel support for secure remote access. See also: [Testing Guide](TESTING.md), [Docker Setup](DOCKER.md), [SSH Tunnel](SSH_TUNNEL.md).
+
+---
 
 ## Quick Setup
 
@@ -90,9 +94,17 @@ DATABASE_URL="postgresql://..." python -m db_connect_mcp
 
 ### For Testing with Claude Desktop or Claude Code
 
-For production usage examples, see the [README](../README.md#using-with-claude-desktop).
+For production usage examples, see the [README](../../README.md#using-with-claude-desktop).
 
 For development and testing with Claude Code, see [Claude Code Integration Guide](CLAUDE_CODE_INTEGRATION.md).
+
+### SSH Tunnel Support
+
+The server supports connecting to databases through SSH tunnels for secure access to databases behind firewalls. See [SSH Tunnel Guide](SSH_TUNNEL.md) for configuration details.
+
+### Devcontainer
+
+The project includes a full devcontainer (`.devcontainer/`) with 5 Docker containers covering all 4 database access patterns: PostgreSQL direct, PostgreSQL tunneled, MySQL direct, MySQL tunneled, plus an SSH bastion host. Rebuild the devcontainer to start everything automatically. See [Docker Setup](DOCKER.md#devcontainer-multi-database-setup) for details.
 
 **Quick Dev Config** - Add to `.mcp.json` in project root:
 
@@ -158,7 +170,7 @@ uv run pytest -m postgresql -n 6
 cd tests/docker && docker-compose down && cd ../..
 ```
 
-See [tests/README.md](../tests/README.md) for detailed testing documentation.
+See [Testing Guide](TESTING.md) for detailed testing documentation.
 
 ### Setting Up Test Databases
 
@@ -376,9 +388,11 @@ Types: `feat`, `fix`, `docs`, `style`, `refactor`, `test`, `chore`
 
 ## Resources
 
-- [Project README](../README.md) - User documentation
-- [Test Guide](../tests/README.md) - Testing documentation
-- [CLAUDE.md](../CLAUDE.md) - Claude Code guidance
+- [Project README](../../README.md) - User documentation
+- [Testing Guide](TESTING.md) - Testing documentation
+- [Docker Setup](DOCKER.md) - Database infrastructure
+- [SSH Tunnel](SSH_TUNNEL.md) - Tunnel feature documentation
+- [CLAUDE.md](../../CLAUDE.md) - Claude Code guidance
 - [MCP Documentation](https://modelcontextprotocol.io/) - MCP protocol reference
 - [SQLAlchemy Docs](https://docs.sqlalchemy.org/) - Database toolkit
 - [Pydantic Docs](https://docs.pydantic.dev/) - Data validation
@@ -391,4 +405,4 @@ Types: `feat`, `fix`, `docs`, `style`, `refactor`, `test`, `chore`
 
 ## License
 
-MIT License - See [LICENSE](../LICENSE) file for details.
+MIT License - See [LICENSE](../../LICENSE) file for details.

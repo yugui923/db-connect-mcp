@@ -1,6 +1,6 @@
 # Claude Code Integration Guide for Development
 
-This guide is for **developers** testing the `db_connect_mcp` server using Claude Code. For end-user setup instructions, see the [README](../README.md#using-with-claude-code).
+This guide is for **developers** testing the `db_connect_mcp` server using Claude Code. For end-user setup instructions, see the [README](../../README.md#using-with-claude-code).
 
 ## Why Use Claude Code for MCP Development?
 
@@ -232,7 +232,7 @@ If testing in a dev container with PostgreSQL sidecar:
 
 ## Resources
 
-- [Main README](../README.md) - User documentation
+- [Main README](../../README.md) - User documentation
 - [Development Guide](DEVELOPMENT.md) - Full development setup
-- [Test Guide](../tests/README.md) - Testing documentation
+- [Testing Guide](TESTING.md) - Testing documentation
 - [Claude Code Docs](https://code.claude.com/docs/en/mcp) - Official MCP documentation

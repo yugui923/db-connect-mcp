@@ -64,6 +64,15 @@ A read-only MCP (Model Context Protocol) server for exploratory data analysis ac
 - **Connection string safety** - Automatically adds read-only parameters
 - **Database-specific safety** - Each adapter implements appropriate safety measures
 
+### 🔐 SSH Tunnel Support
+
+- **Secure remote access** - Connect to databases behind firewalls via SSH tunnels
+- **Automatic tunnel management** - Tunnel lifecycle handled transparently (start, health check, restart, cleanup)
+- **Flexible authentication** - Password or private key based SSH authentication
+- **Any database type** - Works with PostgreSQL, MySQL, and ClickHouse through the same tunnel
+
+See the [SSH Tunnel Guide](docs/guides/SSH_TUNNEL.md) for configuration details.
+
 ## Installation
 
 ### Prerequisites
@@ -79,7 +88,7 @@ pip install db-connect-mcp
 
 That's it! The package is now ready to use.
 
-> **For developers**: See [Development Guide](docs/DEVELOPMENT.md) for setting up a development environment.
+> **For developers**: See [Development Guide](docs/guides/DEVELOPMENT.md) for setting up a development environment.
 
 ## Configuration
 
@@ -219,6 +228,135 @@ DATABASE_URL="postgresql://user:pass@host:5432/db" python -m db_connect_mcp
 
 > **Note**: Using `python -m db_connect_mcp` works regardless of whether Python's Scripts directory is in your PATH.
 
+### Using with Claude Code
+
+Add the MCP server to your project's `.mcp.json`:
+
+```bash
+claude mcp add --transport stdio db-connect --scope project \
+  --env DATABASE_URL=postgresql://user:pass@host:5432/db \
+  -- python -m db_connect_mcp
+```
+
+Or manually create `.mcp.json` in your project root. Below are examples for each supported database:
+
+**PostgreSQL:**
+
+```json
+{
+  "mcpServers": {
+    "db-connect-mcp": {
+      "command": "python",
+      "args": ["-m", "db_connect_mcp"],
+      "env": {
+        "DATABASE_URL": "postgresql+asyncpg://user:pass@host:5432/mydb"
+      }
+    }
+  }
+}
+```
+
+**MySQL:**
+
+```json
+{
+  "mcpServers": {
+    "db-connect-mcp": {
+      "command": "python",
+      "args": ["-m", "db_connect_mcp"],
+      "env": {
+        "DATABASE_URL": "mysql+aiomysql://user:pass@host:3306/mydb"
+      }
+    }
+  }
+}
+```
+
+**ClickHouse:**
+
+```json
+{
+  "mcpServers": {
+    "db-connect-mcp": {
+      "command": "python",
+      "args": ["-m", "db_connect_mcp"],
+      "env": {
+        "DATABASE_URL": "clickhouse+asynch://default:@host:9000/default"
+      }
+    }
+  }
+}
+```
+
+**PostgreSQL via SSH tunnel** (database behind a firewall, reachable only through a bastion host):
+
+```json
+{
+  "mcpServers": {
+    "db-connect-mcp": {
+      "command": "python",
+      "args": ["-m", "db_connect_mcp"],
+      "env": {
+        "DATABASE_URL": "postgresql+asyncpg://user:pass@db-internal:5432/mydb",
+        "SSH_HOST": "bastion.example.com",
+        "SSH_PORT": "22",
+        "SSH_USERNAME": "deployer",
+        "SSH_PRIVATE_KEY_PATH": "/home/user/.ssh/id_rsa",
+        "SSH_REMOTE_HOST": "db-internal",
+        "SSH_REMOTE_PORT": "5432"
+      }
+    }
+  }
+}
+```
+
+**MySQL via SSH tunnel:**
+
+```json
+{
+  "mcpServers": {
+    "db-connect-mcp": {
+      "command": "python",
+      "args": ["-m", "db_connect_mcp"],
+      "env": {
+        "DATABASE_URL": "mysql+aiomysql://user:pass@db-internal:3306/mydb",
+        "SSH_HOST": "bastion.example.com",
+        "SSH_PORT": "22",
+        "SSH_USERNAME": "deployer",
+        "SSH_PASSWORD": "secret"
+      }
+    }
+  }
+}
+```
+
+**Multiple databases** (each MCP server instance connects to one database):
+
+```json
+{
+  "mcpServers": {
+    "postgres-prod": {
+      "command": "python",
+      "args": ["-m", "db_connect_mcp"],
+      "env": {
+        "DATABASE_URL": "postgresql+asyncpg://user:pass@pg-host:5432/prod"
+      }
+    },
+    "mysql-analytics": {
+      "command": "python",
+      "args": ["-m", "db_connect_mcp"],
+      "env": {
+        "DATABASE_URL": "mysql+aiomysql://user:pass@mysql-host:3306/analytics"
+      }
+    }
+  }
+}
+```
+
+After creating `.mcp.json`, restart Claude Code and verify with `/mcp`. You should see `db-connect-mcp` listed with all available tools.
+
+See the [SSH Tunnel Guide](docs/guides/SSH_TUNNEL.md) for full tunnel configuration reference.
+
 ### Using with Claude Desktop
 
 Add the server to your Claude Desktop configuration (`claude_desktop_config.json`):
@@ -237,140 +375,9 @@ Add the server to your Claude Desktop configuration (`claude_desktop_config.json
 }
 ```
 
-**Multiple database connections:**
+The same database URL formats and SSH tunnel environment variables shown in the Claude Code examples above work identically with Claude Desktop.
 
-```json
-{
-  "mcpServers": {
-    "postgres-prod": {
-      "command": "python",
-      "args": ["-m", "db_connect_mcp"],
-      "env": {
-        "DATABASE_URL": "postgresql+asyncpg://user:pass@pg-host:5432/db"
-      }
-    },
-    "mysql-analytics": {
-      "command": "python",
-      "args": ["-m", "db_connect_mcp"],
-      "env": {
-        "DATABASE_URL": "mysql+aiomysql://user:pass@mysql-host:3306/analytics"
-      }
-    }
-  }
-}
-```
-
-### Using with Claude Code
-
-[Claude Code](https://claude.ai/code) is the official CLI for Claude that provides better debugging visibility and faster iteration compared to Claude Desktop.
-
-**Quick Setup:**
-
-1. **Add the MCP server** to your project's `.mcp.json`:
-
-   ```bash
-   claude mcp add --transport stdio db-connect --scope project \
-     --env DATABASE_URL=postgresql://user:pass@host:5432/db \
-     -- python -m db_connect_mcp
-   ```
-
-2. **Or manually create** `.mcp.json` in your project root:
-
-   ```json
-   {
-     "mcpServers": {
-       "db-connect-mcp": {
-         "command": "python",
-         "args": ["-m", "db_connect_mcp"],
-         "env": {
-           "DATABASE_URL": "postgresql://user:pass@host:5432/db"
-         }
-       }
-     }
-   }
-   ```
-
-3. **Restart Claude Code**:
-
-   ```bash
-   # Exit current session (Ctrl+D)
-   claude
-   ```
-
-4. **Verify the server is loaded**:
-
-   ```
-   /mcp
-   ```
-
-   You should see `db-connect-mcp` listed with all available tools.
-
-5. **Start querying**:
-   ```
-   What tables are in my database?
-   ```
-
-**Configuration Scopes:**
-
-- **Project scope** (recommended): `.mcp.json` in project root - Shared with team via git
-- **User scope**: `~/.claude.json` - Available across all your projects
-- **Local scope**: `~/.claude.json` - Private to you in the current project
-
-**Development with uv:**
-
-If you're working with the source code in a dev container or using uv:
-
-```json
-{
-  "mcpServers": {
-    "db-connect-mcp": {
-      "command": "uv",
-      "args": ["run", "python", "-m", "db_connect_mcp"],
-      "env": {
-        "DATABASE_URL": "postgresql+asyncpg://user:pass@host:5432/db"
-      }
-    }
-  }
-}
-```
-
-**Docker/Dev Container Note:**
-
-When running inside a Docker container (like VS Code Dev Containers), use the appropriate hostname:
-
-- **Inside container**: Use Docker service names (e.g., `postgres:5432`)
-- **On host machine**: Use `localhost:5432`
-
-Example for dev container with PostgreSQL sidecar:
-
-```json
-{
-  "mcpServers": {
-    "db-connect-mcp": {
-      "command": "uv",
-      "args": ["run", "python", "-m", "db_connect_mcp"],
-      "env": {
-        "DATABASE_URL": "postgresql+asyncpg://devuser:devpass@postgres:5432/devdb"
-      }
-    }
-  }
-}
-```
-
-**Advantages of Claude Code:**
-
-- ✅ Better error visibility and debugging
-- ✅ Faster iteration (no app restart needed)
-- ✅ Direct access to server logs
-- ✅ Integration with development workflow
-- ✅ Use `/mcp` command to check server status
-
-**Learn more:**
-
-- [Claude Code Documentation](https://code.claude.com/docs)
-- [MCP Server Configuration](https://code.claude.com/docs/en/mcp)
-
-> **For development**: See [Development Guide](docs/DEVELOPMENT.md) for running from source with uv.
+> **For development**: See [Development Guide](docs/guides/DEVELOPMENT.md) for running from source with uv.
 
 ## Database Feature Support
 
@@ -498,7 +505,7 @@ Once configured, you can use the server in Claude:
 
 ## Development
 
-For detailed development setup, testing, and contribution guidelines, see the [Development Guide](docs/DEVELOPMENT.md).
+For detailed development setup, testing, and contribution guidelines, see the [Development Guide](docs/guides/DEVELOPMENT.md).
 
 ### Project Structure
 
@@ -517,7 +524,8 @@ db-connect-mcp/
 │       │   ├── connection.py # Database connection management
 │       │   ├── executor.py  # Query execution
 │       │   ├── inspector.py # Metadata inspection
-│       │   └── analyzer.py  # Statistical analysis
+│       │   ├── analyzer.py  # Statistical analysis
+│       │   └── tunnel.py   # SSH tunnel management
 │       ├── models/          # Data models
 │       │   ├── __init__.py
 │       │   ├── capabilities.py # Database capabilities
@@ -573,7 +581,7 @@ cd tests/docker && docker-compose down -v && docker-compose up -d && cd ../..
 - No cloud database or .env configuration required
 - See `tests/docker/README.md` for details
 
-See the [Development Guide](docs/DEVELOPMENT.md#running-tests) and [Test Guide](tests/README.md) for detailed testing instructions.
+See the [Development Guide](docs/guides/DEVELOPMENT.md#running-tests) and [Testing Guide](docs/guides/TESTING.md) for detailed testing instructions.
 
 ## Troubleshooting
 
