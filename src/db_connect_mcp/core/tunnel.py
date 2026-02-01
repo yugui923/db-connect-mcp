@@ -149,19 +149,45 @@ class SSHTunnelManager:
         return params
 
     @staticmethod
+    def _normalize_pem(pem: str) -> str:
+        """
+        Ensure PEM content has proper line breaks (64-char body lines).
+
+        Handles PEM that was concatenated into a single line.
+        """
+        import re
+
+        pem = pem.strip()
+        # Match header, body, footer — allowing missing newlines
+        m = re.match(
+            r"(-----BEGIN [A-Z ]+-----)\s*(.*?)\s*(-----END [A-Z ]+-----)",
+            pem,
+            re.DOTALL,
+        )
+        if not m:
+            return pem  # Not valid PEM structure, return as-is for error handling later
+
+        header, body, footer = m.group(1), m.group(2), m.group(3)
+        # Strip all whitespace from body and re-wrap at 64 chars
+        body_clean = re.sub(r"\s+", "", body)
+        lines = [body_clean[i : i + 64] for i in range(0, len(body_clean), 64)]
+        return header + "\n" + "\n".join(lines) + "\n" + footer
+
+    @staticmethod
     def _decode_key_content(key_content: str) -> str:
         """
         Decode key content, handling both raw PEM and base64-encoded PEM.
 
         If the content starts with '-----BEGIN', it is treated as raw PEM.
-        Otherwise, it is base64-decoded first.
+        Otherwise, it is base64-decoded first. In both cases, PEM line
+        formatting is normalized.
 
         Raises:
             SSHTunnelError: If base64 decoding fails
         """
         stripped = key_content.strip()
         if stripped.startswith("-----BEGIN"):
-            return stripped
+            return SSHTunnelManager._normalize_pem(stripped)
         try:
             decoded = base64.b64decode(stripped).decode("utf-8")
         except Exception as e:
@@ -172,7 +198,7 @@ class SSHTunnelManager:
             raise SSHTunnelError(
                 "SSH private key: base64-decoded content is not a valid PEM key"
             )
-        return decoded.strip()
+        return SSHTunnelManager._normalize_pem(decoded.strip())
 
     @staticmethod
     def _parse_private_key(
