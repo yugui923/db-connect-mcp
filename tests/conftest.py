@@ -2,6 +2,12 @@
 
 This conftest.py is at the root of the tests/ directory and provides
 fixtures for all test subdirectories (integration/, module/, unit/).
+
+Fixture naming convention:
+  pg_*          = PostgreSQL direct (localhost:5432)
+  mysql_*       = MySQL direct (localhost:3306)
+  pg_tunnel_*   = PostgreSQL via SSH tunnel (bastion -> postgres-tunneled)
+  mysql_tunnel_* = MySQL via SSH tunnel (bastion -> mysql-tunneled)
 """
 
 import os
@@ -32,21 +38,55 @@ if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())  # type: ignore[attr-defined]
 
 
-# ==================== Configuration Fixtures ====================
+# ==================== SSH Tunnel Helper ====================
+
+
+def _build_ssh_tunnel_config(
+    remote_host: str, remote_port: int
+) -> Optional[SSHTunnelConfig]:
+    """Build SSH tunnel config from env vars for a specific remote target."""
+    ssh_host = os.getenv("SSH_HOST")
+    ssh_username = os.getenv("SSH_USERNAME")
+    if not ssh_host or not ssh_username:
+        return None
+    return SSHTunnelConfig(
+        ssh_host=ssh_host,
+        ssh_port=int(os.getenv("SSH_PORT", "22")),
+        ssh_username=ssh_username,
+        ssh_password=os.getenv("SSH_PASSWORD"),
+        remote_host=remote_host,
+        remote_port=remote_port,
+    )
+
+
+# ==================== URL Fixtures ====================
 
 
 @pytest.fixture(scope="session")
 def pg_database_url() -> str:
-    """PostgreSQL test database URL.
-
-    Priority:
-    1. PG_TEST_DATABASE_URL (explicit test database override)
-    2. Local Docker database (default: localhost:5432)
-    """
+    """PostgreSQL direct-access test database URL."""
     return os.getenv(
         "PG_TEST_DATABASE_URL",
         "postgresql+asyncpg://devuser:devpassword@localhost:5432/devdb",
     )
+
+
+@pytest.fixture(scope="session")
+def mysql_database_url() -> Optional[str]:
+    """MySQL direct-access test database URL."""
+    return os.getenv("MYSQL_TEST_DATABASE_URL")
+
+
+@pytest.fixture(scope="session")
+def pg_tunnel_database_url() -> Optional[str]:
+    """PostgreSQL tunnel database URL (target as seen from bastion)."""
+    return os.getenv("PG_TUNNEL_DATABASE_URL")
+
+
+@pytest.fixture(scope="session")
+def mysql_tunnel_database_url() -> Optional[str]:
+    """MySQL tunnel database URL (target as seen from bastion)."""
+    return os.getenv("MYSQL_TUNNEL_DATABASE_URL")
 
 
 @pytest.fixture(scope="session")
@@ -55,24 +95,33 @@ def ch_database_url() -> Optional[str]:
     return os.getenv("CH_TEST_DATABASE_URL")
 
 
+# ==================== Tunnel Config Fixtures ====================
+
+
 @pytest.fixture(scope="session")
-def mysql_database_url() -> Optional[str]:
-    """MySQL test database URL from environment."""
-    return os.getenv("MYSQL_TEST_DATABASE_URL")
+def pg_tunnel_ssh_config() -> Optional[SSHTunnelConfig]:
+    """SSH tunnel config targeting the tunneled PostgreSQL container."""
+    return _build_ssh_tunnel_config("postgres-tunneled", 5432)
 
 
-# ==================== PostgreSQL Fixtures ====================
+@pytest.fixture(scope="session")
+def mysql_tunnel_ssh_config() -> Optional[SSHTunnelConfig]:
+    """SSH tunnel config targeting the tunneled MySQL container."""
+    return _build_ssh_tunnel_config("mysql-tunneled", 3306)
+
+
+# ==================== PostgreSQL Direct Fixtures ====================
 
 
 @pytest.fixture
 async def pg_config(pg_database_url: str) -> DatabaseConfig:
-    """PostgreSQL database configuration."""
+    """PostgreSQL direct database configuration."""
     return DatabaseConfig(url=pg_database_url)
 
 
 @pytest.fixture
 async def pg_adapter(pg_config: DatabaseConfig) -> BaseAdapter:
-    """PostgreSQL adapter instance."""
+    """PostgreSQL direct adapter instance."""
     return create_adapter(pg_config)
 
 
@@ -80,17 +129,15 @@ async def pg_adapter(pg_config: DatabaseConfig) -> BaseAdapter:
 async def pg_connection(
     pg_config: DatabaseConfig,
 ) -> AsyncGenerator[DatabaseConnection, None]:
-    """PostgreSQL database connection with proper cleanup."""
+    """PostgreSQL direct database connection with proper cleanup."""
     connection = DatabaseConnection(pg_config)
     try:
         await connection.initialize()
-        # Test actual connectivity (engine creation is lazy)
         async with connection.get_connection() as conn:
             await conn.execute(text("SELECT 1"))
     except Exception as e:
-        # Skip test if database connection fails
         await connection.dispose()
-        pytest.skip(f"PostgreSQL database connection failed: {e}")
+        pytest.skip(f"PostgreSQL direct connection failed: {e}")
     try:
         yield connection
     finally:
@@ -101,7 +148,7 @@ async def pg_connection(
 async def pg_inspector(
     pg_connection: DatabaseConnection, pg_adapter: BaseAdapter
 ) -> MetadataInspector:
-    """PostgreSQL metadata inspector."""
+    """PostgreSQL direct metadata inspector."""
     return MetadataInspector(pg_connection, pg_adapter)
 
 
@@ -109,21 +156,21 @@ async def pg_inspector(
 async def pg_analyzer(
     pg_connection: DatabaseConnection, pg_adapter: BaseAdapter
 ) -> StatisticsAnalyzer:
-    """PostgreSQL statistics analyzer."""
+    """PostgreSQL direct statistics analyzer."""
     return StatisticsAnalyzer(pg_connection, pg_adapter)
 
 
 @pytest.fixture
-async def pg_executor(pg_connection: DatabaseConnection, pg_adapter: BaseAdapter):
-    """PostgreSQL query executor."""
-    from db_connect_mcp.core import QueryExecutor
-
+async def pg_executor(
+    pg_connection: DatabaseConnection, pg_adapter: BaseAdapter
+) -> QueryExecutor:
+    """PostgreSQL direct query executor."""
     return QueryExecutor(pg_connection, pg_adapter)
 
 
 @pytest.fixture
 def known_tables():
-    """Known tables from local test database with their guaranteed columns.
+    """Known tables from local PG test database with their guaranteed columns.
 
     Use this instead of searching for tables - these are guaranteed to exist
     in the local Docker test database.
@@ -230,7 +277,7 @@ def known_tables():
 async def pg_mcp_server(
     pg_config: DatabaseConfig,
 ) -> AsyncGenerator:
-    """PostgreSQL MCP server for protocol-level testing."""
+    """PostgreSQL direct MCP server for protocol-level testing."""
     from db_connect_mcp.server import DatabaseMCPServer
 
     server = DatabaseMCPServer(pg_config)
@@ -245,42 +292,20 @@ async def pg_mcp_server(
         await server.cleanup()
 
 
-# ==================== MySQL (via SSH Tunnel) Fixtures ====================
-
-
-@pytest.fixture(scope="session")
-def mysql_ssh_tunnel_config() -> Optional[SSHTunnelConfig]:
-    """SSH tunnel config for MySQL, built from environment variables."""
-    ssh_host = os.getenv("SSH_HOST")
-    if not ssh_host:
-        return None
-    ssh_username = os.getenv("SSH_USERNAME")
-    if not ssh_username:
-        return None
-    return SSHTunnelConfig(
-        ssh_host=ssh_host,
-        ssh_port=int(os.getenv("SSH_PORT", "22")),
-        ssh_username=ssh_username,
-        ssh_password=os.getenv("SSH_PASSWORD"),
-        remote_host=os.getenv("SSH_REMOTE_HOST", "127.0.0.1"),
-        remote_port=int(os.getenv("SSH_REMOTE_PORT", "3306")),
-    )
+# ==================== MySQL Direct Fixtures ====================
 
 
 @pytest.fixture
-async def mysql_config(
-    mysql_database_url: Optional[str],
-    mysql_ssh_tunnel_config: Optional[SSHTunnelConfig],
-) -> DatabaseConfig:
-    """MySQL database configuration with SSH tunnel."""
+async def mysql_config(mysql_database_url: Optional[str]) -> DatabaseConfig:
+    """MySQL direct database configuration (no tunnel)."""
     if not mysql_database_url:
         pytest.skip("MYSQL_TEST_DATABASE_URL not set in environment")
-    return DatabaseConfig(url=mysql_database_url, ssh_tunnel=mysql_ssh_tunnel_config)
+    return DatabaseConfig(url=mysql_database_url)
 
 
 @pytest.fixture
 async def mysql_adapter(mysql_config: DatabaseConfig) -> BaseAdapter:
-    """MySQL adapter instance."""
+    """MySQL direct adapter instance."""
     return create_adapter(mysql_config)
 
 
@@ -288,7 +313,7 @@ async def mysql_adapter(mysql_config: DatabaseConfig) -> BaseAdapter:
 async def mysql_connection(
     mysql_config: DatabaseConfig,
 ) -> AsyncGenerator[DatabaseConnection, None]:
-    """MySQL database connection (via SSH tunnel) with proper cleanup."""
+    """MySQL direct database connection with proper cleanup."""
     connection = DatabaseConnection(mysql_config)
     try:
         await connection.initialize()
@@ -296,7 +321,7 @@ async def mysql_connection(
             await conn.execute(text("SELECT 1"))
     except Exception as e:
         await connection.dispose()
-        pytest.skip(f"MySQL database connection failed: {e}")
+        pytest.skip(f"MySQL direct connection failed: {e}")
     try:
         yield connection
     finally:
@@ -307,7 +332,7 @@ async def mysql_connection(
 async def mysql_inspector(
     mysql_connection: DatabaseConnection, mysql_adapter: BaseAdapter
 ) -> MetadataInspector:
-    """MySQL metadata inspector."""
+    """MySQL direct metadata inspector."""
     return MetadataInspector(mysql_connection, mysql_adapter)
 
 
@@ -315,7 +340,7 @@ async def mysql_inspector(
 async def mysql_executor(
     mysql_connection: DatabaseConnection, mysql_adapter: BaseAdapter
 ) -> QueryExecutor:
-    """MySQL query executor."""
+    """MySQL direct query executor."""
     return QueryExecutor(mysql_connection, mysql_adapter)
 
 
@@ -323,7 +348,7 @@ async def mysql_executor(
 async def mysql_analyzer(
     mysql_connection: DatabaseConnection, mysql_adapter: BaseAdapter
 ) -> StatisticsAnalyzer:
-    """MySQL statistics analyzer."""
+    """MySQL direct statistics analyzer."""
     return StatisticsAnalyzer(mysql_connection, mysql_adapter)
 
 
@@ -331,14 +356,184 @@ async def mysql_analyzer(
 async def mysql_mcp_server(
     mysql_config: DatabaseConfig,
 ) -> AsyncGenerator:
-    """MySQL MCP server for protocol-level testing."""
+    """MySQL direct MCP server for protocol-level testing."""
     from db_connect_mcp.server import DatabaseMCPServer
 
     server = DatabaseMCPServer(mysql_config)
     try:
         await server.initialize()
     except Exception as e:
-        pytest.skip(f"MySQL MCP server initialization failed: {e}")
+        pytest.skip(f"MySQL direct MCP server initialization failed: {e}")
+
+    try:
+        yield server
+    finally:
+        await server.cleanup()
+
+
+# ==================== PostgreSQL Tunneled Fixtures ====================
+
+
+@pytest.fixture
+async def pg_tunnel_config(
+    pg_tunnel_database_url: Optional[str],
+    pg_tunnel_ssh_config: Optional[SSHTunnelConfig],
+) -> DatabaseConfig:
+    """PostgreSQL tunneled database configuration."""
+    if not pg_tunnel_database_url:
+        pytest.skip("PG_TUNNEL_DATABASE_URL not set in environment")
+    if not pg_tunnel_ssh_config:
+        pytest.skip("SSH tunnel env vars not set (SSH_HOST, SSH_USERNAME)")
+    return DatabaseConfig(url=pg_tunnel_database_url, ssh_tunnel=pg_tunnel_ssh_config)
+
+
+@pytest.fixture
+async def pg_tunnel_adapter(pg_tunnel_config: DatabaseConfig) -> BaseAdapter:
+    """PostgreSQL tunneled adapter instance."""
+    return create_adapter(pg_tunnel_config)
+
+
+@pytest.fixture
+async def pg_tunnel_connection(
+    pg_tunnel_config: DatabaseConfig,
+) -> AsyncGenerator[DatabaseConnection, None]:
+    """PostgreSQL tunneled database connection with proper cleanup."""
+    connection = DatabaseConnection(pg_tunnel_config)
+    try:
+        await connection.initialize()
+        async with connection.get_connection() as conn:
+            await conn.execute(text("SELECT 1"))
+    except Exception as e:
+        await connection.dispose()
+        pytest.skip(f"PostgreSQL tunneled connection failed: {e}")
+    try:
+        yield connection
+    finally:
+        await connection.dispose()
+
+
+@pytest.fixture
+async def pg_tunnel_inspector(
+    pg_tunnel_connection: DatabaseConnection, pg_tunnel_adapter: BaseAdapter
+) -> MetadataInspector:
+    """PostgreSQL tunneled metadata inspector."""
+    return MetadataInspector(pg_tunnel_connection, pg_tunnel_adapter)
+
+
+@pytest.fixture
+async def pg_tunnel_executor(
+    pg_tunnel_connection: DatabaseConnection, pg_tunnel_adapter: BaseAdapter
+) -> QueryExecutor:
+    """PostgreSQL tunneled query executor."""
+    return QueryExecutor(pg_tunnel_connection, pg_tunnel_adapter)
+
+
+@pytest.fixture
+async def pg_tunnel_analyzer(
+    pg_tunnel_connection: DatabaseConnection, pg_tunnel_adapter: BaseAdapter
+) -> StatisticsAnalyzer:
+    """PostgreSQL tunneled statistics analyzer."""
+    return StatisticsAnalyzer(pg_tunnel_connection, pg_tunnel_adapter)
+
+
+@pytest.fixture
+async def pg_tunnel_mcp_server(
+    pg_tunnel_config: DatabaseConfig,
+) -> AsyncGenerator:
+    """PostgreSQL tunneled MCP server for protocol-level testing."""
+    from db_connect_mcp.server import DatabaseMCPServer
+
+    server = DatabaseMCPServer(pg_tunnel_config)
+    try:
+        await server.initialize()
+    except Exception as e:
+        pytest.skip(f"PostgreSQL tunneled MCP server initialization failed: {e}")
+
+    try:
+        yield server
+    finally:
+        await server.cleanup()
+
+
+# ==================== MySQL Tunneled Fixtures ====================
+
+
+@pytest.fixture
+async def mysql_tunnel_config(
+    mysql_tunnel_database_url: Optional[str],
+    mysql_tunnel_ssh_config: Optional[SSHTunnelConfig],
+) -> DatabaseConfig:
+    """MySQL tunneled database configuration."""
+    if not mysql_tunnel_database_url:
+        pytest.skip("MYSQL_TUNNEL_DATABASE_URL not set in environment")
+    if not mysql_tunnel_ssh_config:
+        pytest.skip("SSH tunnel env vars not set (SSH_HOST, SSH_USERNAME)")
+    return DatabaseConfig(
+        url=mysql_tunnel_database_url, ssh_tunnel=mysql_tunnel_ssh_config
+    )
+
+
+@pytest.fixture
+async def mysql_tunnel_adapter(mysql_tunnel_config: DatabaseConfig) -> BaseAdapter:
+    """MySQL tunneled adapter instance."""
+    return create_adapter(mysql_tunnel_config)
+
+
+@pytest.fixture
+async def mysql_tunnel_connection(
+    mysql_tunnel_config: DatabaseConfig,
+) -> AsyncGenerator[DatabaseConnection, None]:
+    """MySQL tunneled database connection with proper cleanup."""
+    connection = DatabaseConnection(mysql_tunnel_config)
+    try:
+        await connection.initialize()
+        async with connection.get_connection() as conn:
+            await conn.execute(text("SELECT 1"))
+    except Exception as e:
+        await connection.dispose()
+        pytest.skip(f"MySQL tunneled connection failed: {e}")
+    try:
+        yield connection
+    finally:
+        await connection.dispose()
+
+
+@pytest.fixture
+async def mysql_tunnel_inspector(
+    mysql_tunnel_connection: DatabaseConnection, mysql_tunnel_adapter: BaseAdapter
+) -> MetadataInspector:
+    """MySQL tunneled metadata inspector."""
+    return MetadataInspector(mysql_tunnel_connection, mysql_tunnel_adapter)
+
+
+@pytest.fixture
+async def mysql_tunnel_executor(
+    mysql_tunnel_connection: DatabaseConnection, mysql_tunnel_adapter: BaseAdapter
+) -> QueryExecutor:
+    """MySQL tunneled query executor."""
+    return QueryExecutor(mysql_tunnel_connection, mysql_tunnel_adapter)
+
+
+@pytest.fixture
+async def mysql_tunnel_analyzer(
+    mysql_tunnel_connection: DatabaseConnection, mysql_tunnel_adapter: BaseAdapter
+) -> StatisticsAnalyzer:
+    """MySQL tunneled statistics analyzer."""
+    return StatisticsAnalyzer(mysql_tunnel_connection, mysql_tunnel_adapter)
+
+
+@pytest.fixture
+async def mysql_tunnel_mcp_server(
+    mysql_tunnel_config: DatabaseConfig,
+) -> AsyncGenerator:
+    """MySQL tunneled MCP server for protocol-level testing."""
+    from db_connect_mcp.server import DatabaseMCPServer
+
+    server = DatabaseMCPServer(mysql_tunnel_config)
+    try:
+        await server.initialize()
+    except Exception as e:
+        pytest.skip(f"MySQL tunneled MCP server initialization failed: {e}")
 
     try:
         yield server
@@ -371,7 +566,6 @@ async def ch_connection(
     connection = DatabaseConnection(ch_config)
     try:
         await connection.initialize()
-        # Test actual connectivity
         if connection.sync_engine:
             with connection.sync_engine.connect() as conn:
                 conn.execute(text("SELECT 1"))
@@ -450,7 +644,6 @@ async def db_connection(
     connection = DatabaseConnection(db_config)
     try:
         await connection.initialize()
-        # Test actual connectivity (handle both sync and async engines)
         if connection.sync_engine:
             with connection.sync_engine.connect() as conn:
                 conn.execute(text("SELECT 1"))
@@ -470,19 +663,7 @@ async def db_connection(
 
 
 def assert_json_serializable(obj, message: str = "Object should be JSON serializable"):
-    """Assert that an object can be JSON serialized.
-
-    Args:
-        obj: The object to test for JSON serializability
-        message: Custom error message if serialization fails
-
-    Raises:
-        AssertionError: If the object cannot be serialized to JSON
-
-    Example:
-        >>> result = await executor.execute_query("SELECT * FROM products LIMIT 10")
-        >>> assert_json_serializable(result.model_dump())
-    """
+    """Assert that an object can be JSON serialized."""
     import json
 
     try:
