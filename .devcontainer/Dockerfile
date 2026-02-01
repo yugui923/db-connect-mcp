@@ -22,8 +22,6 @@ RUN apt-get clean
 # Switch to vscode user for tool installation
 USER vscode
 
-# Install oh-my-zsh
-RUN sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended
 
 # Set zsh as default shell for vscode user
 RUN sudo chsh -s $(which zsh) vscode
