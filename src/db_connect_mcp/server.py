@@ -493,10 +493,11 @@ def _load_ssh_tunnel_config() -> Optional[SSHTunnelConfig]:
     # Get optional SSH config values
     ssh_port_str = os.getenv("SSH_PORT", "22")
     ssh_password = os.getenv("SSH_PASSWORD")
+    ssh_private_key = os.getenv("SSH_PRIVATE_KEY")
     ssh_private_key_path = os.getenv("SSH_PRIVATE_KEY_PATH")
     ssh_private_key_passphrase = os.getenv("SSH_PRIVATE_KEY_PASSPHRASE")
-    remote_host = os.getenv("SSH_REMOTE_HOST", "127.0.0.1")
-    remote_port_str = os.getenv("SSH_REMOTE_PORT", "5432")
+    remote_host = os.getenv("SSH_REMOTE_HOST")
+    remote_port_str = os.getenv("SSH_REMOTE_PORT")
     local_host = os.getenv("SSH_LOCAL_HOST", "127.0.0.1")
     local_port_str = os.getenv("SSH_LOCAL_PORT")
     tunnel_timeout_str = os.getenv("SSH_TUNNEL_TIMEOUT", "10")
@@ -506,10 +507,11 @@ def _load_ssh_tunnel_config() -> Optional[SSHTunnelConfig]:
         ssh_port=int(ssh_port_str),
         ssh_username=ssh_username,
         ssh_password=ssh_password,
+        ssh_private_key=ssh_private_key,
         ssh_private_key_path=ssh_private_key_path,
         ssh_private_key_passphrase=ssh_private_key_passphrase,
         remote_host=remote_host,
-        remote_port=int(remote_port_str),
+        remote_port=int(remote_port_str) if remote_port_str else None,
         local_host=local_host,
         local_port=int(local_port_str) if local_port_str else None,
         tunnel_timeout=int(tunnel_timeout_str),
