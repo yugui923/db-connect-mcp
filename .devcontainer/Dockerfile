@@ -22,6 +22,9 @@ RUN apt-get clean
 # Switch to vscode user for tool installation
 USER vscode
 
+# Install oh-my-zsh
+RUN sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended
+
 # Set zsh as default shell for vscode user
 RUN sudo chsh -s $(which zsh) vscode
 
@@ -44,9 +47,13 @@ ENV PATH="/home/vscode/.cargo/bin:${PATH}"
 RUN mise install python@3.13 && \
     mise install node@22
 
+# Install Claude Code using native installation (recommended method)
+# The native install provides auto-updates and doesn't require Node.js
+RUN curl -fsSL https://claude.ai/install.sh | bash
+
 # Install global npm packages
-RUN mise exec node -- npm install -g \
-    @anthropic-ai/claude-code \
+RUN mise use -g node@22 && \
+    npm install -g \
     typescript \
     tsx \
     prettier \
@@ -62,6 +69,6 @@ RUN uv tool install ruff && \
 
 # Install ZSH plugins and themes
 RUN git clone https://github.com/zsh-users/zsh-autosuggestions \
-  ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zsh-autosuggestions
-RUN git clone https://github.com/zsh-users/zsh-syntax-highlighting.git \
-  ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zsh-syntax-highlighting
+  ~/.oh-my-zsh/custom/plugins/zsh-autosuggestions && \
+  git clone https://github.com/zsh-users/zsh-syntax-highlighting.git \
+  ~/.oh-my-zsh/custom/plugins/zsh-syntax-highlighting

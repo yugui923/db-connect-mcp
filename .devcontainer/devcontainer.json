@@ -93,7 +93,7 @@
       }
     }
   },
-  "postCreateCommand": "echo 'Dev container ready! PostgreSQL 17 available at postgres:5432'",
+  "postCreateCommand": "bash -c 'echo \"🚀 Dev container ready!\"; echo \"📊 PostgreSQL 17: localhost:5432 (user: devuser, db: devdb)\"; echo \"🔧 Tools installed: uv, mise, ruff, claude\"; echo \"💡 Run \\\"uv sync\\\" to install project dependencies\"'",
   "remoteUser": "vscode",
   "forwardPorts": [3000, 5173, 5432, 8000, 8080]
 }
