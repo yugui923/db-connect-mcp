@@ -22,7 +22,6 @@ RUN apt-get clean
 # Switch to vscode user for tool installation
 USER vscode
 
-
 # Set zsh as default shell for vscode user
 RUN sudo chsh -s $(which zsh) vscode
 
@@ -50,8 +49,7 @@ RUN mise install python@3.13 && \
 RUN curl -fsSL https://claude.ai/install.sh | bash
 
 # Install global npm packages
-RUN mise use -g node@22 && \
-    npm install -g \
+RUN mise exec node -- npm install -g \
     typescript \
     tsx \
     prettier \
@@ -67,6 +65,6 @@ RUN uv tool install ruff && \
 
 # Install ZSH plugins and themes
 RUN git clone https://github.com/zsh-users/zsh-autosuggestions \
-  ~/.oh-my-zsh/custom/plugins/zsh-autosuggestions && \
-  git clone https://github.com/zsh-users/zsh-syntax-highlighting.git \
-  ~/.oh-my-zsh/custom/plugins/zsh-syntax-highlighting
+  ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zsh-autosuggestions
+RUN git clone https://github.com/zsh-users/zsh-syntax-highlighting.git \
+  ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zsh-syntax-highlighting
