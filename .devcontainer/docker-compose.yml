@@ -16,6 +16,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      bastion:
+        condition: service_healthy
 
   postgres:
     image: postgres:17-alpine
@@ -39,8 +41,67 @@ services:
       timeout: 5s
       retries: 10
 
+  mysql:
+    image: mysql:8.0
+    container_name: devcontainer-mysql-tunneled
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_DATABASE: testdb
+      MYSQL_USER: testuser
+      MYSQL_PASSWORD: testpass
+    networks:
+      - tunnel-internal
+    volumes:
+      - ../tests/docker/mysql/init:/docker-entrypoint-initdb.d:ro
+      - mysql-tunnel-data:/var/lib/mysql
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "mysqladmin",
+          "ping",
+          "-h",
+          "localhost",
+          "-u",
+          "root",
+          "-prootpass",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  bastion:
+    build:
+      context: ../tests/docker/bastion
+      dockerfile: Dockerfile
+    container_name: devcontainer-bastion
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:2222:22"
+    networks:
+      - tunnel-internal
+    environment:
+      TUNNEL_USER: tunneluser
+      TUNNEL_PASSWORD: tunnelpass
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "22"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    depends_on:
+      mysql:
+        condition: service_healthy
+
 volumes:
   claude-code-data:
     name: db-connect-mcp-dev-claude-data
   postgres-dev-data:
     name: db-connect-mcp-dev-postgres-data
+  mysql-tunnel-data:
+    name: db-connect-mcp-dev-mysql-tunnel-data
+
+networks:
+  tunnel-internal:
+    name: db-connect-tunnel-internal
+    driver: bridge

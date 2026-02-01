@@ -5,7 +5,14 @@
   "workspaceFolder": "/workspace",
   "containerEnv": {
     "ANTHROPIC_API_KEY": "${localEnv:ANTHROPIC_API_KEY}",
-    "PG_TEST_DATABASE_URL": "postgresql+asyncpg://devuser:devpassword@localhost:5432/devdb"
+    "PG_TEST_DATABASE_URL": "postgresql+asyncpg://devuser:devpassword@localhost:5432/devdb",
+    "MYSQL_TEST_DATABASE_URL": "mysql+aiomysql://testuser:testpass@localhost:3306/testdb",
+    "SSH_HOST": "localhost",
+    "SSH_PORT": "2222",
+    "SSH_USERNAME": "tunneluser",
+    "SSH_PASSWORD": "tunnelpass",
+    "SSH_REMOTE_HOST": "mysql",
+    "SSH_REMOTE_PORT": "3306"
   },
   "customizations": {
     "vscode": {
@@ -100,6 +107,7 @@
   "forwardPorts": [
     3000,
     5173,
+    2222,
     5432,
     8000,
     8080
