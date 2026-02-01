@@ -241,7 +241,8 @@ class E2ETestHelper:
         log_capture = ServerLogCapture()
 
         # Set environment with database URL
-        env = os.environ.copy()
+        # Remove SSH tunnel env vars so PG tests don't route through the MySQL tunnel
+        env = {k: v for k, v in os.environ.items() if not k.startswith("SSH_")}
         env["DATABASE_URL"] = database_url
 
         # Create server parameters

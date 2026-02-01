@@ -1,69 +1,29 @@
-# Documentation Index
+# Documentation
 
-This directory contains documentation for db-connect-mcp developers and contributors.
+All project documentation is organized in this directory.
 
-## For Users
+## Guides
 
-📖 **[Main README](../README.md)** - User documentation for installing and using db-connect-mcp
+Step-by-step guides for development, testing, and infrastructure:
 
-## For Contributors
+- **[Development Guide](guides/DEVELOPMENT.md)** -- Setup, workflow, architecture, contributing
+- **[Testing Guide](guides/TESTING.md)** -- Test structure, fixtures, running tests, 200+ tests across 4 database access patterns
+- **[Docker Setup](guides/DOCKER.md)** -- Standalone PostgreSQL and full devcontainer with 5 containers
+- **[SSH Tunnel](guides/SSH_TUNNEL.md)** -- SSH tunnel feature, configuration, bastion host, network isolation
+- **[Claude Code Integration](guides/CLAUDE_CODE_INTEGRATION.md)** -- MCP server development and testing with Claude Code
 
-📚 **[Development Guide](DEVELOPMENT.md)** - Complete guide for setting up development environment, running tests, and contributing
+## Reference
 
-## For MCP Developers
+Historical test results and planning documents:
 
-🔧 **[Claude Code Integration](CLAUDE_CODE_INTEGRATION.md)** - Testing MCP servers with Claude Code during development
-
-## Test Documentation
-
-✅ **[Test Guide](../tests/README.md)** - Detailed testing documentation
-✅ **[MCP Capability Test Summary](MCP_CAPABILITY_TEST_SUMMARY.md)** - Results from comprehensive MCP tool testing
-
-## Technical References
-
-🔍 **[Console Script vs Module Execution](CONSOLE_SCRIPT_VS_MODULE.md)** - Understanding `db-connect-mcp` vs `python -m db_connect_mcp`
-
+- **[MCP Capability Test Summary](reference/MCP_CAPABILITY_TEST_SUMMARY.md)** -- Comprehensive MCP tool test results against PostgreSQL 17
 ## Quick Links
 
-### Getting Started
-
-1. [Installation](../README.md#installation) - Install via pip
-2. [Configuration](../README.md#configuration) - Set up DATABASE_URL
-3. [Usage Examples](../README.md#usage) - Basic usage
-
-### Development Setup
-
-1. [Prerequisites](DEVELOPMENT.md#prerequisites) - Python, uv, databases
-2. [Installation](DEVELOPMENT.md#quick-setup) - Clone and install
-3. [Running Tests](DEVELOPMENT.md#running-tests) - Test with pytest
-
-### Testing with Claude Code
-
-1. [Setup](CLAUDE_CODE_INTEGRATION.md#development-setup) - Configure .mcp.json
-2. [Workflow](CLAUDE_CODE_INTEGRATION.md#development-testing-workflow) - Development testing cycle
-3. [Troubleshooting](CLAUDE_CODE_INTEGRATION.md#development-specific-troubleshooting) - Common issues
-
-## Architecture
-
-For understanding the codebase architecture:
-
-- [Adapter Pattern](DEVELOPMENT.md#adapter-pattern) - Database-specific adapters
-- [Core Components](DEVELOPMENT.md#core-components) - Connection, inspector, executor, analyzer
-- [MCP Integration](DEVELOPMENT.md#mcp-server-integration) - How MCP tools are registered
-- [Project Structure](DEVELOPMENT.md#project-structure) - Directory layout
-
-## Contributing
-
-See [Development Guide - Contributing](DEVELOPMENT.md#contributing) for:
-
-- Pull request process
-- Commit message format
-- Code style guidelines
-- Adding new features
-
-## External Resources
-
-- [MCP Protocol](https://modelcontextprotocol.io/) - Model Context Protocol specification
-- [Claude Code](https://code.claude.com/docs) - Official Claude Code documentation
-- [SQLAlchemy](https://docs.sqlalchemy.org/) - Database toolkit documentation
-- [Pydantic](https://docs.pydantic.dev/) - Data validation documentation
+| I want to... | Go to |
+| ------------- | ----- |
+| Set up my dev environment | [Development Guide](guides/DEVELOPMENT.md#quick-setup) |
+| Run the tests | [Testing Guide](guides/TESTING.md#running-tests) |
+| Start the test databases | [Docker Setup](guides/DOCKER.md#standalone-setup-postgresql-only) |
+| Understand the SSH tunnel feature | [SSH Tunnel](guides/SSH_TUNNEL.md) |
+| Use the devcontainer | [Docker Setup](guides/DOCKER.md#devcontainer-multi-database-setup) |
+| Test with Claude Code | [Claude Code Integration](guides/CLAUDE_CODE_INTEGRATION.md) |

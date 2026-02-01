@@ -1,24 +1,37 @@
-# Development container with PostgreSQL 17 as a sidecar container
-# Used by VS Code Dev Containers extension
+# Development container with database sidecars for testing
+# 6 services total:
+#   devcontainer          - dev environment (host network)
+#   postgres-direct       - PostgreSQL 17 direct access (port 5432)
+#   mysql-direct          - MySQL 8.0 direct access (port 3306)
+#   postgres-tunneled     - PostgreSQL 17 tunnel-only (no published ports)
+#   mysql-tunneled        - MySQL 8.0 tunnel-only (no published ports)
+#   bastion               - SSH bastion host (port 2222)
 services:
   devcontainer:
     build:
       context: ..
       dockerfile: .devcontainer/Dockerfile
     volumes:
-      - ..:/workspace:cached
+      - ..:/workspace
+      - claude-code-data:/home/vscode/.claude
     network_mode: host
     command: sleep infinity
     environment:
-      # PostgreSQL connection for development/tests
-      PG_TEST_DATABASE_URL: postgresql+asyncpg://devuser:devpassword@postgres:5432/devdb
+      PG_TEST_DATABASE_URL: postgresql+asyncpg://devuser:devpassword@localhost:5432/devdb
     depends_on:
-      postgres:
+      postgres-direct:
+        condition: service_healthy
+      mysql-direct:
+        condition: service_healthy
+      bastion:
         condition: service_healthy
 
-  postgres:
+  # ==================== Direct-access databases ====================
+  # Published ports — accessible from devcontainer via localhost
+
+  postgres-direct:
     image: postgres:17-alpine
-    container_name: devcontainer-postgres
+    container_name: devcontainer-postgres-direct
     restart: unless-stopped
     environment:
       POSTGRES_DB: devdb
@@ -28,16 +41,136 @@ services:
     ports:
       - "127.0.0.1:5432:5432"
     volumes:
-      # Initialization scripts (run in alphabetical order)
       - ../tests/docker/postgres/init:/docker-entrypoint-initdb.d:ro
-      # Persistent data storage
-      - postgres-dev-data:/var/lib/postgresql/data
+      - postgres-direct-data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U devuser -d devdb"]
       interval: 5s
       timeout: 5s
       retries: 10
 
+  mysql-direct:
+    image: mysql:8.0
+    container_name: devcontainer-mysql-direct
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_DATABASE: testdb
+      MYSQL_USER: testuser
+      MYSQL_PASSWORD: testpass
+    ports:
+      - "127.0.0.1:3306:3306"
+    volumes:
+      - ../tests/docker/mysql/init:/docker-entrypoint-initdb.d:ro
+      - mysql-direct-data:/var/lib/mysql
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "mysqladmin",
+          "ping",
+          "-h",
+          "localhost",
+          "-u",
+          "root",
+          "-prootpass",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ==================== Tunnel-only databases ====================
+  # NO published ports — only accessible via bastion SSH tunnel
+
+  postgres-tunneled:
+    image: postgres:17-alpine
+    container_name: devcontainer-postgres-tunneled
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: devdb
+      POSTGRES_USER: devuser
+      POSTGRES_PASSWORD: devpassword
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=en_US.utf8"
+    networks:
+      - tunnel-internal
+    volumes:
+      - ../tests/docker/postgres/init:/docker-entrypoint-initdb.d:ro
+      - postgres-tunneled-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U devuser -d devdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  mysql-tunneled:
+    image: mysql:8.0
+    container_name: devcontainer-mysql-tunneled
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_DATABASE: testdb
+      MYSQL_USER: testuser
+      MYSQL_PASSWORD: testpass
+    networks:
+      - tunnel-internal
+    volumes:
+      - ../tests/docker/mysql/init:/docker-entrypoint-initdb.d:ro
+      - mysql-tunneled-data:/var/lib/mysql
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "mysqladmin",
+          "ping",
+          "-h",
+          "localhost",
+          "-u",
+          "root",
+          "-prootpass",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ==================== Bastion host ====================
+
+  bastion:
+    build:
+      context: ../tests/docker/bastion
+      dockerfile: Dockerfile
+    container_name: devcontainer-bastion
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:2222:22"
+    networks:
+      - tunnel-internal
+    environment:
+      TUNNEL_USER: tunneluser
+      TUNNEL_PASSWORD: tunnelpass
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "22"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    depends_on:
+      mysql-tunneled:
+        condition: service_healthy
+      postgres-tunneled:
+        condition: service_healthy
+
 volumes:
-  postgres-dev-data:
-    name: db-connect-mcp-dev-postgres-data
+  claude-code-data:
+    name: db-connect-mcp-dev-claude-data
+  postgres-direct-data:
+    name: db-connect-mcp-dev-postgres-direct-data
+  postgres-tunneled-data:
+    name: db-connect-mcp-dev-postgres-tunneled-data
+  mysql-direct-data:
+    name: db-connect-mcp-dev-mysql-direct-data
+  mysql-tunneled-data:
+    name: db-connect-mcp-dev-mysql-tunneled-data
+
+networks:
+  tunnel-internal:
+    name: db-connect-tunnel-internal
+    driver: bridge

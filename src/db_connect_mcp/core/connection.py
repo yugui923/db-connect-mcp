@@ -1,13 +1,19 @@
 """Database connection management with SQLAlchemy."""
 
 import asyncio
+import logging
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator, Optional, Union
+from typing import TYPE_CHECKING, AsyncGenerator, Optional, Union
 
 from sqlalchemy import text, create_engine, Engine, Connection
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_engine
 
 from db_connect_mcp.models.config import DatabaseConfig
+
+if TYPE_CHECKING:
+    from db_connect_mcp.core.tunnel import SSHTunnelManager
+
+logger = logging.getLogger(__name__)
 
 
 class SyncConnectionWrapper:
@@ -125,6 +131,7 @@ class DatabaseConnection:
             config: Database configuration with connection URL and pool settings
         """
         self.config = config
+        self._original_url = config.url  # Store original URL for reference
         self.engine: Optional[AsyncEngine] = None
         self.sync_engine: Optional[Engine] = None
         self._dialect = config.dialect
@@ -137,16 +144,27 @@ class DatabaseConnection:
             or (self._dialect == "clickhouse" and self._driver == "connect")
         )
 
+        # SSH tunnel support
+        self._tunnel_manager: Optional["SSHTunnelManager"] = None
+        self._tunneled_url: Optional[str] = None
+
     async def initialize(self) -> None:
         """Initialize the async or sync engine based on driver requirements."""
         if self.engine is not None or self.sync_engine is not None:
             return  # Already initialized
 
+        # Start SSH tunnel if configured
+        if self.config.ssh_tunnel:
+            await self._start_tunnel()
+
+        # Use tunneled URL if tunnel is active, otherwise original
+        effective_url = self._tunneled_url or self.config.url
+
         # Handle ClickHouse with sync-only driver
         if self._is_sync_only:
             # Create synchronous engine for ClickHouse
             self.sync_engine = create_engine(
-                self.config.url,
+                effective_url,
                 pool_size=self.config.pool_size,
                 max_overflow=self.config.max_overflow,
                 pool_timeout=self.config.pool_timeout,
@@ -160,7 +178,7 @@ class DatabaseConnection:
         if self._dialect == "postgresql" and self._driver == "asyncpg":
             from sqlalchemy.engine.url import make_url
 
-            url_obj = make_url(self.config.url)
+            url_obj = make_url(effective_url)
 
             # Check for SSL-related query parameters
             if url_obj.query:
@@ -174,7 +192,7 @@ class DatabaseConnection:
                         connect_args["ssl"] = False
                     # Remove sslmode from URL query to avoid "unexpected keyword" error
                     url_obj = url_obj.difference_update_query(["sslmode"])
-                    self.config.url = url_obj.render_as_string(hide_password=False)
+                    effective_url = url_obj.render_as_string(hide_password=False)
                 elif "ssl" in url_obj.query:
                     ssl_value = url_obj.query["ssl"]
                     if ssl_value in ["require", "true", "1"]:
@@ -183,11 +201,11 @@ class DatabaseConnection:
                         connect_args["ssl"] = False
                     # Remove ssl from URL query
                     url_obj = url_obj.difference_update_query(["ssl"])
-                    self.config.url = url_obj.render_as_string(hide_password=False)
+                    effective_url = url_obj.render_as_string(hide_password=False)
 
         # Create async engine for PostgreSQL and MySQL
         self.engine = create_async_engine(
-            self.config.url,
+            effective_url,
             pool_size=self.config.pool_size,
             max_overflow=self.config.max_overflow,
             pool_timeout=self.config.pool_timeout,
@@ -196,14 +214,78 @@ class DatabaseConnection:
             connect_args=connect_args if connect_args else {},
         )
 
+    async def _start_tunnel(self) -> None:
+        """Start SSH tunnel and rewrite database URL."""
+        from db_connect_mcp.core.tunnel import (
+            SSHTunnelError,
+            SSHTunnelManager as TunnelManager,
+            rewrite_database_url,
+        )
+        from db_connect_mcp.models.config import SSHTunnelConfig
+        from sqlalchemy.engine.url import make_url
+
+        ssh_tunnel_config = self.config.ssh_tunnel
+        if ssh_tunnel_config is None:
+            return
+
+        # Copy config to avoid mutating the caller's object
+        tunnel_kwargs = ssh_tunnel_config.model_dump()
+
+        # Auto-derive remote_host/remote_port from DATABASE_URL if not set
+        if tunnel_kwargs["remote_host"] is None or tunnel_kwargs["remote_port"] is None:
+            url_obj = make_url(self.config.url)
+            if tunnel_kwargs["remote_host"] is None:
+                tunnel_kwargs["remote_host"] = url_obj.host or "127.0.0.1"
+                logger.info(
+                    f"SSH tunnel remote_host derived from DATABASE_URL: {tunnel_kwargs['remote_host']}"
+                )
+            if tunnel_kwargs["remote_port"] is None:
+                default_ports = {
+                    "postgresql": 5432,
+                    "mysql": 3306,
+                    "clickhouse": 9000,
+                }
+                fallback_port = default_ports.get(self._dialect, 5432)
+                tunnel_kwargs["remote_port"] = url_obj.port or fallback_port
+                logger.info(
+                    f"SSH tunnel remote_port derived from DATABASE_URL: {tunnel_kwargs['remote_port']}"
+                )
+
+        effective_config = SSHTunnelConfig(**tunnel_kwargs)
+
+        try:
+            self._tunnel_manager = TunnelManager(effective_config)
+            local_port = await asyncio.to_thread(self._tunnel_manager.start)
+
+            # Rewrite URL to use tunnel
+            self._tunneled_url = rewrite_database_url(
+                self.config.url,
+                effective_config.local_host,
+                local_port,
+            )
+
+            logger.info(f"Database connection will use SSH tunnel on port {local_port}")
+
+        except SSHTunnelError as e:
+            logger.error(f"SSH tunnel failed: {e}")
+            raise
+
     async def dispose(self) -> None:
         """Dispose of the connection pool and cleanup resources."""
-        if self.engine is not None:
-            await self.engine.dispose()
-            self.engine = None
-        if self.sync_engine is not None:
-            self.sync_engine.dispose()
-            self.sync_engine = None
+        try:
+            # Dispose engine first
+            if self.engine is not None:
+                await self.engine.dispose()
+                self.engine = None
+            if self.sync_engine is not None:
+                self.sync_engine.dispose()
+                self.sync_engine = None
+        finally:
+            # Always stop SSH tunnel, even if engine dispose fails
+            if self._tunnel_manager is not None:
+                self._tunnel_manager.stop()
+                self._tunnel_manager = None
+                self._tunneled_url = None
 
     @asynccontextmanager
     async def get_connection(
@@ -326,6 +408,11 @@ class DatabaseConnection:
     def is_initialized(self) -> bool:
         """Check if engine is initialized."""
         return self.engine is not None or self.sync_engine is not None
+
+    @property
+    def is_tunneled(self) -> bool:
+        """Check if connection uses SSH tunnel."""
+        return self._tunnel_manager is not None and self._tunnel_manager.is_active
 
     async def test_connection(self) -> bool:
         """

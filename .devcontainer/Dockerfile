@@ -1,3 +1,14 @@
+# Yuri devcontainer Dockerfile
+# Last updated: 2025-01-31
+
+# This Dockerfile sets up a development environment with:
+# - Ubuntu 24.04 base image
+# - System dependencies for development
+# - mise (runtime version manager) for managing Python and Node versions
+# - uv (fast Python package manager) for installing Python tools
+# - Claude Code (native installation)
+
+
 FROM mcr.microsoft.com/devcontainers/base:ubuntu-24.04
 
 # Install system dependencies needed for development
@@ -44,9 +55,14 @@ ENV PATH="/home/vscode/.cargo/bin:${PATH}"
 RUN mise install python@3.13 && \
     mise install node@22
 
+
+# Install Claude Code using native installation (recommended method)
+# The native install provides auto-updates and doesn't require Node.js
+RUN curl -fsSL https://claude.ai/install.sh | bash
+
+
 # Install global npm packages
 RUN mise exec node -- npm install -g \
-    @anthropic-ai/claude-code \
     typescript \
     tsx \
     prettier \
