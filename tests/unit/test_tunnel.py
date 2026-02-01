@@ -174,7 +174,7 @@ class TestURLRewriting:
         """URL rewriting should work with IPv6 localhost."""
         original = "postgresql://user:pass@host:5432/db"
         result = rewrite_database_url(original, "::1", 5433)
-        assert "::1:5433" in result
+        assert "[::1]:5433" in result
 
 
 class TestSSHTunnelManagerMocked:

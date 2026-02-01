@@ -474,6 +474,16 @@ class DatabaseMCPServer:
         logger.info("Database MCP server cleaned up")
 
 
+def _parse_int_env(name: str, value: Optional[str], default: Optional[int] = None) -> Optional[int]:
+    """Parse an environment variable as an integer with clear error messages."""
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        raise ValueError(f"Environment variable {name} must be an integer, got: {value!r}")
+
+
 def _load_ssh_tunnel_config() -> Optional[SSHTunnelConfig]:
     """
     Load SSH tunnel configuration from environment variables.
@@ -491,30 +501,31 @@ def _load_ssh_tunnel_config() -> Optional[SSHTunnelConfig]:
         raise ValueError("SSH_USERNAME must be set when SSH_HOST is configured")
 
     # Get optional SSH config values
-    ssh_port_str = os.getenv("SSH_PORT", "22")
     ssh_password = os.getenv("SSH_PASSWORD")
     ssh_private_key = os.getenv("SSH_PRIVATE_KEY")
     ssh_private_key_path = os.getenv("SSH_PRIVATE_KEY_PATH")
     ssh_private_key_passphrase = os.getenv("SSH_PRIVATE_KEY_PASSPHRASE")
     remote_host = os.getenv("SSH_REMOTE_HOST")
-    remote_port_str = os.getenv("SSH_REMOTE_PORT")
     local_host = os.getenv("SSH_LOCAL_HOST", "127.0.0.1")
-    local_port_str = os.getenv("SSH_LOCAL_PORT")
-    tunnel_timeout_str = os.getenv("SSH_TUNNEL_TIMEOUT", "10")
+
+    ssh_port = _parse_int_env("SSH_PORT", os.getenv("SSH_PORT"), default=22)
+    remote_port = _parse_int_env("SSH_REMOTE_PORT", os.getenv("SSH_REMOTE_PORT"))
+    local_port = _parse_int_env("SSH_LOCAL_PORT", os.getenv("SSH_LOCAL_PORT"))
+    tunnel_timeout = _parse_int_env("SSH_TUNNEL_TIMEOUT", os.getenv("SSH_TUNNEL_TIMEOUT"), default=10)
 
     return SSHTunnelConfig(
         ssh_host=ssh_host,
-        ssh_port=int(ssh_port_str),
+        ssh_port=ssh_port,
         ssh_username=ssh_username,
         ssh_password=ssh_password,
         ssh_private_key=ssh_private_key,
         ssh_private_key_path=ssh_private_key_path,
         ssh_private_key_passphrase=ssh_private_key_passphrase,
         remote_host=remote_host,
-        remote_port=int(remote_port_str) if remote_port_str else None,
+        remote_port=remote_port,
         local_host=local_host,
-        local_port=int(local_port_str) if local_port_str else None,
-        tunnel_timeout=int(tunnel_timeout_str),
+        local_port=local_port,
+        tunnel_timeout=tunnel_timeout,
     )
 
 

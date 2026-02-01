@@ -17,12 +17,10 @@ Step-by-step guides for development, testing, and infrastructure:
 Historical test results and planning documents:
 
 - **[MCP Capability Test Summary](reference/MCP_CAPABILITY_TEST_SUMMARY.md)** -- Comprehensive MCP tool test results against PostgreSQL 17
-- **[Tunnel Testing Plan](reference/TUNNEL_TESTING_PLAN.md)** -- Original implementation plan for SSH tunnel test infrastructure
-
 ## Quick Links
 
 | I want to... | Go to |
-|---------------|-------|
+| ------------- | ----- |
 | Set up my dev environment | [Development Guide](guides/DEVELOPMENT.md#quick-setup) |
 | Run the tests | [Testing Guide](guides/TESTING.md#running-tests) |
 | Start the test databases | [Docker Setup](guides/DOCKER.md#standalone-setup-postgresql-only) |

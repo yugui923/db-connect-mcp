@@ -41,7 +41,7 @@ cd tests/docker && docker-compose down -v && docker-compose up -d && cd ../..
 ### PostgreSQL Sample Data
 
 | Table | Rows | Description |
-|-------|------|-------------|
+| ----- | ---- | ----------- |
 | categories | 50 | Hierarchical structure |
 | products | 2,000 | Diverse types, prices, stock levels |
 | users | 5,000 | Varied attributes, NULL testing |
@@ -72,7 +72,7 @@ Located in `.devcontainer/`. This is the full development environment with all 4
 ### Container Architecture
 
 | Container | Image | Port | Network | Purpose |
-|-----------|-------|------|---------|---------|
+| --------- | ----- | ---- | ------- | ------- |
 | `devcontainer` | Custom | host network | host | Development environment |
 | `postgres-direct` | PostgreSQL 17 | **5432** (published) | host | Direct PostgreSQL access |
 | `mysql-direct` | MySQL 8.0 | **3306** (published) | host | Direct MySQL access |
@@ -82,7 +82,7 @@ Located in `.devcontainer/`. This is the full development environment with all 4
 
 ### Network Isolation
 
-```
+```text
 Host Network                         tunnel-internal (bridge)
 ┌──────────────────────┐            ┌──────────────────────────┐
 │ devcontainer         │            │ bastion (SSH on :2222)    │
@@ -98,7 +98,7 @@ The `tunnel-internal` bridge network is **not** connected to the devcontainer. T
 ### Credentials
 
 | Service | Credential | Value |
-|---------|-----------|-------|
+| ------- | ---------- | ----- |
 | PostgreSQL (both) | User / Password / DB | `devuser` / `devpassword` / `devdb` |
 | MySQL (both) | User / Password / DB | `testuser` / `testpass` / `testdb` |
 | MySQL (both) | Root password | `rootpass` |
@@ -142,7 +142,7 @@ The bastion is an Alpine Linux 3.19 container with OpenSSH server:
 
 All database containers have health checks. The startup dependency chain ensures proper ordering:
 
-```
+```text
 postgres-direct ──────────────────────────────> devcontainer
 mysql-direct ──────────────────────────────────>
 postgres-tunneled ──> bastion ─────────────────>

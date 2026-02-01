@@ -250,8 +250,8 @@ class SSHTunnelManager:
         try:
             self.start()
             return True
-        except SSHTunnelError:
-            raise SSHTunnelError("SSH tunnel lost and could not be restarted")
+        except SSHTunnelError as e:
+            raise SSHTunnelError("SSH tunnel lost and could not be restarted") from e
 
     @property
     def is_active(self) -> bool:
@@ -295,12 +295,15 @@ def rewrite_database_url(original_url: str, local_host: str, local_port: int) ->
     # Format: scheme://user:pass@host:port/path
     netloc = parsed.netloc
 
+    # Wrap IPv6 addresses in brackets per RFC 3986
+    host_str = f"[{local_host}]" if ":" in local_host else local_host
+
     # Handle credentials in URL
     if "@" in netloc:
         credentials, _ = netloc.rsplit("@", 1)
-        new_netloc = f"{credentials}@{local_host}:{local_port}"
+        new_netloc = f"{credentials}@{host_str}:{local_port}"
     else:
-        new_netloc = f"{local_host}:{local_port}"
+        new_netloc = f"{host_str}:{local_port}"
 
     # Rebuild URL with new netloc
     rewritten = urlunparse(

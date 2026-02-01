@@ -207,7 +207,7 @@ The server supports connecting to databases through SSH tunnels, enabling secure
 SSH tunnel is configured via `SSHTunnelConfig` on `DatabaseConfig.ssh_tunnel`:
 
 | Field | Default | Description |
-|-------|---------|-------------|
+| ----- | ------- | ----------- |
 | `ssh_host` | (required) | SSH server hostname |
 | `ssh_port` | `22` | SSH server port |
 | `ssh_username` | (required) | SSH username |
@@ -231,7 +231,7 @@ SSH tunnel is configured via `SSHTunnelConfig` on `DatabaseConfig.ssh_tunnel`:
 The project includes a full devcontainer configuration (`.devcontainer/`) with **5 Docker containers** covering all 4 database access patterns:
 
 | Container | Port | Network | Access Pattern |
-|-----------|------|---------|----------------|
+| --------- | ---- | ------- | -------------- |
 | `postgres-direct` | 5432 (published) | host | Direct access via localhost |
 | `mysql-direct` | 3306 (published) | host | Direct access via localhost |
 | `postgres-tunneled` | None (no published ports) | `tunnel-internal` | SSH tunnel only |
@@ -242,7 +242,7 @@ The `tunnel-internal` bridge network isolates tunneled databases — they are **
 
 ### Environment Variables (set automatically in devcontainer)
 
-```
+```text
 PG_TEST_DATABASE_URL=postgresql+asyncpg://devuser:devpassword@localhost:5432/devdb
 MYSQL_TEST_DATABASE_URL=mysql+aiomysql://testuser:testpass@localhost:3306/testdb
 PG_TUNNEL_DATABASE_URL=postgresql+asyncpg://devuser:devpassword@postgres-tunneled:5432/devdb

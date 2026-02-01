@@ -6,7 +6,7 @@ This document covers the SSH tunnel feature, which enables secure connections to
 
 The SSH tunnel feature establishes an encrypted SSH connection to a bastion/jump host, then forwards local traffic through that tunnel to the target database. This is transparent to the rest of the application -- once the tunnel is up, the database connection works as if the database were on localhost.
 
-```
+```text
 Application                 Bastion Host              Database Server
 ┌──────────┐   SSH tunnel   ┌──────────┐   private    ┌──────────┐
 │ MCP      │───────────────>│ SSH      │─────────────>│ PostgreSQL│
@@ -20,7 +20,7 @@ Application                 Bastion Host              Database Server
 ### Source Files
 
 | File | Purpose |
-|------|---------|
+| ---- | ------- |
 | `src/db_connect_mcp/core/tunnel.py` | `SSHTunnelManager` class -- lifecycle management (start, stop, health checks, context manager) |
 | `src/db_connect_mcp/models/config.py` | `SSHTunnelConfig` Pydantic model -- all SSH tunnel configuration fields |
 | `src/db_connect_mcp/core/connection.py` | `DatabaseConnection` integration -- auto-starts tunnel during `initialize()`, rewrites URL, cleans up on `dispose()` |
@@ -59,7 +59,7 @@ Application                 Bastion Host              Database Server
 `SSHTunnelConfig` fields:
 
 | Field | Type | Default | Description |
-|-------|------|---------|-------------|
+| ----- | ---- | ------- | ----------- |
 | `ssh_host` | `str` | (required) | SSH server hostname or IP |
 | `ssh_port` | `int` | `22` | SSH server port |
 | `ssh_username` | `str` | (required) | SSH login username |
@@ -112,7 +112,7 @@ SSH tunnel configuration is passed through environment variables in your MCP con
 ## Dependencies
 
 | Package | Version | Purpose |
-|---------|---------|---------|
+| ------- | ------- | ------- |
 | `sshtunnel` | `>=0.4.0` | SSH tunnel management (wraps paramiko) |
 | `paramiko` | `>=3.0.0,<4.0.0` | SSH protocol implementation |
 
@@ -124,7 +124,7 @@ The project includes a complete devcontainer setup that exercises all 4 database
 
 ### Container Architecture
 
-```
+```text
 ┌─────────────────────────────────────────────────────────┐
 │ devcontainer (host network)                             │
 │   Can reach: postgres-direct:5432, mysql-direct:3306,   │

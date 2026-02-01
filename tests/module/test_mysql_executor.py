@@ -73,22 +73,22 @@ class TestMySQLDirectExecutorReadOnly:
 
     @pytest.mark.asyncio
     async def test_reject_drop(self, mysql_executor: QueryExecutor):
-        with pytest.raises(Exception):
+        with pytest.raises(ValueError):
             await mysql_executor.execute_query("DROP TABLE products", limit=10)
 
     @pytest.mark.asyncio
     async def test_reject_delete(self, mysql_executor: QueryExecutor):
-        with pytest.raises(Exception):
+        with pytest.raises(ValueError):
             await mysql_executor.execute_query("DELETE FROM products WHERE product_id = 1", limit=10)
 
     @pytest.mark.asyncio
     async def test_reject_update(self, mysql_executor: QueryExecutor):
-        with pytest.raises(Exception):
+        with pytest.raises(ValueError):
             await mysql_executor.execute_query("UPDATE products SET price = 0", limit=10)
 
     @pytest.mark.asyncio
     async def test_reject_insert(self, mysql_executor: QueryExecutor):
-        with pytest.raises(Exception):
+        with pytest.raises(ValueError):
             await mysql_executor.execute_query(
                 "INSERT INTO products (name, price) VALUES ('test', 1.00)", limit=10
             )
@@ -138,12 +138,12 @@ class TestMySQLTunneledExecutorReadOnly:
 
     @pytest.mark.asyncio
     async def test_reject_drop(self, mysql_tunnel_executor: QueryExecutor):
-        with pytest.raises(Exception):
+        with pytest.raises(ValueError):
             await mysql_tunnel_executor.execute_query("DROP TABLE products", limit=10)
 
     @pytest.mark.asyncio
     async def test_reject_insert(self, mysql_tunnel_executor: QueryExecutor):
-        with pytest.raises(Exception):
+        with pytest.raises(ValueError):
             await mysql_tunnel_executor.execute_query(
                 "INSERT INTO products (name, price) VALUES ('test', 1.00)", limit=10
             )
