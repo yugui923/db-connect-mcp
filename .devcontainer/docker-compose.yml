@@ -6,7 +6,8 @@ services:
       context: ..
       dockerfile: .devcontainer/Dockerfile
     volumes:
-      - ..:/workspace:cached
+      - ..:/workspace
+      - claude-code-data:/home/vscode/.claude
     network_mode: host
     command: sleep infinity
     environment:
@@ -39,5 +40,7 @@ services:
       retries: 10
 
 volumes:
+  claude-code-data:
+    name: db-connect-mcp-dev-claude-data
   postgres-dev-data:
     name: db-connect-mcp-dev-postgres-data
