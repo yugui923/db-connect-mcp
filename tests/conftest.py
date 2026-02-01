@@ -17,9 +17,10 @@ from db_connect_mcp.adapters.base import BaseAdapter
 from db_connect_mcp.core import (
     DatabaseConnection,
     MetadataInspector,
+    QueryExecutor,
     StatisticsAnalyzer,
 )
-from db_connect_mcp.models.config import DatabaseConfig
+from db_connect_mcp.models.config import DatabaseConfig, SSHTunnelConfig
 
 # Load environment variables
 load_dotenv()
@@ -237,6 +238,107 @@ async def pg_mcp_server(
         await server.initialize()
     except Exception as e:
         pytest.skip(f"MCP server initialization failed: {e}")
+
+    try:
+        yield server
+    finally:
+        await server.cleanup()
+
+
+# ==================== MySQL (via SSH Tunnel) Fixtures ====================
+
+
+@pytest.fixture(scope="session")
+def mysql_ssh_tunnel_config() -> Optional[SSHTunnelConfig]:
+    """SSH tunnel config for MySQL, built from environment variables."""
+    ssh_host = os.getenv("SSH_HOST")
+    if not ssh_host:
+        return None
+    ssh_username = os.getenv("SSH_USERNAME")
+    if not ssh_username:
+        return None
+    return SSHTunnelConfig(
+        ssh_host=ssh_host,
+        ssh_port=int(os.getenv("SSH_PORT", "22")),
+        ssh_username=ssh_username,
+        ssh_password=os.getenv("SSH_PASSWORD"),
+        remote_host=os.getenv("SSH_REMOTE_HOST", "127.0.0.1"),
+        remote_port=int(os.getenv("SSH_REMOTE_PORT", "3306")),
+    )
+
+
+@pytest.fixture
+async def mysql_config(
+    mysql_database_url: Optional[str],
+    mysql_ssh_tunnel_config: Optional[SSHTunnelConfig],
+) -> DatabaseConfig:
+    """MySQL database configuration with SSH tunnel."""
+    if not mysql_database_url:
+        pytest.skip("MYSQL_TEST_DATABASE_URL not set in environment")
+    return DatabaseConfig(url=mysql_database_url, ssh_tunnel=mysql_ssh_tunnel_config)
+
+
+@pytest.fixture
+async def mysql_adapter(mysql_config: DatabaseConfig) -> BaseAdapter:
+    """MySQL adapter instance."""
+    return create_adapter(mysql_config)
+
+
+@pytest.fixture
+async def mysql_connection(
+    mysql_config: DatabaseConfig,
+) -> AsyncGenerator[DatabaseConnection, None]:
+    """MySQL database connection (via SSH tunnel) with proper cleanup."""
+    connection = DatabaseConnection(mysql_config)
+    try:
+        await connection.initialize()
+        async with connection.get_connection() as conn:
+            await conn.execute(text("SELECT 1"))
+    except Exception as e:
+        await connection.dispose()
+        pytest.skip(f"MySQL database connection failed: {e}")
+    try:
+        yield connection
+    finally:
+        await connection.dispose()
+
+
+@pytest.fixture
+async def mysql_inspector(
+    mysql_connection: DatabaseConnection, mysql_adapter: BaseAdapter
+) -> MetadataInspector:
+    """MySQL metadata inspector."""
+    return MetadataInspector(mysql_connection, mysql_adapter)
+
+
+@pytest.fixture
+async def mysql_executor(
+    mysql_connection: DatabaseConnection, mysql_adapter: BaseAdapter
+) -> QueryExecutor:
+    """MySQL query executor."""
+    return QueryExecutor(mysql_connection, mysql_adapter)
+
+
+@pytest.fixture
+async def mysql_analyzer(
+    mysql_connection: DatabaseConnection, mysql_adapter: BaseAdapter
+) -> StatisticsAnalyzer:
+    """MySQL statistics analyzer."""
+    return StatisticsAnalyzer(mysql_connection, mysql_adapter)
+
+
+@pytest.fixture
+async def mysql_mcp_server(
+    mysql_config: DatabaseConfig,
+) -> AsyncGenerator:
+    """MySQL MCP server for protocol-level testing."""
+    from db_connect_mcp.server import DatabaseMCPServer
+
+    server = DatabaseMCPServer(mysql_config)
+    try:
+        await server.initialize()
+    except Exception as e:
+        pytest.skip(f"MySQL MCP server initialization failed: {e}")
 
     try:
         yield server
