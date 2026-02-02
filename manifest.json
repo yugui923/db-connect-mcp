@@ -1,0 +1,102 @@
+{
+  "manifest_version": "0.3",
+  "name": "db-connect-mcp",
+  "display_name": "Database Connect",
+  "version": "0.3.1",
+  "description": "Read-only database explorer for PostgreSQL, MySQL, and ClickHouse",
+  "author": {
+    "name": "Yuri Gui",
+    "url": "https://github.com/yugui923/db-connect-mcp"
+  },
+  "license": "MIT",
+  "repository": "https://github.com/yugui923/db-connect-mcp",
+  "keywords": ["database", "postgresql", "mysql", "clickhouse", "sql"],
+  "server": {
+    "type": "python",
+    "entry_point": "server.py",
+    "mcp_config": {
+      "command": "python",
+      "args": ["-m", "db_connect_mcp"],
+      "env": {
+        "DATABASE_URL": "${user_config.database_url}",
+        "SSH_HOST": "${user_config.ssh_host}",
+        "SSH_PORT": "${user_config.ssh_port}",
+        "SSH_USERNAME": "${user_config.ssh_username}",
+        "SSH_PASSWORD": "${user_config.ssh_password}"
+      }
+    }
+  },
+  "user_config": {
+    "database_url": {
+      "type": "string",
+      "description": "Database connection URL (e.g. postgresql+asyncpg://user:pass@host:5432/db)",
+      "required": true,
+      "sensitive": true
+    },
+    "ssh_host": {
+      "type": "string",
+      "description": "SSH tunnel host (optional, for tunneled connections)",
+      "required": false
+    },
+    "ssh_port": {
+      "type": "string",
+      "description": "SSH tunnel port (default: 22)",
+      "required": false
+    },
+    "ssh_username": {
+      "type": "string",
+      "description": "SSH tunnel username",
+      "required": false
+    },
+    "ssh_password": {
+      "type": "string",
+      "description": "SSH tunnel password",
+      "required": false,
+      "sensitive": true
+    }
+  },
+  "tools": [
+    {
+      "name": "get_database_info",
+      "description": "Get database information including version, size, and capabilities"
+    },
+    {
+      "name": "list_schemas",
+      "description": "List all schemas/databases in the database instance"
+    },
+    {
+      "name": "list_tables",
+      "description": "List all tables and views in a schema"
+    },
+    {
+      "name": "describe_table",
+      "description": "Get comprehensive table information including columns, indexes, and constraints"
+    },
+    {
+      "name": "analyze_column",
+      "description": "Get comprehensive column statistics including percentiles and distributions"
+    },
+    {
+      "name": "sample_data",
+      "description": "Sample data from a table efficiently"
+    },
+    {
+      "name": "execute_query",
+      "description": "Execute a read-only SQL query (SELECT, WITH, EXPLAIN)"
+    },
+    {
+      "name": "get_table_relationships",
+      "description": "Get foreign key relationships for a table"
+    },
+    {
+      "name": "explain_query",
+      "description": "Get query execution plan to analyze performance"
+    }
+  ],
+  "compatibility": {
+    "platforms": ["darwin", "win32", "linux"],
+    "runtimes": {
+      "python": ">=3.10"
+    }
+  }
+}

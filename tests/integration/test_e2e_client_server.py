@@ -21,16 +21,13 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, AsyncGenerator, Optional
-from unittest import mock
+from typing import Any, Optional
 
-import anyio
 import pytest
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from mcp.types import TextContent
 
-from db_connect_mcp.models.config import DatabaseConfig
 
 # Mark all tests in this module for E2E testing
 pytestmark = [
@@ -657,7 +654,7 @@ class TestE2EServerLogs:
             await asyncio.sleep(1)
 
             # Verify we can capture logs
-            logs = server_ctx.log_capture.get_logs()
+            _logs = server_ctx.log_capture.get_logs()
 
             # Note: Logs might be empty or minimal depending on buffering
             # The framework is in place for when buffering allows capture
