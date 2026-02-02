@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "db-connect-mcp",
   "display_name": "Database Connect",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Read-only database explorer for PostgreSQL, MySQL, and ClickHouse",
   "author": {
     "name": "Yuri Gui",
