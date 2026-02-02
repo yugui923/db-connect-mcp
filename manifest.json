@@ -9,7 +9,10 @@
     "url": "https://github.com/yugui923/db-connect-mcp"
   },
   "license": "MIT",
-  "repository": "https://github.com/yugui923/db-connect-mcp",
+  "repository": {
+    "url": "https://github.com/yugui923/db-connect-mcp",
+    "type": "github"
+  },
   "keywords": ["database", "postgresql", "mysql", "clickhouse", "sql"],
   "server": {
     "type": "python",
@@ -28,27 +31,32 @@
   },
   "user_config": {
     "database_url": {
+      "title": "Database URL",
       "type": "string",
       "description": "Database connection URL (e.g. postgresql+asyncpg://user:pass@host:5432/db)",
       "required": true,
       "sensitive": true
     },
     "ssh_host": {
+      "title": "SSH Host",
       "type": "string",
       "description": "SSH tunnel host (optional, for tunneled connections)",
       "required": false
     },
     "ssh_port": {
+      "title": "SSH Port",
       "type": "string",
       "description": "SSH tunnel port (default: 22)",
       "required": false
     },
     "ssh_username": {
+      "title": "SSH Username",
       "type": "string",
       "description": "SSH tunnel username",
       "required": false
     },
     "ssh_password": {
+      "title": "SSH Password",
       "type": "string",
       "description": "SSH tunnel password",
       "required": false,
