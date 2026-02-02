@@ -560,8 +560,17 @@ async def main() -> None:
             f"SSH tunnel configured: {ssh_tunnel_config.ssh_host}:{ssh_tunnel_config.ssh_port}"
         )
 
+    # Parse statement timeout from environment
+    statement_timeout = _parse_int_env(
+        "DB_STATEMENT_TIMEOUT", os.getenv("DB_STATEMENT_TIMEOUT"), default=900
+    )
+
     # Create configuration
-    config = DatabaseConfig(url=database_url, ssh_tunnel=ssh_tunnel_config)
+    config = DatabaseConfig(
+        url=database_url,
+        ssh_tunnel=ssh_tunnel_config,
+        statement_timeout=statement_timeout,
+    )
 
     # Create and initialize server
     mcp_server = DatabaseMCPServer(config)

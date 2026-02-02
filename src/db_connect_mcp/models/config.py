@@ -145,7 +145,7 @@ class DatabaseConfig(BaseModel):
         description="Enforce read-only connections",
     )
     statement_timeout: Optional[int] = Field(
-        default=30,
+        default=900,
         ge=1,
         le=3600,
         description="Statement execution timeout in seconds",
@@ -501,7 +501,7 @@ class DatabaseConfig(BaseModel):
                     "pool_size": 5,
                     "max_overflow": 10,
                     "read_only": True,
-                    "statement_timeout": 30,
+                    "statement_timeout": 900,
                 }
             ]
         }
