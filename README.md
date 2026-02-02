@@ -1,5 +1,7 @@
 # db-connect-mcp - Multi-Database MCP Server
 
+<!-- mcp-name: io.github.yugui923/db-connect-mcp -->
+
 A read-only MCP (Model Context Protocol) server for exploratory data analysis across multiple database systems. This server provides safe, read-only access to PostgreSQL, MySQL, and ClickHouse databases with comprehensive analysis capabilities.
 
 ## Quick Start

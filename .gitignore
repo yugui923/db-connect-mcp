@@ -182,3 +182,7 @@ cython_debug/
 
 /tmp/claude-*
 .env.local
+
+# MCP Registry
+.mcpregistry_github_token
+.mcpregistry_registry_token

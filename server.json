@@ -1,0 +1,30 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.yugui923/db-connect-mcp",
+  "title": "DB Connect MCP",
+  "description": "Multi-database MCP server for PostgreSQL, MySQL, and ClickHouse",
+  "repository": {
+    "url": "https://github.com/yugui923/db-connect-mcp",
+    "source": "github"
+  },
+  "version": "0.3.1",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "db-connect-mcp",
+      "version": "0.3.1",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "description": "Database connection URL (e.g., postgresql+asyncpg://user:pass@host:5432/db)",
+          "isRequired": true,
+          "format": "string",
+          "isSecret": true,
+          "name": "DATABASE_URL"
+        }
+      ]
+    }
+  ]
+}
