@@ -18,6 +18,10 @@ from db_connect_mcp.models.table import TableInfo
 class MySQLAdapter(BaseAdapter):
     """MySQL adapter with good feature support."""
 
+    def _quote_identifier(self, name: str) -> str:
+        """MySQL uses backtick quoting."""
+        return f"`{name}`"
+
     @property
     def capabilities(self) -> DatabaseCapabilities:
         """MySQL has good but not comprehensive support."""
@@ -98,6 +102,7 @@ class MySQLAdapter(BaseAdapter):
         schema: Optional[str],
     ) -> ColumnStats:
         """Get MySQL column statistics (basic stats only)."""
+        self._validate_identifier(column_name, "column")
         table_ref = self._build_table_reference(table_name, schema)
 
         # MySQL doesn't support percentile functions, so we get basic stats only
@@ -200,6 +205,7 @@ class MySQLAdapter(BaseAdapter):
         limit: int,
     ) -> Distribution:
         """Get value distribution for MySQL."""
+        self._validate_identifier(column_name, "column")
         table_ref = self._build_table_reference(table_name, schema)
 
         stats_query = text(f"""

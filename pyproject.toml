@@ -35,9 +35,9 @@ classifiers = [
 ]
 
 dependencies = [
-    "mcp>=1.0.0",
+    "mcp>=1.6.0",
     "pydantic>=2.0.0",
-    "orjson>=3.9.0",
+    "orjson>=3.10.14",
     "sqlalchemy[asyncio]>=2.0.0",
     "python-dotenv>=1.0.0",
     "asyncpg>=0.29.0",

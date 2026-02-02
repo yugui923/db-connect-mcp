@@ -75,6 +75,8 @@ class PostgresAdapter(BaseAdapter):
         # Build schema-qualified table name for regclass casting
         # Must use format string, not parameter binding, for regclass
         schema_name = table_info.schema or "public"
+        self._validate_identifier(schema_name, "schema")
+        self._validate_identifier(table_info.name, "table")
         table_ident = f'"{schema_name}"."{table_info.name}"'
 
         # Use format string for regclass casting (parameter binding doesn't work with ::regclass)
@@ -143,6 +145,7 @@ class PostgresAdapter(BaseAdapter):
         schema: Optional[str],
     ) -> ColumnStats:
         """Get comprehensive PostgreSQL column statistics."""
+        self._validate_identifier(column_name, "column")
         table_ref = self._build_table_reference(table_name, schema)
 
         # First, verify the column exists
@@ -327,6 +330,7 @@ class PostgresAdapter(BaseAdapter):
         limit: int,
     ) -> Distribution:
         """Get value distribution for PostgreSQL."""
+        self._validate_identifier(column_name, "column")
         table_ref = self._build_table_reference(table_name, schema)
 
         query = text(f"""

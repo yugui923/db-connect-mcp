@@ -16,6 +16,10 @@ from db_connect_mcp.models.table import TableInfo
 class ClickHouseAdapter(BaseAdapter):
     """ClickHouse adapter optimized for analytical queries."""
 
+    def _quote_identifier(self, name: str) -> str:
+        """ClickHouse uses backtick quoting."""
+        return f"`{name}`"
+
     @property
     def capabilities(self) -> DatabaseCapabilities:
         """ClickHouse analytics-focused capabilities."""
@@ -131,6 +135,7 @@ class ClickHouseAdapter(BaseAdapter):
         schema: Optional[str],
     ) -> ColumnStats:
         """Get ClickHouse column statistics with columnar optimizations."""
+        self._validate_identifier(column_name, "column")
         table_ref = self._build_table_reference(table_name, schema)
 
         # ClickHouse has excellent support for quantiles
@@ -228,6 +233,7 @@ class ClickHouseAdapter(BaseAdapter):
         limit: int,
     ) -> Distribution:
         """Get value distribution for ClickHouse."""
+        self._validate_identifier(column_name, "column")
         table_ref = self._build_table_reference(table_name, schema)
 
         stats_query = text(f"""

@@ -285,7 +285,8 @@ class DatabaseMCPServer:
         self, arguments: dict[str, Any]
     ) -> list[TextContent]:
         """Handle get_database_info request."""
-        assert self.inspector is not None
+        if self.inspector is None:
+            raise RuntimeError("Server not initialized")
 
         version = await self.connection.get_version()
 
@@ -322,7 +323,8 @@ class DatabaseMCPServer:
 
     async def handle_list_schemas(self, arguments: dict[str, Any]) -> list[TextContent]:
         """Handle list_schemas request."""
-        assert self.inspector is not None
+        if self.inspector is None:
+            raise RuntimeError("Server not initialized")
 
         schemas = await self.inspector.get_schemas()
         schemas_data = [s.model_dump(mode="json") for s in schemas]
@@ -337,7 +339,8 @@ class DatabaseMCPServer:
 
     async def handle_list_tables(self, arguments: dict[str, Any]) -> list[TextContent]:
         """Handle list_tables request."""
-        assert self.inspector is not None
+        if self.inspector is None:
+            raise RuntimeError("Server not initialized")
 
         schema = arguments.get("schema")
         include_views = arguments.get("include_views", True)
@@ -357,7 +360,8 @@ class DatabaseMCPServer:
         self, arguments: dict[str, Any]
     ) -> list[TextContent]:
         """Handle describe_table request."""
-        assert self.inspector is not None
+        if self.inspector is None:
+            raise RuntimeError("Server not initialized")
 
         table = arguments["table"]
         schema = arguments.get("schema")
@@ -376,7 +380,8 @@ class DatabaseMCPServer:
         self, arguments: dict[str, Any]
     ) -> list[TextContent]:
         """Handle execute_query request."""
-        assert self.executor is not None
+        if self.executor is None:
+            raise RuntimeError("Server not initialized")
 
         query = arguments["query"]
         limit = arguments.get("limit", 1000)
@@ -393,7 +398,8 @@ class DatabaseMCPServer:
 
     async def handle_sample_data(self, arguments: dict[str, Any]) -> list[TextContent]:
         """Handle sample_data request."""
-        assert self.executor is not None
+        if self.executor is None:
+            raise RuntimeError("Server not initialized")
 
         table = arguments["table"]
         schema = arguments.get("schema")
@@ -413,7 +419,8 @@ class DatabaseMCPServer:
         self, arguments: dict[str, Any]
     ) -> list[TextContent]:
         """Handle get_table_relationships request."""
-        assert self.inspector is not None
+        if self.inspector is None:
+            raise RuntimeError("Server not initialized")
 
         table = arguments["table"]
         schema = arguments.get("schema")
@@ -433,7 +440,8 @@ class DatabaseMCPServer:
         self, arguments: dict[str, Any]
     ) -> list[TextContent]:
         """Handle analyze_column request."""
-        assert self.analyzer is not None
+        if self.analyzer is None:
+            raise RuntimeError("Server not initialized")
 
         table = arguments["table"]
         column = arguments["column"]
@@ -453,7 +461,8 @@ class DatabaseMCPServer:
         self, arguments: dict[str, Any]
     ) -> list[TextContent]:
         """Handle explain_query request."""
-        assert self.executor is not None
+        if self.executor is None:
+            raise RuntimeError("Server not initialized")
 
         query = arguments["query"]
         analyze = arguments.get("analyze", False)
@@ -474,14 +483,18 @@ class DatabaseMCPServer:
         logger.info("Database MCP server cleaned up")
 
 
-def _parse_int_env(name: str, value: Optional[str], default: Optional[int] = None) -> Optional[int]:
+def _parse_int_env(
+    name: str, value: Optional[str], default: Optional[int] = None
+) -> Optional[int]:
     """Parse an environment variable as an integer with clear error messages."""
     if value is None:
         return default
     try:
         return int(value)
     except ValueError:
-        raise ValueError(f"Environment variable {name} must be an integer, got: {value!r}")
+        raise ValueError(
+            f"Environment variable {name} must be an integer, got: {value!r}"
+        )
 
 
 def _load_ssh_tunnel_config() -> Optional[SSHTunnelConfig]:
@@ -511,7 +524,9 @@ def _load_ssh_tunnel_config() -> Optional[SSHTunnelConfig]:
     ssh_port = _parse_int_env("SSH_PORT", os.getenv("SSH_PORT"), default=22)
     remote_port = _parse_int_env("SSH_REMOTE_PORT", os.getenv("SSH_REMOTE_PORT"))
     local_port = _parse_int_env("SSH_LOCAL_PORT", os.getenv("SSH_LOCAL_PORT"))
-    tunnel_timeout = _parse_int_env("SSH_TUNNEL_TIMEOUT", os.getenv("SSH_TUNNEL_TIMEOUT"), default=10)
+    tunnel_timeout = _parse_int_env(
+        "SSH_TUNNEL_TIMEOUT", os.getenv("SSH_TUNNEL_TIMEOUT"), default=10
+    )
 
     return SSHTunnelConfig(
         ssh_host=ssh_host,

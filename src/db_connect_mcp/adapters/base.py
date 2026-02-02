@@ -1,5 +1,6 @@
 """Base adapter abstract class for database-specific implementations."""
 
+import re
 from abc import ABC, abstractmethod
 from typing import Any, Optional, Union, TYPE_CHECKING
 
@@ -151,8 +152,40 @@ class BaseAdapter(ABC):
         """
         ...
 
+    # Pattern for valid SQL identifiers: letters, digits, underscores
+    _VALID_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+    @staticmethod
+    def _validate_identifier(name: str, kind: str = "identifier") -> None:
+        """Validate that a name is a safe SQL identifier.
+
+        Args:
+            name: The identifier to validate.
+            kind: Description for error messages (e.g. "table", "column", "schema").
+
+        Raises:
+            ValueError: If the identifier contains unsafe characters.
+        """
+        if not BaseAdapter._VALID_IDENTIFIER_RE.match(name):
+            raise ValueError(
+                f"Invalid {kind} name: {name!r}. "
+                f"Only letters, digits, and underscores are allowed."
+            )
+
+    def _quote_identifier(self, name: str) -> str:
+        """Quote an identifier using the database-appropriate quoting style.
+
+        Default uses double quotes (ANSI SQL / PostgreSQL).
+        Override in subclasses for different quoting (e.g. backticks for MySQL/ClickHouse).
+        """
+        return f'"{name}"'
+
     def _build_table_reference(self, table_name: str, schema: Optional[str]) -> str:
-        """Build qualified table reference."""
+        """Build qualified table reference with validation and quoting."""
+        self._validate_identifier(table_name, "table")
         if schema:
-            return f"{schema}.{table_name}"
-        return table_name
+            self._validate_identifier(schema, "schema")
+            return (
+                f"{self._quote_identifier(schema)}.{self._quote_identifier(table_name)}"
+            )
+        return self._quote_identifier(table_name)
