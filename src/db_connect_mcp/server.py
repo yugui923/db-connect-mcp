@@ -4,6 +4,7 @@ A Model Context Protocol (MCP) server providing database analysis and querying
 capabilities for PostgreSQL, MySQL, and ClickHouse databases.
 """
 
+import argparse
 import asyncio
 import json
 import logging
@@ -544,7 +545,74 @@ def _load_ssh_tunnel_config() -> Optional[SSHTunnelConfig]:
     )
 
 
-async def main() -> None:
+class _MCPASGIApp:
+    """ASGI application wrapper for MCP server with optional auth."""
+
+    def __init__(
+        self,
+        session_manager: Any,
+        auth_token: str | None = None,
+    ) -> None:
+        self.session_manager = session_manager
+        self.auth_token = auth_token
+
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        from starlette.responses import Response
+
+        if self.auth_token and scope["type"] == "http":
+            headers = dict(scope.get("headers", []))
+            auth_value = headers.get(b"authorization", b"").decode()
+            if (
+                not auth_value.startswith("Bearer ")
+                or auth_value[7:] != self.auth_token
+            ):
+                response = Response("Unauthorized", status_code=401)
+                await response(scope, receive, send)
+                return
+        await self.session_manager.handle_request(scope, receive, send)
+
+
+async def _run_streamable_http(
+    mcp_server: DatabaseMCPServer, host: str, port: int
+) -> None:
+    """Run the MCP server using Streamable HTTP transport."""
+    import uvicorn
+    from starlette.applications import Starlette
+    from starlette.routing import Route
+
+    from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
+
+    session_manager = StreamableHTTPSessionManager(
+        app=mcp_server.server,
+        json_response=True,
+        stateless=True,
+    )
+
+    auth_token = os.getenv("MCP_AUTH_TOKEN")
+
+    # Create ASGI app instance (class with __call__ for proper Starlette routing)
+    mcp_asgi_app = _MCPASGIApp(session_manager, auth_token)
+
+    app = Starlette(
+        routes=[Route("/mcp", endpoint=mcp_asgi_app)],
+        lifespan=lambda app: session_manager.run(),
+    )
+
+    config = uvicorn.Config(app, host=host, port=port, log_level="info")
+    server = uvicorn.Server(config)
+
+    logger.info(f"Starting Streamable HTTP server on {host}:{port}/mcp")
+    if auth_token:
+        logger.info("Bearer token authentication enabled")
+
+    await server.serve()
+
+
+async def main(
+    transport: str = "stdio",
+    host: str = "0.0.0.0",
+    port: int = 8000,
+) -> None:
     """Main entry point for the MCP server."""
     # Get database URL from environment
     database_url = os.getenv("DATABASE_URL")
@@ -626,14 +694,17 @@ async def main() -> None:
             return await handler(arguments)
 
         # Run the server
-        from mcp.server.stdio import stdio_server
+        if transport == "streamable-http":
+            await _run_streamable_http(mcp_server, host, port)
+        else:
+            from mcp.server.stdio import stdio_server
 
-        async with stdio_server() as (read_stream, write_stream):
-            await mcp_server.server.run(
-                read_stream,
-                write_stream,
-                mcp_server.server.create_initialization_options(),
-            )
+            async with stdio_server() as (read_stream, write_stream):
+                await mcp_server.server.run(
+                    read_stream,
+                    write_stream,
+                    mcp_server.server.create_initialization_options(),
+                )
 
     finally:
         await mcp_server.cleanup()
@@ -646,12 +717,32 @@ def cli_entry() -> None:
     This function is called by the 'db-connect-mcp' console script.
     It sets up the event loop and runs the async main() function.
     """
+    parser = argparse.ArgumentParser(description="Multi-database MCP server")
+    parser.add_argument(
+        "--transport",
+        choices=["stdio", "streamable-http"],
+        default="stdio",
+        help="Transport protocol (default: stdio)",
+    )
+    parser.add_argument(
+        "--host",
+        default="0.0.0.0",
+        help="Host to bind to for streamable-http (default: 0.0.0.0)",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=8000,
+        help="Port for streamable-http (default: 8000)",
+    )
+    args = parser.parse_args()
+
     # Windows-specific event loop policy
     if os.name == "nt":
         asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())  # type: ignore[attr-defined]
 
     try:
-        asyncio.run(main())
+        asyncio.run(main(transport=args.transport, host=args.host, port=args.port))
     except KeyboardInterrupt:
         logger.info("Server stopped by user")
     except Exception as e:

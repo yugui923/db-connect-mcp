@@ -571,6 +571,7 @@ dependencies = [
 dev = [
     { name = "black" },
     { name = "hatchling" },
+    { name = "httpx" },
     { name = "pyright" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
@@ -598,6 +599,7 @@ requires-dist = [
 dev = [
     { name = "black", specifier = ">=23.0.0" },
     { name = "hatchling", specifier = ">=1.0.0" },
+    { name = "httpx", specifier = ">=0.27.0" },
     { name = "pyright", specifier = ">=1.1.0" },
     { name = "pytest", specifier = ">=7.0.0" },
     { name = "pytest-asyncio", specifier = ">=0.21.0" },
