@@ -19,7 +19,7 @@ class TestMySQLDirectAnalyzerNumeric:
 
     @pytest.mark.asyncio
     async def test_analyze_numeric_column(self, mysql_analyzer: StatisticsAnalyzer):
-        stats = await mysql_analyzer.analyze_column("products", "price", "testdb")
+        stats = await mysql_analyzer.analyze_column("products", "price", "devdb")
         assert stats is not None
         assert stats.column == "price"
         assert stats.total_rows > 0
@@ -28,7 +28,7 @@ class TestMySQLDirectAnalyzerNumeric:
 
     @pytest.mark.asyncio
     async def test_analyze_numeric_serializable(self, mysql_analyzer: StatisticsAnalyzer):
-        stats = await mysql_analyzer.analyze_column("products", "price", "testdb")
+        stats = await mysql_analyzer.analyze_column("products", "price", "devdb")
         assert_json_serializable(stats.model_dump())
 
 
@@ -39,14 +39,14 @@ class TestMySQLDirectAnalyzerText:
 
     @pytest.mark.asyncio
     async def test_analyze_text_column(self, mysql_analyzer: StatisticsAnalyzer):
-        stats = await mysql_analyzer.analyze_column("products", "name", "testdb")
+        stats = await mysql_analyzer.analyze_column("products", "name", "devdb")
         assert stats is not None
         assert stats.column == "name"
         assert stats.total_rows > 0
 
     @pytest.mark.asyncio
     async def test_analyze_email_column(self, mysql_analyzer: StatisticsAnalyzer):
-        stats = await mysql_analyzer.analyze_column("users", "email", "testdb")
+        stats = await mysql_analyzer.analyze_column("users", "email", "devdb")
         assert stats is not None
         assert stats.total_rows > 0
 
@@ -58,7 +58,7 @@ class TestMySQLDirectAnalyzerEdgeCases:
 
     @pytest.mark.asyncio
     async def test_analyze_nonexistent_column(self, mysql_analyzer: StatisticsAnalyzer):
-        stats = await mysql_analyzer.analyze_column("products", "nonexistent_col", "testdb")
+        stats = await mysql_analyzer.analyze_column("products", "nonexistent_col", "devdb")
         assert stats.total_rows == 0 or stats.warning is not None
 
 
@@ -72,14 +72,14 @@ class TestMySQLTunneledAnalyzerNumeric:
 
     @pytest.mark.asyncio
     async def test_analyze_numeric_column(self, mysql_tunnel_analyzer: StatisticsAnalyzer):
-        stats = await mysql_tunnel_analyzer.analyze_column("products", "price", "testdb")
+        stats = await mysql_tunnel_analyzer.analyze_column("products", "price", "devdb")
         assert stats is not None
         assert stats.column == "price"
         assert stats.total_rows > 0
 
     @pytest.mark.asyncio
     async def test_analyze_numeric_serializable(self, mysql_tunnel_analyzer: StatisticsAnalyzer):
-        stats = await mysql_tunnel_analyzer.analyze_column("products", "price", "testdb")
+        stats = await mysql_tunnel_analyzer.analyze_column("products", "price", "devdb")
         assert_json_serializable(stats.model_dump())
 
 
@@ -90,7 +90,7 @@ class TestMySQLTunneledAnalyzerText:
 
     @pytest.mark.asyncio
     async def test_analyze_text_column(self, mysql_tunnel_analyzer: StatisticsAnalyzer):
-        stats = await mysql_tunnel_analyzer.analyze_column("products", "name", "testdb")
+        stats = await mysql_tunnel_analyzer.analyze_column("products", "name", "devdb")
         assert stats is not None
         assert stats.column == "name"
         assert stats.total_rows > 0

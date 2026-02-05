@@ -55,13 +55,13 @@ class TestMySQLDirectExecutorSampling:
 
     @pytest.mark.asyncio
     async def test_sample_data(self, mysql_executor: QueryExecutor):
-        result = await mysql_executor.sample_data("products", "testdb", limit=3)
+        result = await mysql_executor.sample_data("products", "devdb", limit=3)
         assert result.row_count > 0
         assert result.row_count <= 3
 
     @pytest.mark.asyncio
     async def test_sample_data_users(self, mysql_executor: QueryExecutor):
-        result = await mysql_executor.sample_data("users", "testdb", limit=5)
+        result = await mysql_executor.sample_data("users", "devdb", limit=5)
         assert result.row_count > 0
         assert "email" in result.columns
 

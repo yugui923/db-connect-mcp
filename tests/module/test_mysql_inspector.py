@@ -20,10 +20,10 @@ class TestMySQLDirectInspectorSchemas:
     async def test_list_schemas(self, mysql_inspector: MetadataInspector):
         schemas = await mysql_inspector.get_schemas()
         assert len(schemas) > 0
-        testdb = next((s for s in schemas if s.name == "testdb"), None)
-        assert testdb is not None, "testdb schema should exist"
-        assert testdb.table_count is not None
-        assert testdb.table_count >= 3
+        devdb = next((s for s in schemas if s.name == "devdb"), None)
+        assert devdb is not None, "devdb schema should exist"
+        assert devdb.table_count is not None
+        assert devdb.table_count >= 3
 
 
 class TestMySQLDirectInspectorTables:
@@ -33,7 +33,7 @@ class TestMySQLDirectInspectorTables:
 
     @pytest.mark.asyncio
     async def test_list_tables(self, mysql_inspector: MetadataInspector):
-        tables = await mysql_inspector.get_tables("testdb")
+        tables = await mysql_inspector.get_tables("devdb")
         table_names = {t.name for t in tables}
         assert "categories" in table_names
         assert "products" in table_names
@@ -41,7 +41,7 @@ class TestMySQLDirectInspectorTables:
 
     @pytest.mark.asyncio
     async def test_describe_table_categories(self, mysql_inspector: MetadataInspector):
-        table = await mysql_inspector.describe_table("categories", "testdb")
+        table = await mysql_inspector.describe_table("categories", "devdb")
         assert table is not None
         assert table.name == "categories"
         col_names = [c.name for c in table.columns]
@@ -50,7 +50,7 @@ class TestMySQLDirectInspectorTables:
 
     @pytest.mark.asyncio
     async def test_describe_table_products(self, mysql_inspector: MetadataInspector):
-        table = await mysql_inspector.describe_table("products", "testdb")
+        table = await mysql_inspector.describe_table("products", "devdb")
         assert table is not None
         col_names = [c.name for c in table.columns]
         assert "product_id" in col_names
@@ -59,7 +59,7 @@ class TestMySQLDirectInspectorTables:
 
     @pytest.mark.asyncio
     async def test_describe_table_has_indexes(self, mysql_inspector: MetadataInspector):
-        table = await mysql_inspector.describe_table("products", "testdb")
+        table = await mysql_inspector.describe_table("products", "devdb")
         assert table is not None
         if table.indexes:
             assert len(table.indexes) > 0
@@ -72,7 +72,7 @@ class TestMySQLDirectInspectorRelationships:
 
     @pytest.mark.asyncio
     async def test_get_relationships(self, mysql_inspector: MetadataInspector):
-        relationships = await mysql_inspector.get_relationships("products", "testdb")
+        relationships = await mysql_inspector.get_relationships("products", "devdb")
         assert len(relationships) > 0
         assert relationships[0].from_table == "products"
         assert "category_id" in relationships[0].from_columns
@@ -90,10 +90,10 @@ class TestMySQLTunneledInspectorSchemas:
     async def test_list_schemas(self, mysql_tunnel_inspector: MetadataInspector):
         schemas = await mysql_tunnel_inspector.get_schemas()
         assert len(schemas) > 0
-        testdb = next((s for s in schemas if s.name == "testdb"), None)
-        assert testdb is not None, "testdb schema should exist"
-        assert testdb.table_count is not None
-        assert testdb.table_count >= 3
+        devdb = next((s for s in schemas if s.name == "devdb"), None)
+        assert devdb is not None, "devdb schema should exist"
+        assert devdb.table_count is not None
+        assert devdb.table_count >= 3
 
 
 class TestMySQLTunneledInspectorTables:
@@ -103,7 +103,7 @@ class TestMySQLTunneledInspectorTables:
 
     @pytest.mark.asyncio
     async def test_list_tables(self, mysql_tunnel_inspector: MetadataInspector):
-        tables = await mysql_tunnel_inspector.get_tables("testdb")
+        tables = await mysql_tunnel_inspector.get_tables("devdb")
         table_names = {t.name for t in tables}
         assert "categories" in table_names
         assert "products" in table_names
@@ -111,7 +111,7 @@ class TestMySQLTunneledInspectorTables:
 
     @pytest.mark.asyncio
     async def test_describe_table_products(self, mysql_tunnel_inspector: MetadataInspector):
-        table = await mysql_tunnel_inspector.describe_table("products", "testdb")
+        table = await mysql_tunnel_inspector.describe_table("products", "devdb")
         assert table is not None
         col_names = [c.name for c in table.columns]
         assert "product_id" in col_names
@@ -125,6 +125,6 @@ class TestMySQLTunneledInspectorRelationships:
 
     @pytest.mark.asyncio
     async def test_get_relationships(self, mysql_tunnel_inspector: MetadataInspector):
-        relationships = await mysql_tunnel_inspector.get_relationships("products", "testdb")
+        relationships = await mysql_tunnel_inspector.get_relationships("products", "devdb")
         assert len(relationships) > 0
         assert relationships[0].from_table == "products"

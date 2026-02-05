@@ -83,13 +83,13 @@ class TestSSHTunnelConnectivity:
         with SSHTunnelManager(config) as manager:
             port = manager.local_bind_port
             rewritten = rewrite_database_url(
-                "mysql+aiomysql://testuser:testpass@mysql-tunneled:3306/testdb",
+                "mysql+aiomysql://devuser:devpassword@mysql-tunneled:3306/devdb",
                 "127.0.0.1",
                 port,
             )
             assert f"127.0.0.1:{port}" in rewritten
-            assert "testuser:testpass" in rewritten
-            assert "/testdb" in rewritten
+            assert "devuser:devpassword" in rewritten
+            assert "/devdb" in rewritten
 
     def test_tunnel_url_rewriting_pg(self):
         """Test URL rewriting with a real tunnel port for PostgreSQL."""
@@ -272,11 +272,11 @@ class TestSSHTunnelMySQLMCP:
     async def test_mcp_list_schemas(self, mysql_tunnel_mcp_server):
         result = await mysql_tunnel_mcp_server.handle_list_schemas({})
         assert len(result) > 0
-        assert "testdb" in result[0].text
+        assert "devdb" in result[0].text
 
     @pytest.mark.asyncio
     async def test_mcp_list_tables(self, mysql_tunnel_mcp_server):
-        result = await mysql_tunnel_mcp_server.handle_list_tables({"schema": "testdb"})
+        result = await mysql_tunnel_mcp_server.handle_list_tables({"schema": "devdb"})
         assert len(result) > 0
         text = result[0].text
         assert "products" in text
@@ -293,7 +293,7 @@ class TestSSHTunnelMySQLMCP:
     @pytest.mark.asyncio
     async def test_mcp_sample_data(self, mysql_tunnel_mcp_server):
         result = await mysql_tunnel_mcp_server.handle_sample_data({
-            "table": "products", "schema": "testdb", "limit": 3,
+            "table": "products", "schema": "devdb", "limit": 3,
         })
         assert len(result) > 0
         assert "product_id" in result[0].text
