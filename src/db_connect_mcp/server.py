@@ -572,10 +572,87 @@ class _MCPASGIApp:
         await self.session_manager.handle_request(scope, receive, send)
 
 
+class _OAuthMCPASGIApp:
+    """ASGI application wrapper for MCP server with OAuth 2.0 JWT verification."""
+
+    def __init__(
+        self,
+        session_manager: Any,
+        token_verifier: Any,
+        required_scopes: list[str] | None = None,
+    ) -> None:
+        self.session_manager = session_manager
+        self.token_verifier = token_verifier
+        self.required_scopes = required_scopes or []
+
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        from starlette.responses import JSONResponse
+
+        if scope["type"] == "http":
+            headers = dict(scope.get("headers", []))
+            auth_value = headers.get(b"authorization", b"").decode()
+
+            # Check for Bearer token
+            if not auth_value.startswith("Bearer "):
+                response = JSONResponse(
+                    {"error": "unauthorized", "error_description": "Missing bearer token"},
+                    status_code=401,
+                    headers={"WWW-Authenticate": 'Bearer realm="mcp"'},
+                )
+                await response(scope, receive, send)
+                return
+
+            token = auth_value[7:]
+
+            # Verify the token
+            access_token = await self.token_verifier.verify_token(token)
+            if access_token is None:
+                response = JSONResponse(
+                    {"error": "invalid_token", "error_description": "Token validation failed"},
+                    status_code=401,
+                    headers={"WWW-Authenticate": 'Bearer realm="mcp", error="invalid_token"'},
+                )
+                await response(scope, receive, send)
+                return
+
+            # Check required scopes
+            if self.required_scopes:
+                missing_scopes = [s for s in self.required_scopes if s not in access_token.scopes]
+                if missing_scopes:
+                    response = JSONResponse(
+                        {
+                            "error": "insufficient_scope",
+                            "error_description": f"Missing required scopes: {', '.join(missing_scopes)}",
+                        },
+                        status_code=403,
+                        headers={
+                            "WWW-Authenticate": f'Bearer realm="mcp", error="insufficient_scope", scope="{" ".join(self.required_scopes)}"'
+                        },
+                    )
+                    await response(scope, receive, send)
+                    return
+
+            # Store token info in scope for downstream use
+            scope["auth"] = access_token
+
+        await self.session_manager.handle_request(scope, receive, send)
+
+
 async def _run_streamable_http(
-    mcp_server: DatabaseMCPServer, host: str, port: int
+    mcp_server: DatabaseMCPServer,
+    host: str,
+    port: int,
+    oauth_issuer: str | None = None,
+    oauth_audience: str | None = None,
+    oauth_scopes: list[str] | None = None,
 ) -> None:
-    """Run the MCP server using Streamable HTTP transport."""
+    """Run the MCP server using Streamable HTTP transport.
+
+    Supports three authentication modes:
+    1. No auth: If neither MCP_AUTH_TOKEN nor oauth_issuer is set
+    2. Simple bearer token: If MCP_AUTH_TOKEN env var is set
+    3. OAuth 2.0 JWT: If oauth_issuer and oauth_audience are provided
+    """
     import uvicorn
     from starlette.applications import Starlette
     from starlette.routing import Route
@@ -588,22 +665,43 @@ async def _run_streamable_http(
         stateless=True,
     )
 
+    # Determine authentication mode
     auth_token = os.getenv("MCP_AUTH_TOKEN")
+    mcp_asgi_app: _MCPASGIApp | _OAuthMCPASGIApp
 
-    # Create ASGI app instance (class with __call__ for proper Starlette routing)
-    mcp_asgi_app = _MCPASGIApp(session_manager, auth_token)
+    if oauth_issuer and oauth_audience:
+        # OAuth 2.0 JWT verification mode
+        from db_connect_mcp.auth import JWTTokenVerifier, JWTVerifierConfig
+
+        config = JWTVerifierConfig(
+            issuer=oauth_issuer,
+            audience=oauth_audience,
+            required_scopes=oauth_scopes,
+        )
+        token_verifier = JWTTokenVerifier(config)
+        mcp_asgi_app = _OAuthMCPASGIApp(
+            session_manager,
+            token_verifier,
+            required_scopes=oauth_scopes,
+        )
+        logger.info(f"OAuth 2.0 JWT verification enabled (issuer: {oauth_issuer})")
+        if oauth_scopes:
+            logger.info(f"Required scopes: {', '.join(oauth_scopes)}")
+    else:
+        # Simple bearer token or no auth mode
+        mcp_asgi_app = _MCPASGIApp(session_manager, auth_token)
+        if auth_token:
+            logger.info("Bearer token authentication enabled (MCP_AUTH_TOKEN)")
 
     app = Starlette(
         routes=[Route("/mcp", endpoint=mcp_asgi_app)],
         lifespan=lambda app: session_manager.run(),
     )
 
-    config = uvicorn.Config(app, host=host, port=port, log_level="info")
-    server = uvicorn.Server(config)
+    uvicorn_config = uvicorn.Config(app, host=host, port=port, log_level="info")
+    server = uvicorn.Server(uvicorn_config)
 
     logger.info(f"Starting Streamable HTTP server on {host}:{port}/mcp")
-    if auth_token:
-        logger.info("Bearer token authentication enabled")
 
     await server.serve()
 
@@ -612,6 +710,9 @@ async def main(
     transport: str = "stdio",
     host: str = "0.0.0.0",
     port: int = 8000,
+    oauth_issuer: str | None = None,
+    oauth_audience: str | None = None,
+    oauth_scopes: list[str] | None = None,
 ) -> None:
     """Main entry point for the MCP server."""
     # Get database URL from environment
@@ -695,7 +796,14 @@ async def main(
 
         # Run the server
         if transport == "streamable-http":
-            await _run_streamable_http(mcp_server, host, port)
+            await _run_streamable_http(
+                mcp_server,
+                host,
+                port,
+                oauth_issuer=oauth_issuer,
+                oauth_audience=oauth_audience,
+                oauth_scopes=oauth_scopes,
+            )
         else:
             from mcp.server.stdio import stdio_server
 
@@ -717,7 +825,29 @@ def cli_entry() -> None:
     This function is called by the 'db-connect-mcp' console script.
     It sets up the event loop and runs the async main() function.
     """
-    parser = argparse.ArgumentParser(description="Multi-database MCP server")
+    parser = argparse.ArgumentParser(
+        description="Multi-database MCP server",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Authentication modes (for streamable-http transport):
+  1. No auth: Default when no auth options are set
+  2. Simple bearer token: Set MCP_AUTH_TOKEN environment variable
+  3. OAuth 2.0 JWT: Use --oauth-issuer and --oauth-audience
+
+OAuth 2.0 examples:
+  Auth0:
+    --oauth-issuer https://your-tenant.auth0.com/ \\
+    --oauth-audience https://your-api-identifier
+
+  Azure AD:
+    --oauth-issuer https://login.microsoftonline.com/{tenant}/v2.0 \\
+    --oauth-audience your-client-id
+
+  Okta:
+    --oauth-issuer https://your-domain.okta.com/oauth2/default \\
+    --oauth-audience api://default
+""",
+    )
     parser.add_argument(
         "--transport",
         choices=["stdio", "streamable-http"],
@@ -735,14 +865,56 @@ def cli_entry() -> None:
         default=8000,
         help="Port for streamable-http (default: 8000)",
     )
+
+    # OAuth 2.0 arguments
+    oauth_group = parser.add_argument_group("OAuth 2.0 authentication")
+    oauth_group.add_argument(
+        "--oauth-issuer",
+        default=os.getenv("MCP_OAUTH_ISSUER"),
+        help="OAuth issuer URL (e.g., https://your-tenant.auth0.com/). "
+        "Can also be set via MCP_OAUTH_ISSUER env var.",
+    )
+    oauth_group.add_argument(
+        "--oauth-audience",
+        default=os.getenv("MCP_OAUTH_AUDIENCE"),
+        help="Expected audience claim (your API identifier). "
+        "Can also be set via MCP_OAUTH_AUDIENCE env var.",
+    )
+    oauth_group.add_argument(
+        "--oauth-scopes",
+        default=os.getenv("MCP_OAUTH_SCOPES"),
+        help="Required scopes (comma-separated). "
+        "Can also be set via MCP_OAUTH_SCOPES env var.",
+    )
+
     args = parser.parse_args()
+
+    # Validate OAuth arguments
+    if (args.oauth_issuer and not args.oauth_audience) or (
+        args.oauth_audience and not args.oauth_issuer
+    ):
+        parser.error("--oauth-issuer and --oauth-audience must be used together")
+
+    # Parse scopes
+    oauth_scopes: list[str] | None = None
+    if args.oauth_scopes:
+        oauth_scopes = [s.strip() for s in args.oauth_scopes.split(",") if s.strip()]
 
     # Windows-specific event loop policy
     if os.name == "nt":
         asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())  # type: ignore[attr-defined]
 
     try:
-        asyncio.run(main(transport=args.transport, host=args.host, port=args.port))
+        asyncio.run(
+            main(
+                transport=args.transport,
+                host=args.host,
+                port=args.port,
+                oauth_issuer=args.oauth_issuer,
+                oauth_audience=args.oauth_audience,
+                oauth_scopes=oauth_scopes,
+            )
+        )
     except KeyboardInterrupt:
         logger.info("Server stopped by user")
     except Exception as e:
