@@ -7,16 +7,15 @@
   ],
   "workspaceFolder": "/workspace",
   "containerEnv": {
-    "ANTHROPIC_API_KEY": "${localEnv:ANTHROPIC_API_KEY}",
     "AGENT_ID": "${localWorkspaceFolderBasename}",
     "PG_TEST_DATABASE_URL": "postgresql+asyncpg://devuser:devpassword@localhost:5432/devdb",
-    "MYSQL_TEST_DATABASE_URL": "mysql+aiomysql://testuser:testpass@localhost:3306/testdb",
+    "MYSQL_TEST_DATABASE_URL": "mysql+aiomysql://devuser:devpassword@localhost:3306/devdb",
     "PG_TUNNEL_DATABASE_URL": "postgresql+asyncpg://devuser:devpassword@postgres-tunneled:5432/devdb",
-    "MYSQL_TUNNEL_DATABASE_URL": "mysql+aiomysql://testuser:testpass@mysql-tunneled:3306/testdb",
+    "MYSQL_TUNNEL_DATABASE_URL": "mysql+aiomysql://devuser:devpassword@mysql-tunneled:3306/devdb",
     "SSH_HOST": "localhost",
     "SSH_PORT": "2222",
     "SSH_USERNAME": "tunneluser",
-    "SSH_PASSWORD": "tunnelpass"
+    "SSH_PASSWORD": "tunnelpassword"
   },
   "customizations": {
     "vscode": {
@@ -27,8 +26,6 @@
         "dbaeumer.vscode-eslint",
         "eamodio.gitlens",
         "esbenp.prettier-vscode",
-        "github.copilot",
-        "github.copilot-chat",
         "gruntfuggly.todo-tree",
         "mhutchie.git-graph",
         "ms-ossdata.vscode-pgsql",
@@ -106,7 +103,7 @@
       }
     }
   },
-  "postCreateCommand": "bash -c 'echo \"🚀 Dev container ready!\"; echo \"📊 PostgreSQL 17: localhost:5432 (user: devuser, db: devdb)\"; echo \"🔧 Tools installed: uv, mise, ruff, claude\"; echo \"💡 Run \\\"uv sync\\\" to install project dependencies\"'",
+  "postCreateCommand": "echo '\n========================================\n  Dev Container Ready!\n========================================\n  Base:      Ubuntu 24.04\n  User:      vscode\n  Shell:     zsh (autosuggestions, syntax-highlighting)\n  Network:   host mode\n----------------------------------------\n  Runtime Manager: mise\n    - Python 3.13\n    - Node 22\n  Package Managers: uv, npm\n----------------------------------------\n  Python Tools:  ruff, black, mypy, pytest\n  Node Tools:    typescript, tsx, prettier, eslint\n  DB Clients:    sqlite3, mysql-client, postgresql-client\n  AI:            Claude Code\n========================================\n'",
   "remoteUser": "vscode",
   "forwardPorts": [
     2222,

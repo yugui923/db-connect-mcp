@@ -1,3 +1,7 @@
+# Yuri devcontainer docker-compose.yml
+# Last updated: 2025-02-04
+
+# Used by VS Code Dev Containers extension
 # Development container with database sidecars for testing
 # 6 services total:
 #   devcontainer          - dev environment (host network)
@@ -54,27 +58,17 @@ services:
     container_name: devcontainer-mysql-direct
     restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: rootpass
-      MYSQL_DATABASE: testdb
-      MYSQL_USER: testuser
-      MYSQL_PASSWORD: testpass
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: devdb
+      MYSQL_USER: devuser
+      MYSQL_PASSWORD: devpassword
     ports:
       - "127.0.0.1:3306:3306"
     volumes:
       - ../tests/docker/mysql/init:/docker-entrypoint-initdb.d:ro
       - mysql-direct-data:/var/lib/mysql
     healthcheck:
-      test:
-        [
-          "CMD",
-          "mysqladmin",
-          "ping",
-          "-h",
-          "localhost",
-          "-u",
-          "root",
-          "-prootpass",
-        ]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-prootpass"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -107,27 +101,17 @@ services:
     container_name: devcontainer-mysql-tunneled
     restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: rootpass
-      MYSQL_DATABASE: testdb
-      MYSQL_USER: testuser
-      MYSQL_PASSWORD: testpass
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: devdb
+      MYSQL_USER: devuser
+      MYSQL_PASSWORD: devpassword
     networks:
       - tunnel-internal
     volumes:
       - ../tests/docker/mysql/init:/docker-entrypoint-initdb.d:ro
       - mysql-tunneled-data:/var/lib/mysql
     healthcheck:
-      test:
-        [
-          "CMD",
-          "mysqladmin",
-          "ping",
-          "-h",
-          "localhost",
-          "-u",
-          "root",
-          "-prootpass",
-        ]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-prootpass"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -146,7 +130,7 @@ services:
       - tunnel-internal
     environment:
       TUNNEL_USER: tunneluser
-      TUNNEL_PASSWORD: tunnelpass
+      TUNNEL_PASSWORD: tunnelpassword
     healthcheck:
       test: ["CMD", "nc", "-z", "localhost", "22"]
       interval: 5s
@@ -160,7 +144,7 @@ services:
 
 volumes:
   claude-code-data:
-    name: db-connect-mcp-dev-claude-data
+    name: db-connect-mcp-dev-claude-code-data
   postgres-direct-data:
     name: db-connect-mcp-dev-postgres-direct-data
   postgres-tunneled-data:
