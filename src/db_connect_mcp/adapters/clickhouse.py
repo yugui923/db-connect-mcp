@@ -10,7 +10,7 @@ from db_connect_mcp.adapters.base import BaseAdapter
 from db_connect_mcp.models.capabilities import DatabaseCapabilities
 from db_connect_mcp.models.database import SchemaInfo
 from db_connect_mcp.models.statistics import ColumnStats, Distribution
-from db_connect_mcp.models.table import TableInfo
+from db_connect_mcp.models.table import ColumnInfo, TableInfo
 
 
 class ClickHouseAdapter(BaseAdapter):
@@ -68,7 +68,7 @@ class ClickHouseAdapter(BaseAdapter):
         self, conn: AsyncConnection, table_info: TableInfo
     ) -> TableInfo:
         """Add ClickHouse-specific table metadata."""
-        # Get table engine and metadata
+        # Get table engine and metadata (including comment)
         query = text("""
             SELECT
                 engine,
@@ -77,7 +77,8 @@ class ClickHouseAdapter(BaseAdapter):
                 partition_key,
                 sorting_key,
                 primary_key,
-                sampling_key
+                sampling_key,
+                comment
             FROM system.tables
             WHERE database = currentDatabase()
               AND name = :table_name
@@ -89,6 +90,7 @@ class ClickHouseAdapter(BaseAdapter):
         if row:
             table_info.row_count = int(row[1]) if row[1] else None
             table_info.size_bytes = int(row[2]) if row[2] else None
+            table_info.comment = row[7] if row[7] else None
 
             # ClickHouse-specific metadata
             table_info.extra_info["engine"] = row[0]
@@ -126,6 +128,46 @@ class ClickHouseAdapter(BaseAdapter):
             pass
 
         return table_info
+
+    async def enrich_column_comments(
+        self,
+        conn: AsyncConnection,
+        table_name: str,
+        schema: str | None,
+        columns: list[ColumnInfo],
+    ) -> list[ColumnInfo]:
+        """Fetch column comments from ClickHouse system.columns."""
+        # Query column comments from system.columns
+        query = text("""
+            SELECT
+                name,
+                comment
+            FROM system.columns
+            WHERE database = currentDatabase()
+              AND table = :table_name
+              AND comment != ''
+        """)
+
+        try:
+            result = await conn.execute(query, {"table_name": table_name})
+            rows = result.fetchall()
+
+            # Build lookup dict
+            comments = {row[0]: row[1] for row in rows}
+
+            # Update columns with comments
+            for col in columns:
+                if col.name in comments:
+                    col.comment = comments[col.name]
+
+        except Exception as e:
+            import logging
+
+            logging.getLogger(__name__).warning(
+                f"Failed to fetch column comments for {table_name}: {e}"
+            )
+
+        return columns
 
     async def get_column_statistics(
         self,

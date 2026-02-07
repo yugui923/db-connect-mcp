@@ -389,6 +389,122 @@ class TestMCPToolCalls:
             await server.cleanup()
 
 
+class TestMCPDescribeTableComments:
+    """Test describe_table tool with database comments via MCP protocol."""
+
+    @pytest.mark.asyncio
+    async def test_describe_table_includes_table_comment(self, pg_config: DatabaseConfig):
+        """Test that describe_table returns table-level comments."""
+        server, client = await MCPProtocolHelper.create_test_server_and_client(
+            pg_config
+        )
+
+        try:
+            response = await client.call_tool(
+                "describe_table",
+                arguments={"table": "categories", "schema": "public"},
+            )
+            data = MCPProtocolHelper.check_and_parse_response(response)
+
+            # Should have a comment field
+            assert "comment" in data
+            assert data["comment"] is not None
+            assert "Product categories" in data["comment"]
+
+        finally:
+            await server.cleanup()
+
+    @pytest.mark.asyncio
+    async def test_describe_table_includes_column_comments(
+        self, pg_config: DatabaseConfig
+    ):
+        """Test that describe_table returns column-level comments."""
+        server, client = await MCPProtocolHelper.create_test_server_and_client(
+            pg_config
+        )
+
+        try:
+            response = await client.call_tool(
+                "describe_table",
+                arguments={"table": "categories", "schema": "public"},
+            )
+            data = MCPProtocolHelper.check_and_parse_response(response)
+
+            # Columns should have comment field
+            columns = data["columns"]
+            assert len(columns) > 0
+
+            # Find parent_category_id column
+            parent_col = next(
+                (c for c in columns if c["name"] == "parent_category_id"), None
+            )
+            assert parent_col is not None
+            assert "comment" in parent_col
+            assert parent_col["comment"] is not None
+            assert "Self-referencing" in parent_col["comment"]
+
+        finally:
+            await server.cleanup()
+
+    @pytest.mark.asyncio
+    async def test_describe_table_long_comment_via_protocol(
+        self, pg_config: DatabaseConfig
+    ):
+        """Test that very long comments are transmitted correctly via MCP."""
+        server, client = await MCPProtocolHelper.create_test_server_and_client(
+            pg_config
+        )
+
+        try:
+            response = await client.call_tool(
+                "describe_table",
+                arguments={"table": "data_type_examples", "schema": "public"},
+            )
+            data = MCPProtocolHelper.check_and_parse_response(response)
+
+            # Find money_col with long comment
+            columns = data["columns"]
+            money_col = next(
+                (c for c in columns if c["name"] == "money_col"), None
+            )
+
+            assert money_col is not None
+            assert money_col["comment"] is not None
+            # Long comment should be > 2000 characters
+            assert len(money_col["comment"]) > 2000
+
+        finally:
+            await server.cleanup()
+
+    @pytest.mark.asyncio
+    async def test_describe_table_comment_json_valid(self, pg_config: DatabaseConfig):
+        """Test that comments with special characters serialize correctly."""
+        server, client = await MCPProtocolHelper.create_test_server_and_client(
+            pg_config
+        )
+
+        try:
+            response = await client.call_tool(
+                "describe_table",
+                arguments={"table": "products", "schema": "public"},
+            )
+
+            # Should be able to parse as JSON (proves serialization worked)
+            data = MCPProtocolHelper.check_and_parse_response(response)
+
+            # Should have columns with comments
+            cols_with_comments = [c for c in data["columns"] if c.get("comment")]
+            assert len(cols_with_comments) > 0
+
+            # Verify JSON round-trip works
+            json_str = json.dumps(data)
+            reparsed = json.loads(json_str)
+            assert reparsed["name"] == data["name"]
+
+        finally:
+            await server.cleanup()
+
+
 class TestMCPErrorHandling:
     """Test error handling at the MCP protocol level."""
 

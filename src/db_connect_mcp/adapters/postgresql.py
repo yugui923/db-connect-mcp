@@ -10,7 +10,7 @@ from db_connect_mcp.adapters.base import BaseAdapter
 from db_connect_mcp.models.capabilities import DatabaseCapabilities
 from db_connect_mcp.models.database import SchemaInfo
 from db_connect_mcp.models.statistics import ColumnStats, Distribution
-from db_connect_mcp.models.table import TableInfo
+from db_connect_mcp.models.table import ColumnInfo, TableInfo
 
 
 class PostgresAdapter(BaseAdapter):
@@ -136,6 +136,52 @@ class PostgresAdapter(BaseAdapter):
             )
 
         return table_info
+
+    async def enrich_column_comments(
+        self,
+        conn: AsyncConnection,
+        table_name: str,
+        schema: str | None,
+        columns: list[ColumnInfo],
+    ) -> list[ColumnInfo]:
+        """Fetch column comments from PostgreSQL system catalogs."""
+        schema_name = schema or "public"
+        self._validate_identifier(schema_name, "schema")
+        self._validate_identifier(table_name, "table")
+        table_ident = f'"{schema_name}"."{table_name}"'
+
+        # Query column comments from pg_description
+        query = text(f"""
+            SELECT
+                a.attname as column_name,
+                col_description(a.attrelid, a.attnum) as comment
+            FROM pg_attribute a
+            WHERE a.attrelid = '{table_ident}'::regclass
+              AND a.attnum > 0
+              AND NOT a.attisdropped
+              AND col_description(a.attrelid, a.attnum) IS NOT NULL
+        """)
+
+        try:
+            result = await conn.execute(query)
+            rows = result.fetchall()
+
+            # Build lookup dict
+            comments = {row[0]: row[1] for row in rows}
+
+            # Update columns with comments
+            for col in columns:
+                if col.name in comments:
+                    col.comment = comments[col.name]
+
+        except Exception as e:
+            import logging
+
+            logging.getLogger(__name__).warning(
+                f"Failed to fetch column comments for {schema_name}.{table_name}: {e}"
+            )
+
+        return columns
 
     async def get_column_statistics(
         self,

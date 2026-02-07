@@ -255,6 +255,13 @@ class MetadataInspector:
             # Let adapter enrich with database-specific info
             table_info = await self.adapter.enrich_table_info(conn, table_info)
 
+            # Enrich column comments from database metadata
+            # This provides more reliable comment retrieval than SQLAlchemy reflection
+            if self.adapter.capabilities.comments:
+                table_info.columns = await self.adapter.enrich_column_comments(
+                    conn, table_name, schema, table_info.columns
+                )
+
             return table_info
 
     async def get_relationships(

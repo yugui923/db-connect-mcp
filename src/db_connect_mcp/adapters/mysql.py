@@ -12,7 +12,7 @@ import orjson
 from db_connect_mcp.models.capabilities import DatabaseCapabilities
 from db_connect_mcp.models.database import SchemaInfo
 from db_connect_mcp.models.statistics import ColumnStats, Distribution
-from db_connect_mcp.models.table import TableInfo
+from db_connect_mcp.models.table import ColumnInfo, TableInfo
 
 
 class MySQLAdapter(BaseAdapter):
@@ -93,6 +93,46 @@ class MySQLAdapter(BaseAdapter):
             table_info.extra_info["engine"] = row[0]
 
         return table_info
+
+    async def enrich_column_comments(
+        self,
+        conn: AsyncConnection,
+        table_name: str,
+        schema: str | None,
+        columns: list[ColumnInfo],
+    ) -> list[ColumnInfo]:
+        """Fetch column comments from MySQL information_schema."""
+        # Query column comments from information_schema
+        query = text("""
+            SELECT
+                COLUMN_NAME,
+                COLUMN_COMMENT
+            FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND TABLE_NAME = :table_name
+              AND COLUMN_COMMENT != ''
+        """)
+
+        try:
+            result = await conn.execute(query, {"table_name": table_name})
+            rows = result.fetchall()
+
+            # Build lookup dict
+            comments = {row[0]: row[1] for row in rows}
+
+            # Update columns with comments
+            for col in columns:
+                if col.name in comments:
+                    col.comment = comments[col.name]
+
+        except Exception as e:
+            import logging
+
+            logging.getLogger(__name__).warning(
+                f"Failed to fetch column comments for {table_name}: {e}"
+            )
+
+        return columns
 
     async def get_column_statistics(
         self,

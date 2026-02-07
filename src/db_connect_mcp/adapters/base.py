@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from db_connect_mcp.models.capabilities import DatabaseCapabilities
 from db_connect_mcp.models.database import SchemaInfo
 from db_connect_mcp.models.statistics import ColumnStats, Distribution
-from db_connect_mcp.models.table import TableInfo
+from db_connect_mcp.models.table import ColumnInfo, TableInfo
 
 if TYPE_CHECKING:
     from db_connect_mcp.core.connection import AsyncConnectionWrapper
@@ -58,6 +58,32 @@ class BaseAdapter(ABC):
             Enriched table information with sizes, row counts, etc.
         """
         ...
+
+    async def enrich_column_comments(
+        self,
+        conn: ConnectionType,
+        table_name: str,
+        schema: Optional[str],
+        columns: list[ColumnInfo],
+    ) -> list[ColumnInfo]:
+        """
+        Enrich column info with database-specific comments.
+
+        This method fetches column comments directly from the database's
+        metadata tables, providing more reliable comment retrieval than
+        relying solely on SQLAlchemy reflection.
+
+        Args:
+            conn: Database connection
+            table_name: Table name
+            schema: Schema name
+            columns: List of column info objects to enrich
+
+        Returns:
+            List of columns with comments populated
+        """
+        # Default implementation does nothing - override in subclasses
+        return columns
 
     @abstractmethod
     async def get_column_statistics(
