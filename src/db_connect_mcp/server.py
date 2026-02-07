@@ -73,6 +73,102 @@ def truncate_json_response(data: str, max_length: int) -> str:
     )
 
 
+def _truncate_comment(comment: str | None, max_length: int) -> str | None:
+    """Truncate a comment to max_length, adding ellipsis if truncated."""
+    if comment is None:
+        return None
+    if len(comment) <= max_length:
+        return comment
+    if max_length <= 3:
+        return "..."[:max_length] if max_length > 0 else None
+    return comment[: max_length - 3] + "..."
+
+
+def apply_dynamic_comment_limits(
+    table_data: dict[str, Any], max_response_size: int
+) -> dict[str, Any]:
+    """
+    Apply dynamic comment length limits based on table size and response budget.
+
+    This function distributes the available character budget for comments
+    proportionally among the table comment and column comments, ensuring no
+    single comment monopolizes the response size.
+
+    Strategy:
+    1. Calculate base response size without comments
+    2. Reserve budget for comments (remaining space with safety margin)
+    3. Allocate 10% of comment budget to table comment
+    4. Distribute remaining 90% equally among column comments
+    5. Truncate any comments exceeding their allocation
+
+    Args:
+        table_data: Dictionary from TableInfo.model_dump()
+        max_response_size: Maximum allowed response size in characters
+
+    Returns:
+        Modified table_data with truncated comments
+    """
+    # First, calculate the base size without any comments
+    table_copy = table_data.copy()
+    original_table_comment = table_copy.get("comment")
+    table_copy["comment"] = None
+
+    columns = table_copy.get("columns", [])
+    original_column_comments: dict[int, str | None] = {}
+    for i, col in enumerate(columns):
+        original_column_comments[i] = col.get("comment")
+        col["comment"] = None
+
+    # Calculate base size (table structure without comments)
+    base_json = json.dumps(table_copy, indent=2)
+    base_size = len(base_json)
+
+    # Calculate available budget for comments
+    # Leave 10% safety margin for JSON formatting overhead
+    safety_margin = int(max_response_size * 0.1)
+    available_for_comments = max(0, max_response_size - base_size - safety_margin)
+
+    # Count how many comments we have
+    num_columns = len(columns)
+    has_table_comment = original_table_comment is not None
+
+    if available_for_comments <= 0 or (num_columns == 0 and not has_table_comment):
+        # No budget for comments, return with all comments removed
+        return table_copy
+
+    # Allocate budget:
+    # - Table comment gets 10% of budget (max 2000 chars)
+    # - Column comments share the remaining 90%
+    table_comment_budget = 0
+    column_comment_budget_each = 0
+
+    if has_table_comment and num_columns > 0:
+        # Both table and column comments
+        table_comment_budget = min(int(available_for_comments * 0.1), 2000)
+        remaining = available_for_comments - table_comment_budget
+        column_comment_budget_each = remaining // num_columns
+    elif has_table_comment:
+        # Only table comment
+        table_comment_budget = min(available_for_comments, 5000)
+    elif num_columns > 0:
+        # Only column comments
+        column_comment_budget_each = available_for_comments // num_columns
+
+    # Apply truncation to table comment
+    if original_table_comment is not None:
+        table_copy["comment"] = _truncate_comment(
+            original_table_comment, table_comment_budget
+        )
+
+    # Apply truncation to column comments
+    for i, col in enumerate(columns):
+        original_comment = original_column_comments.get(i)
+        if original_comment is not None:
+            col["comment"] = _truncate_comment(original_comment, column_comment_budget_each)
+
+    return table_copy
+
+
 class DatabaseMCPServer:
     """MCP server for multi-database operations."""
 
@@ -369,7 +465,11 @@ class DatabaseMCPServer:
 
         table_info = await self.inspector.describe_table(table, schema)
 
-        response = json.dumps(table_info.model_dump(mode="json"), indent=2)
+        # Apply dynamic comment truncation based on table size and response limit
+        table_data = table_info.model_dump(mode="json")
+        table_data = apply_dynamic_comment_limits(table_data, MAX_RESPONSE_DESCRIBE_TABLE)
+
+        response = json.dumps(table_data, indent=2)
         return [
             TextContent(
                 type="text",
