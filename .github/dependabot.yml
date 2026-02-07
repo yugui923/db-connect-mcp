@@ -1,0 +1,38 @@
+version: 2
+updates:
+  # Python dependencies via pip/uv
+  - package-ecosystem: pip
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 10
+    groups:
+      development:
+        patterns:
+          - "pytest*"
+          - "ruff"
+          - "pyright"
+          - "pytest-*"
+        update-types:
+          - minor
+          - patch
+      production:
+        patterns:
+          - "*"
+        exclude-patterns:
+          - "pytest*"
+          - "ruff"
+          - "pyright"
+          - "pytest-*"
+        update-types:
+          - minor
+          - patch
+
+  # GitHub Actions
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 10

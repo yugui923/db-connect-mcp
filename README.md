@@ -2,6 +2,12 @@
 
 <!-- mcp-name: io.github.yugui923/db-connect-mcp -->
 
+[![CI](https://github.com/yugui923/db-connect-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/yugui923/db-connect-mcp/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/yugui923/db-connect-mcp/actions/workflows/codeql.yml/badge.svg)](https://github.com/yugui923/db-connect-mcp/actions/workflows/codeql.yml)
+[![codecov](https://codecov.io/gh/yugui923/db-connect-mcp/graph/badge.svg)](https://codecov.io/gh/yugui923/db-connect-mcp)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/yugui923/db-connect-mcp/badge)](https://scorecard.dev/viewer/?uri=github.com/yugui923/db-connect-mcp)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 A read-only MCP (Model Context Protocol) server for exploratory data analysis across multiple database systems. This server provides safe, read-only access to PostgreSQL, MySQL, and ClickHouse databases with comprehensive analysis capabilities.
 
 ## Quick Start

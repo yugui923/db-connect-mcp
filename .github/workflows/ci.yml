@@ -1,0 +1,95 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: testuser
+          POSTGRES_PASSWORD: testpass
+          POSTGRES_DB: testdb
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Initialize test database
+        env:
+          PGPASSWORD: testpass
+        run: |
+          psql -h localhost -U testuser -d testdb -f tests/docker/postgres/init/01-create-schema.sql
+          psql -h localhost -U testuser -d testdb -f tests/docker/postgres/init/02-seed-data.sql
+          psql -h localhost -U testuser -d testdb -f tests/docker/postgres/init/03-create-views.sql
+
+      - name: Run linting
+        run: uv run ruff check .
+
+      - name: Run formatting check
+        run: uv run ruff format --check .
+
+      - name: Run type checking
+        run: npx pyright
+
+      - name: Run tests with coverage
+        env:
+          PG_TEST_DATABASE_URL: postgresql+asyncpg://testuser:testpass@localhost:5432/testdb
+        run: uv run pytest -n 6 --cov=src/db_connect_mcp --cov-report=xml --cov-report=term
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage.xml
+          fail_ci_if_error: false
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Build package
+        run: uv build
+
+      - name: Verify build artifacts
+        run: |
+          ls -la dist/
+          test -f dist/*.whl
+          test -f dist/*.tar.gz
