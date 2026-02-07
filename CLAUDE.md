@@ -257,6 +257,47 @@ SSH_USERNAME=tunneluser
 SSH_PASSWORD=tunnelpass
 ```
 
+## Version Management
+
+**IMPORTANT:** Before bumping the version and tagging a new release, ensure all version strings are aligned across the project.
+
+### Files Containing Version Information
+
+| File | Location |
+| ---- | -------- |
+| `pyproject.toml` | `version = "X.Y.Z"` (line ~7) |
+| `src/db_connect_mcp/__init__.py` | `__version__ = "X.Y.Z"` |
+| `uv.lock` | Auto-generated (run `uv sync` after updating pyproject.toml) |
+
+### Version Bump Process
+
+1. **Verify current versions are aligned** before making changes:
+   ```bash
+   grep -E "^version|__version__" pyproject.toml src/db_connect_mcp/__init__.py
+   ```
+
+2. **Update version in all files:**
+   - Edit `pyproject.toml` with the new version
+   - Edit `src/db_connect_mcp/__init__.py` with the matching version
+
+3. **Regenerate uv.lock:**
+   ```bash
+   uv sync
+   ```
+
+4. **Verify all versions match** before committing:
+   ```bash
+   grep -E "^version|__version__" pyproject.toml src/db_connect_mcp/__init__.py
+   ```
+
+5. **Commit, tag, and push:**
+   ```bash
+   git add pyproject.toml src/db_connect_mcp/__init__.py uv.lock
+   git commit -m "chore: bump version to X.Y.Z"
+   git tag vX.Y.Z
+   git push && git push --tags
+   ```
+
 ## Additional Documentation
 
 - **[Development Guide](docs/guides/DEVELOPMENT.md)** - Development environment setup, testing, and contribution guidelines
