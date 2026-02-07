@@ -93,7 +93,11 @@ class SSHTunnelConfig(BaseModel):
     @model_validator(mode="after")
     def validate_authentication(self) -> "SSHTunnelConfig":
         """Validate that at least one authentication method is provided."""
-        if not self.ssh_password and not self.ssh_private_key_path and not self.ssh_private_key:
+        if (
+            not self.ssh_password
+            and not self.ssh_private_key_path
+            and not self.ssh_private_key
+        ):
             raise ValueError(
                 "SSH authentication requires either ssh_password, ssh_private_key_path, or ssh_private_key"
             )

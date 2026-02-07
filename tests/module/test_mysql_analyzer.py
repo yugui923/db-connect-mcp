@@ -27,7 +27,9 @@ class TestMySQLDirectAnalyzerNumeric:
         assert stats.distinct_count > 0
 
     @pytest.mark.asyncio
-    async def test_analyze_numeric_serializable(self, mysql_analyzer: StatisticsAnalyzer):
+    async def test_analyze_numeric_serializable(
+        self, mysql_analyzer: StatisticsAnalyzer
+    ):
         stats = await mysql_analyzer.analyze_column("products", "price", "devdb")
         assert_json_serializable(stats.model_dump())
 
@@ -58,7 +60,9 @@ class TestMySQLDirectAnalyzerEdgeCases:
 
     @pytest.mark.asyncio
     async def test_analyze_nonexistent_column(self, mysql_analyzer: StatisticsAnalyzer):
-        stats = await mysql_analyzer.analyze_column("products", "nonexistent_col", "devdb")
+        stats = await mysql_analyzer.analyze_column(
+            "products", "nonexistent_col", "devdb"
+        )
         assert stats.total_rows == 0 or stats.warning is not None
 
 
@@ -71,14 +75,18 @@ class TestMySQLTunneledAnalyzerNumeric:
     pytestmark = [pytest.mark.mysql, pytest.mark.ssh_tunnel]
 
     @pytest.mark.asyncio
-    async def test_analyze_numeric_column(self, mysql_tunnel_analyzer: StatisticsAnalyzer):
+    async def test_analyze_numeric_column(
+        self, mysql_tunnel_analyzer: StatisticsAnalyzer
+    ):
         stats = await mysql_tunnel_analyzer.analyze_column("products", "price", "devdb")
         assert stats is not None
         assert stats.column == "price"
         assert stats.total_rows > 0
 
     @pytest.mark.asyncio
-    async def test_analyze_numeric_serializable(self, mysql_tunnel_analyzer: StatisticsAnalyzer):
+    async def test_analyze_numeric_serializable(
+        self, mysql_tunnel_analyzer: StatisticsAnalyzer
+    ):
         stats = await mysql_tunnel_analyzer.analyze_column("products", "price", "devdb")
         assert_json_serializable(stats.model_dump())
 

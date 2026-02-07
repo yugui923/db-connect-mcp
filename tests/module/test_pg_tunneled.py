@@ -41,7 +41,9 @@ class TestPGTunneledInspectorTables:
         assert "orders" in table_names
 
     @pytest.mark.asyncio
-    async def test_describe_table_products(self, pg_tunnel_inspector: MetadataInspector):
+    async def test_describe_table_products(
+        self, pg_tunnel_inspector: MetadataInspector
+    ):
         table = await pg_tunnel_inspector.describe_table("products", "public")
         assert table is not None
         assert table.name == "products"
@@ -51,7 +53,9 @@ class TestPGTunneledInspectorTables:
         assert "category_id" in col_names
 
     @pytest.mark.asyncio
-    async def test_describe_table_has_indexes(self, pg_tunnel_inspector: MetadataInspector):
+    async def test_describe_table_has_indexes(
+        self, pg_tunnel_inspector: MetadataInspector
+    ):
         table = await pg_tunnel_inspector.describe_table("products", "public")
         assert table is not None
         assert table.indexes is not None
@@ -63,7 +67,9 @@ class TestPGTunneledInspectorRelationships:
 
     @pytest.mark.asyncio
     async def test_get_relationships(self, pg_tunnel_inspector: MetadataInspector):
-        relationships = await pg_tunnel_inspector.get_relationships("products", "public")
+        relationships = await pg_tunnel_inspector.get_relationships(
+            "products", "public"
+        )
         assert len(relationships) > 0
         assert relationships[0].from_table == "products"
         assert "category_id" in relationships[0].from_columns
@@ -77,7 +83,9 @@ class TestPGTunneledExecutorBasic:
 
     @pytest.mark.asyncio
     async def test_execute_simple_query(self, pg_tunnel_executor: QueryExecutor):
-        result = await pg_tunnel_executor.execute_query("SELECT 1 as test_col", limit=10)
+        result = await pg_tunnel_executor.execute_query(
+            "SELECT 1 as test_col", limit=10
+        )
         assert result.row_count == 1
         assert result.rows[0]["test_col"] == 1
 
@@ -172,7 +180,9 @@ class TestPGTunneledAnalyzer:
         assert stats.total_rows > 0
 
     @pytest.mark.asyncio
-    async def test_analyze_numeric_serializable(self, pg_tunnel_analyzer: StatisticsAnalyzer):
+    async def test_analyze_numeric_serializable(
+        self, pg_tunnel_analyzer: StatisticsAnalyzer
+    ):
         stats = await pg_tunnel_analyzer.analyze_column("products", "price", "public")
         assert_json_serializable(stats.model_dump())
 

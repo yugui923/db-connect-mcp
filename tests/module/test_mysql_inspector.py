@@ -110,7 +110,9 @@ class TestMySQLTunneledInspectorTables:
         assert "users" in table_names
 
     @pytest.mark.asyncio
-    async def test_describe_table_products(self, mysql_tunnel_inspector: MetadataInspector):
+    async def test_describe_table_products(
+        self, mysql_tunnel_inspector: MetadataInspector
+    ):
         table = await mysql_tunnel_inspector.describe_table("products", "devdb")
         assert table is not None
         col_names = [c.name for c in table.columns]
@@ -125,6 +127,8 @@ class TestMySQLTunneledInspectorRelationships:
 
     @pytest.mark.asyncio
     async def test_get_relationships(self, mysql_tunnel_inspector: MetadataInspector):
-        relationships = await mysql_tunnel_inspector.get_relationships("products", "devdb")
+        relationships = await mysql_tunnel_inspector.get_relationships(
+            "products", "devdb"
+        )
         assert len(relationships) > 0
         assert relationships[0].from_table == "products"

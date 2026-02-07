@@ -31,7 +31,9 @@ class TestMySQLDirectExecutorBasic:
 
     @pytest.mark.asyncio
     async def test_query_result_serializable(self, mysql_executor: QueryExecutor):
-        result = await mysql_executor.execute_query("SELECT * FROM products LIMIT 5", limit=5)
+        result = await mysql_executor.execute_query(
+            "SELECT * FROM products LIMIT 5", limit=5
+        )
         assert_json_serializable(result.model_dump())
 
     @pytest.mark.asyncio
@@ -79,12 +81,16 @@ class TestMySQLDirectExecutorReadOnly:
     @pytest.mark.asyncio
     async def test_reject_delete(self, mysql_executor: QueryExecutor):
         with pytest.raises(ValueError):
-            await mysql_executor.execute_query("DELETE FROM products WHERE product_id = 1", limit=10)
+            await mysql_executor.execute_query(
+                "DELETE FROM products WHERE product_id = 1", limit=10
+            )
 
     @pytest.mark.asyncio
     async def test_reject_update(self, mysql_executor: QueryExecutor):
         with pytest.raises(ValueError):
-            await mysql_executor.execute_query("UPDATE products SET price = 0", limit=10)
+            await mysql_executor.execute_query(
+                "UPDATE products SET price = 0", limit=10
+            )
 
     @pytest.mark.asyncio
     async def test_reject_insert(self, mysql_executor: QueryExecutor):
@@ -104,18 +110,26 @@ class TestMySQLTunneledExecutorBasic:
 
     @pytest.mark.asyncio
     async def test_execute_simple_query(self, mysql_tunnel_executor: QueryExecutor):
-        result = await mysql_tunnel_executor.execute_query("SELECT 1 as test_col", limit=10)
+        result = await mysql_tunnel_executor.execute_query(
+            "SELECT 1 as test_col", limit=10
+        )
         assert result.row_count == 1
         assert result.rows[0]["test_col"] == 1
 
     @pytest.mark.asyncio
     async def test_execute_query_with_limit(self, mysql_tunnel_executor: QueryExecutor):
-        result = await mysql_tunnel_executor.execute_query("SELECT * FROM products", limit=2)
+        result = await mysql_tunnel_executor.execute_query(
+            "SELECT * FROM products", limit=2
+        )
         assert result.row_count <= 2
 
     @pytest.mark.asyncio
-    async def test_query_result_serializable(self, mysql_tunnel_executor: QueryExecutor):
-        result = await mysql_tunnel_executor.execute_query("SELECT * FROM products LIMIT 5", limit=5)
+    async def test_query_result_serializable(
+        self, mysql_tunnel_executor: QueryExecutor
+    ):
+        result = await mysql_tunnel_executor.execute_query(
+            "SELECT * FROM products LIMIT 5", limit=5
+        )
         assert_json_serializable(result.model_dump())
 
     @pytest.mark.asyncio

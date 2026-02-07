@@ -169,7 +169,7 @@ class MCPProtocolHelper:
             response: CallToolResult from client.call_tool()
 
         Returns:
-            Parsed JSON data as dict
+            Parsed JSON data as dict (unwrapped from truncation wrapper if present)
 
         Raises:
             pytest.skip: If response contains a database connection error
@@ -192,7 +192,13 @@ class MCPProtocolHelper:
             raise AssertionError(f"Tool call returned error: {error_text}")
 
         # Parse and return successful response
-        return MCPProtocolHelper.parse_text_content(response.content)
+        data = MCPProtocolHelper.parse_text_content(response.content)
+
+        # Unwrap truncation wrapper if present
+        # When truncation occurs, response is {"data": {...}, "_truncation_info": {...}}
+        if "_truncation_info" in data and "data" in data:
+            return data["data"]
+        return data
 
 
 class TestMCPServerLifecycle:
@@ -393,7 +399,9 @@ class TestMCPDescribeTableComments:
     """Test describe_table tool with database comments via MCP protocol."""
 
     @pytest.mark.asyncio
-    async def test_describe_table_includes_table_comment(self, pg_config: DatabaseConfig):
+    async def test_describe_table_includes_table_comment(
+        self, pg_config: DatabaseConfig
+    ):
         """Test that describe_table returns table-level comments."""
         server, client = await MCPProtocolHelper.create_test_server_and_client(
             pg_config
@@ -450,7 +458,7 @@ class TestMCPDescribeTableComments:
     async def test_describe_table_long_comment_via_protocol(
         self, pg_config: DatabaseConfig
     ):
-        """Test that very long comments are transmitted correctly via MCP."""
+        """Test that very long comments are handled correctly via MCP with truncation."""
         server, client = await MCPProtocolHelper.create_test_server_and_client(
             pg_config
         )
@@ -460,18 +468,30 @@ class TestMCPDescribeTableComments:
                 "describe_table",
                 arguments={"table": "data_type_examples", "schema": "public"},
             )
-            data = MCPProtocolHelper.check_and_parse_response(response)
+
+            # Get the raw response to check for truncation info
+            raw_data = MCPProtocolHelper.parse_text_content(response.content)
+
+            # Check that truncation info is present (long comments get truncated)
+            assert "_truncation_info" in raw_data, "Expected truncation to occur"
+            assert raw_data["_truncation_info"]["truncated"] is True
+            assert (
+                "columns[].comment" in raw_data["_truncation_info"]["truncated_fields"]
+            )
+
+            # Get unwrapped data
+            data = raw_data["data"] if "data" in raw_data else raw_data
 
             # Find money_col with long comment
             columns = data["columns"]
-            money_col = next(
-                (c for c in columns if c["name"] == "money_col"), None
-            )
+            money_col = next((c for c in columns if c["name"] == "money_col"), None)
 
             assert money_col is not None
             assert money_col["comment"] is not None
-            # Long comment should be > 2000 characters
-            assert len(money_col["comment"]) > 2000
+            # Comment should be present but truncated (ends with ...)
+            assert money_col["comment"].endswith("...")
+            # Truncated comment should still have substantial content
+            assert len(money_col["comment"]) > 500
 
         finally:
             await server.cleanup()

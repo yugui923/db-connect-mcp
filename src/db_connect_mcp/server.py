@@ -73,20 +73,247 @@ def truncate_json_response(data: str, max_length: int) -> str:
     )
 
 
+def _truncate_string(value: str | None, max_length: int) -> tuple[str | None, bool]:
+    """
+    Truncate a string to max_length, adding ellipsis if truncated.
+
+    Returns:
+        Tuple of (truncated_value, was_truncated)
+    """
+    if value is None:
+        return None, False
+    if len(value) <= max_length:
+        return value, False
+    if max_length <= 3:
+        truncated = "..."[:max_length] if max_length > 0 else None
+        return truncated, True
+    return value[: max_length - 3] + "...", True
+
+
 def _truncate_comment(comment: str | None, max_length: int) -> str | None:
     """Truncate a comment to max_length, adding ellipsis if truncated."""
-    if comment is None:
-        return None
-    if len(comment) <= max_length:
-        return comment
-    if max_length <= 3:
-        return "..."[:max_length] if max_length > 0 else None
-    return comment[: max_length - 3] + "..."
+    result, _ = _truncate_string(comment, max_length)
+    return result
+
+
+def _truncate_list(items: list[Any], max_items: int) -> tuple[list[Any], bool]:
+    """
+    Truncate a list to max_items.
+
+    Returns:
+        Tuple of (truncated_list, was_truncated)
+    """
+    if len(items) <= max_items:
+        return items, False
+    return items[:max_items], True
+
+
+# Constants for truncation limits
+MAX_STRING_VALUE_LENGTH = 500  # Max length for individual string values in data
+MAX_COMMON_VALUES = 20  # Max number of most_common_values entries
+MAX_PLAN_LENGTH = 10000  # Max length for explain plan text
+MAX_SCHEMA_COMMENT_LENGTH = 1000  # Max length for schema comments
+MAX_TABLE_COMMENT_LENGTH = 500  # Max length for table comments in list_tables
+
+
+def apply_truncation_to_list_schemas(
+    schemas_data: list[dict[str, Any]], max_response_size: int
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """
+    Apply truncation to list_schemas response.
+
+    Returns:
+        Tuple of (truncated_data, list_of_truncated_field_names)
+    """
+    truncated_fields: list[str] = []
+
+    for i, schema in enumerate(schemas_data):
+        if schema.get("comment"):
+            truncated, was_truncated = _truncate_string(
+                schema["comment"], MAX_SCHEMA_COMMENT_LENGTH
+            )
+            if was_truncated:
+                schema["comment"] = truncated
+                field_name = f"schemas[{i}].comment"
+                if field_name not in truncated_fields:
+                    truncated_fields.append(field_name)
+
+    return schemas_data, truncated_fields
+
+
+def apply_truncation_to_list_tables(
+    tables_data: list[dict[str, Any]], max_response_size: int
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """
+    Apply truncation to list_tables response.
+
+    Returns:
+        Tuple of (truncated_data, list_of_truncated_field_names)
+    """
+    truncated_fields: list[str] = []
+
+    for i, table in enumerate(tables_data):
+        if table.get("comment"):
+            truncated, was_truncated = _truncate_string(
+                table["comment"], MAX_TABLE_COMMENT_LENGTH
+            )
+            if was_truncated:
+                table["comment"] = truncated
+                truncated_fields.append(f"tables[{i}].comment")
+
+    return tables_data, truncated_fields
+
+
+def apply_truncation_to_sample_data(
+    result_data: dict[str, Any], max_response_size: int
+) -> tuple[dict[str, Any], list[str]]:
+    """
+    Apply truncation to sample_data response.
+
+    Truncates long string values in rows to prevent one cell from dominating.
+
+    Returns:
+        Tuple of (truncated_data, list_of_truncated_field_names)
+    """
+    truncated_fields: list[str] = []
+    rows = result_data.get("rows", [])
+
+    for row_idx, row in enumerate(rows):
+        for col_name, value in row.items():
+            if isinstance(value, str) and len(value) > MAX_STRING_VALUE_LENGTH:
+                truncated, _ = _truncate_string(value, MAX_STRING_VALUE_LENGTH)
+                row[col_name] = truncated
+                field_id = f"rows[].{col_name}"
+                if field_id not in truncated_fields:
+                    truncated_fields.append(field_id)
+
+    return result_data, truncated_fields
+
+
+def apply_truncation_to_analyze_column(
+    stats_data: dict[str, Any], max_response_size: int
+) -> tuple[dict[str, Any], list[str]]:
+    """
+    Apply truncation to analyze_column response.
+
+    Truncates most_common_values list and individual value strings.
+
+    Returns:
+        Tuple of (truncated_data, list_of_truncated_field_names)
+    """
+    truncated_fields: list[str] = []
+
+    # Truncate most_common_values list
+    most_common = stats_data.get("most_common_values", [])
+    if most_common:
+        truncated_list, was_truncated = _truncate_list(most_common, MAX_COMMON_VALUES)
+        if was_truncated:
+            stats_data["most_common_values"] = truncated_list
+            truncated_fields.append("most_common_values")
+
+        # Truncate long string values within most_common_values
+        for item in stats_data.get("most_common_values", []):
+            if "value" in item and isinstance(item["value"], str):
+                truncated, was_truncated = _truncate_string(
+                    item["value"], MAX_STRING_VALUE_LENGTH
+                )
+                if was_truncated:
+                    item["value"] = truncated
+                    if "most_common_values[].value" not in truncated_fields:
+                        truncated_fields.append("most_common_values[].value")
+
+    # Also truncate min/max if they're long strings
+    for field in ["min_value", "max_value", "median_value"]:
+        if field in stats_data and isinstance(stats_data[field], str):
+            truncated, was_truncated = _truncate_string(
+                stats_data[field], MAX_STRING_VALUE_LENGTH
+            )
+            if was_truncated:
+                stats_data[field] = truncated
+                truncated_fields.append(field)
+
+    return stats_data, truncated_fields
+
+
+def apply_truncation_to_explain_query(
+    plan_data: dict[str, Any], max_response_size: int
+) -> tuple[dict[str, Any], list[str]]:
+    """
+    Apply truncation to explain_query response.
+
+    Truncates long plan text while preserving essential information.
+
+    Returns:
+        Tuple of (truncated_data, list_of_truncated_field_names)
+    """
+    truncated_fields: list[str] = []
+
+    # Truncate plan text if very long
+    if plan_data.get("plan"):
+        truncated, was_truncated = _truncate_string(plan_data["plan"], MAX_PLAN_LENGTH)
+        if was_truncated:
+            plan_data["plan"] = truncated
+            truncated_fields.append("plan")
+
+    # If plan_json is huge, remove it and keep only text plan
+    if plan_data.get("plan_json"):
+        plan_json_str = json.dumps(plan_data["plan_json"])
+        if len(plan_json_str) > MAX_PLAN_LENGTH:
+            plan_data["plan_json"] = None
+            plan_data["plan_json_note"] = "JSON plan too large, see 'plan' text instead"
+            truncated_fields.append("plan_json")
+
+    return plan_data, truncated_fields
+
+
+def wrap_response_with_truncation_info(
+    data: dict[str, Any] | list[dict[str, Any]], truncated_fields: list[str]
+) -> dict[str, Any]:
+    """
+    Wrap response data with truncation metadata.
+
+    If any fields were truncated, adds _truncation_info to the response.
+
+    Args:
+        data: Original response data (dict or list)
+        truncated_fields: List of field names that were truncated
+
+    Returns:
+        Response wrapped with truncation metadata if needed
+    """
+    if not truncated_fields:
+        # No truncation occurred, return as-is
+        if isinstance(data, list):
+            return {"data": data}
+        return data
+
+    return {
+        "data": data if isinstance(data, list) else data,
+        "_truncation_info": {
+            "truncated": True,
+            "truncated_fields": truncated_fields,
+            "message": "Some fields were truncated to fit response size limits. "
+            "Use more specific queries or tools for full content.",
+        },
+    }
+
+
+def wrap_list_response_with_truncation_info(
+    data: list[dict[str, Any]], truncated_fields: list[str]
+) -> list[dict[str, Any]] | dict[str, Any]:
+    """
+    Wrap list response with truncation info if needed.
+
+    For list responses, we only wrap if truncation occurred.
+    """
+    if not truncated_fields:
+        return data
+    return wrap_response_with_truncation_info(data, truncated_fields)
 
 
 def apply_dynamic_comment_limits(
     table_data: dict[str, Any], max_response_size: int
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], list[str]]:
     """
     Apply dynamic comment length limits based on table size and response budget.
 
@@ -106,8 +333,10 @@ def apply_dynamic_comment_limits(
         max_response_size: Maximum allowed response size in characters
 
     Returns:
-        Modified table_data with truncated comments
+        Tuple of (modified_table_data, list_of_truncated_fields)
     """
+    truncated_fields: list[str] = []
+
     # First, calculate the base size without any comments
     table_copy = table_data.copy()
     original_table_comment = table_copy.get("comment")
@@ -134,7 +363,11 @@ def apply_dynamic_comment_limits(
 
     if available_for_comments <= 0 or (num_columns == 0 and not has_table_comment):
         # No budget for comments, return with all comments removed
-        return table_copy
+        if has_table_comment:
+            truncated_fields.append("comment")
+        if any(c is not None for c in original_column_comments.values()):
+            truncated_fields.append("columns[].comment")
+        return table_copy, truncated_fields
 
     # Allocate budget:
     # - Table comment gets 10% of budget (max 2000 chars)
@@ -156,17 +389,29 @@ def apply_dynamic_comment_limits(
 
     # Apply truncation to table comment
     if original_table_comment is not None:
-        table_copy["comment"] = _truncate_comment(
+        truncated, was_truncated = _truncate_string(
             original_table_comment, table_comment_budget
         )
+        table_copy["comment"] = truncated
+        if was_truncated:
+            truncated_fields.append("comment")
 
     # Apply truncation to column comments
+    column_was_truncated = False
     for i, col in enumerate(columns):
         original_comment = original_column_comments.get(i)
         if original_comment is not None:
-            col["comment"] = _truncate_comment(original_comment, column_comment_budget_each)
+            truncated, was_truncated = _truncate_string(
+                original_comment, column_comment_budget_each
+            )
+            col["comment"] = truncated
+            if was_truncated:
+                column_was_truncated = True
 
-    return table_copy
+    if column_was_truncated:
+        truncated_fields.append("columns[].comment")
+
+    return table_copy, truncated_fields
 
 
 class DatabaseMCPServer:
@@ -426,7 +671,15 @@ class DatabaseMCPServer:
         schemas = await self.inspector.get_schemas()
         schemas_data = [s.model_dump(mode="json") for s in schemas]
 
-        response = json.dumps(schemas_data, indent=2)
+        # Apply truncation to schema comments
+        schemas_data, truncated_fields = apply_truncation_to_list_schemas(
+            schemas_data, MAX_RESPONSE_LIST_SCHEMAS
+        )
+
+        # Wrap with truncation info if any fields were truncated
+        result = wrap_list_response_with_truncation_info(schemas_data, truncated_fields)
+
+        response = json.dumps(result, indent=2)
         return [
             TextContent(
                 type="text",
@@ -445,7 +698,15 @@ class DatabaseMCPServer:
         tables = await self.inspector.get_tables(schema, include_views)
         tables_data = [t.model_dump(mode="json") for t in tables]
 
-        response = json.dumps(tables_data, indent=2)
+        # Apply truncation to table comments
+        tables_data, truncated_fields = apply_truncation_to_list_tables(
+            tables_data, MAX_RESPONSE_LIST_TABLES
+        )
+
+        # Wrap with truncation info if any fields were truncated
+        result = wrap_list_response_with_truncation_info(tables_data, truncated_fields)
+
+        response = json.dumps(result, indent=2)
         return [
             TextContent(
                 type="text",
@@ -467,9 +728,14 @@ class DatabaseMCPServer:
 
         # Apply dynamic comment truncation based on table size and response limit
         table_data = table_info.model_dump(mode="json")
-        table_data = apply_dynamic_comment_limits(table_data, MAX_RESPONSE_DESCRIBE_TABLE)
+        table_data, truncated_fields = apply_dynamic_comment_limits(
+            table_data, MAX_RESPONSE_DESCRIBE_TABLE
+        )
 
-        response = json.dumps(table_data, indent=2)
+        # Wrap with truncation info if any fields were truncated
+        result = wrap_response_with_truncation_info(table_data, truncated_fields)
+
+        response = json.dumps(result, indent=2)
         return [
             TextContent(
                 type="text",
@@ -507,8 +773,17 @@ class DatabaseMCPServer:
         limit = arguments.get("limit", 100)
 
         result = await self.executor.sample_data(table, schema, limit)
+        result_data = result.model_dump(mode="json")
 
-        response = json.dumps(result.model_dump(mode="json"), indent=2)
+        # Apply truncation to long string values in rows
+        result_data, truncated_fields = apply_truncation_to_sample_data(
+            result_data, MAX_RESPONSE_SAMPLE_DATA
+        )
+
+        # Wrap with truncation info if any fields were truncated
+        final_result = wrap_response_with_truncation_info(result_data, truncated_fields)
+
+        response = json.dumps(final_result, indent=2)
         return [
             TextContent(
                 type="text",
@@ -549,8 +824,17 @@ class DatabaseMCPServer:
         schema = arguments.get("schema")
 
         stats = await self.analyzer.analyze_column(table, column, schema)
+        stats_data = stats.model_dump(mode="json")
 
-        response = json.dumps(stats.model_dump(mode="json"), indent=2)
+        # Apply truncation to most_common_values and long string values
+        stats_data, truncated_fields = apply_truncation_to_analyze_column(
+            stats_data, MAX_RESPONSE_ANALYZE_COLUMN
+        )
+
+        # Wrap with truncation info if any fields were truncated
+        result = wrap_response_with_truncation_info(stats_data, truncated_fields)
+
+        response = json.dumps(result, indent=2)
         return [
             TextContent(
                 type="text",
@@ -569,8 +853,17 @@ class DatabaseMCPServer:
         analyze = arguments.get("analyze", False)
 
         plan = await self.executor.explain_query(query, analyze)
+        plan_data = plan.model_dump(mode="json")
 
-        response = json.dumps(plan.model_dump(mode="json"), indent=2)
+        # Apply truncation to long plan text
+        plan_data, truncated_fields = apply_truncation_to_explain_query(
+            plan_data, MAX_RESPONSE_EXPLAIN_QUERY
+        )
+
+        # Wrap with truncation info if any fields were truncated
+        result = wrap_response_with_truncation_info(plan_data, truncated_fields)
+
+        response = json.dumps(result, indent=2)
         return [
             TextContent(
                 type="text",
@@ -695,7 +988,10 @@ class _OAuthMCPASGIApp:
             # Check for Bearer token
             if not auth_value.startswith("Bearer "):
                 response = JSONResponse(
-                    {"error": "unauthorized", "error_description": "Missing bearer token"},
+                    {
+                        "error": "unauthorized",
+                        "error_description": "Missing bearer token",
+                    },
                     status_code=401,
                     headers={"WWW-Authenticate": 'Bearer realm="mcp"'},
                 )
@@ -708,16 +1004,23 @@ class _OAuthMCPASGIApp:
             access_token = await self.token_verifier.verify_token(token)
             if access_token is None:
                 response = JSONResponse(
-                    {"error": "invalid_token", "error_description": "Token validation failed"},
+                    {
+                        "error": "invalid_token",
+                        "error_description": "Token validation failed",
+                    },
                     status_code=401,
-                    headers={"WWW-Authenticate": 'Bearer realm="mcp", error="invalid_token"'},
+                    headers={
+                        "WWW-Authenticate": 'Bearer realm="mcp", error="invalid_token"'
+                    },
                 )
                 await response(scope, receive, send)
                 return
 
             # Check required scopes
             if self.required_scopes:
-                missing_scopes = [s for s in self.required_scopes if s not in access_token.scopes]
+                missing_scopes = [
+                    s for s in self.required_scopes if s not in access_token.scopes
+                ]
                 if missing_scopes:
                     response = JSONResponse(
                         {

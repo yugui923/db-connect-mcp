@@ -289,7 +289,9 @@ class TestSSHTunnelManagerMocked:
             assert call_kwargs["ssh_pkey"] == "/path/to/key"
             assert call_kwargs["ssh_private_key_password"] == "keypass"
 
-    def test_tunnel_start_error_raises_exception(self, mock_tunnel_forwarder, valid_config):
+    def test_tunnel_start_error_raises_exception(
+        self, mock_tunnel_forwarder, valid_config
+    ):
         """Tunnel start errors should raise SSHTunnelError."""
         mock_class, mock_instance = mock_tunnel_forwarder
         mock_instance.start.side_effect = Exception("Connection refused")
@@ -316,7 +318,9 @@ class TestSSHTunnelManagerMocked:
 
         assert "private key not found" in str(exc_info.value).lower()
 
-    def test_ensure_active_restarts_inactive_tunnel(self, mock_tunnel_forwarder, valid_config):
+    def test_ensure_active_restarts_inactive_tunnel(
+        self, mock_tunnel_forwarder, valid_config
+    ):
         """ensure_active should restart inactive tunnel."""
         mock_class, mock_instance = mock_tunnel_forwarder
 

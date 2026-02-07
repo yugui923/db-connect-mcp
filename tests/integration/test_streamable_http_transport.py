@@ -331,9 +331,7 @@ class TestNoAuthConfiguration:
     def test_bearer_header_ignored_when_no_auth(self, starlette_app_no_auth):
         """Test that Bearer header is ignored when auth not configured."""
         with TestClient(starlette_app_no_auth, raise_server_exceptions=False) as client:
-            response = client.get(
-                "/mcp", headers={"Authorization": "Bearer any-token"}
-            )
+            response = client.get("/mcp", headers={"Authorization": "Bearer any-token"})
             assert response.status_code != 401
 
 
@@ -593,25 +591,19 @@ class TestRequestBody:
     def test_null_body(self, starlette_app_no_auth):
         """Test null JSON body."""
         with TestClient(starlette_app_no_auth, raise_server_exceptions=False) as client:
-            response = client.post(
-                "/mcp", content="null", headers=MCP_JSON_HEADERS
-            )
+            response = client.post("/mcp", content="null", headers=MCP_JSON_HEADERS)
             assert response.status_code in (200, 400, 422, 500)
 
     def test_empty_object(self, starlette_app_no_auth):
         """Test empty JSON object."""
         with TestClient(starlette_app_no_auth, raise_server_exceptions=False) as client:
-            response = client.post(
-                "/mcp", json={}, headers=MCP_JSON_HEADERS
-            )
+            response = client.post("/mcp", json={}, headers=MCP_JSON_HEADERS)
             assert response.status_code in (200, 400, 422, 500)
 
     def test_array_body(self, starlette_app_no_auth):
         """Test JSON array body (batch request)."""
         with TestClient(starlette_app_no_auth, raise_server_exceptions=False) as client:
-            response = client.post(
-                "/mcp", json=[], headers=MCP_JSON_HEADERS
-            )
+            response = client.post("/mcp", json=[], headers=MCP_JSON_HEADERS)
             assert response.status_code in (200, 400, 422, 500)
 
     def test_large_body(self, starlette_app_no_auth):
@@ -624,9 +616,7 @@ class TestRequestBody:
                 "method": "initialize",
                 "params": {"data": large_data},
             }
-            response = client.post(
-                "/mcp", json=request, headers=MCP_JSON_HEADERS
-            )
+            response = client.post("/mcp", json=request, headers=MCP_JSON_HEADERS)
             # Should handle gracefully
             assert response.status_code in (200, 202, 400, 413, 422, 500)
 
@@ -643,9 +633,7 @@ class TestRequestBody:
                     "clientInfo": {"name": "测试客户端", "version": "1.0"},
                 },
             }
-            response = client.post(
-                "/mcp", json=request, headers=MCP_JSON_HEADERS
-            )
+            response = client.post("/mcp", json=request, headers=MCP_JSON_HEADERS)
             assert response.status_code in (200, 202)
 
 
@@ -670,9 +658,7 @@ class TestStatelessMode:
                     "clientInfo": {"name": "test", "version": "1.0"},
                 },
             }
-            response = client.post(
-                "/mcp", json=request, headers=MCP_JSON_HEADERS
-            )
+            response = client.post("/mcp", json=request, headers=MCP_JSON_HEADERS)
             assert response.status_code in (200, 202)
 
     def test_session_header_ignored(self, starlette_app_no_auth):
@@ -706,9 +692,7 @@ class TestStatelessMode:
                         "clientInfo": {"name": f"client-{i}", "version": "1.0"},
                     },
                 }
-                response = client.post(
-                    "/mcp", json=request, headers=MCP_JSON_HEADERS
-                )
+                response = client.post("/mcp", json=request, headers=MCP_JSON_HEADERS)
                 assert response.status_code in (200, 202)
 
 
@@ -734,9 +718,7 @@ class TestConcurrentRequests:
                         "clientInfo": {"name": "test", "version": "1.0"},
                     },
                 }
-                response = client.post(
-                    "/mcp", json=request, headers=MCP_JSON_HEADERS
-                )
+                response = client.post("/mcp", json=request, headers=MCP_JSON_HEADERS)
                 assert response.status_code in (200, 202)
 
     def test_parallel_requests(self, starlette_app_no_auth):
@@ -756,13 +738,13 @@ class TestConcurrentRequests:
                         "clientInfo": {"name": f"client-{i}", "version": "1.0"},
                     },
                 }
-                return client.post(
-                    "/mcp", json=request, headers=MCP_JSON_HEADERS
-                )
+                return client.post("/mcp", json=request, headers=MCP_JSON_HEADERS)
 
             with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
                 futures = [executor.submit(make_request, i) for i in range(10)]
-                responses = [f.result() for f in concurrent.futures.as_completed(futures)]
+                responses = [
+                    f.result() for f in concurrent.futures.as_completed(futures)
+                ]
 
             for response in responses:
                 assert response.status_code in (200, 202)
@@ -791,7 +773,9 @@ class TestConcurrentRequests:
 
             with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
                 futures = [executor.submit(make_post_request, i) for i in range(5)]
-                responses = [f.result() for f in concurrent.futures.as_completed(futures)]
+                responses = [
+                    f.result() for f in concurrent.futures.as_completed(futures)
+                ]
 
             # All should complete without server errors
             for response in responses:
@@ -838,9 +822,7 @@ class TestErrorHandling:
                 "method": "initialize",
                 "params": nested,
             }
-            response = client.post(
-                "/mcp", json=request, headers=MCP_JSON_HEADERS
-            )
+            response = client.post("/mcp", json=request, headers=MCP_JSON_HEADERS)
             # Should handle gracefully
             assert response.status_code in (200, 202, 400, 422, 500)
 
@@ -950,7 +932,9 @@ class TestRealHTTPClient:
 
             with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
                 futures = [executor.submit(client_session, i) for i in range(10)]
-                status_codes = [f.result() for f in concurrent.futures.as_completed(futures)]
+                status_codes = [
+                    f.result() for f in concurrent.futures.as_completed(futures)
+                ]
 
             for status in status_codes:
                 assert status in (200, 202)

@@ -212,7 +212,9 @@ class TestMetadataInspectorComments:
         # (SQLAlchemy might still extract system-generated comments, so we just check it doesn't error)
 
     @pytest.mark.asyncio
-    async def test_comments_in_json_serialization(self, pg_inspector: MetadataInspector):
+    async def test_comments_in_json_serialization(
+        self, pg_inspector: MetadataInspector
+    ):
         """Test that comments are properly included in JSON serialization."""
         import json
 
@@ -242,13 +244,17 @@ class TestMetadataInspectorComments:
         assert parsed["comment"] == json_output["comment"]
 
     @pytest.mark.asyncio
-    async def test_all_columns_have_comment_field(self, pg_inspector: MetadataInspector):
+    async def test_all_columns_have_comment_field(
+        self, pg_inspector: MetadataInspector
+    ):
         """Test that all columns have a comment field (even if None)."""
         table_info = await pg_inspector.describe_table("products", "public")
 
         for col in table_info.columns:
             # Every column should have the comment attribute (can be None)
-            assert hasattr(col, "comment"), f"Column {col.name} missing comment attribute"
+            assert hasattr(col, "comment"), (
+                f"Column {col.name} missing comment attribute"
+            )
 
     @pytest.mark.asyncio
     async def test_multiple_tables_comments(self, pg_inspector: MetadataInspector):
@@ -260,7 +266,9 @@ class TestMetadataInspectorComments:
 
             # Each of these tables should have a table-level comment
             assert table_info.comment is not None, f"{table_name} should have a comment"
-            assert len(table_info.comment) > 0, f"{table_name} comment should not be empty"
+            assert len(table_info.comment) > 0, (
+                f"{table_name} comment should not be empty"
+            )
 
     @pytest.mark.asyncio
     async def test_comment_content_is_string(self, pg_inspector: MetadataInspector):
@@ -286,9 +294,7 @@ class TestMetadataInspectorLongComments:
         table_info = await pg_inspector.describe_table("data_type_examples", "public")
 
         # money_col has a very long comment (2700+ characters)
-        money_col = next(
-            (c for c in table_info.columns if c.name == "money_col"), None
-        )
+        money_col = next((c for c in table_info.columns if c.name == "money_col"), None)
         assert money_col is not None
         assert money_col.comment is not None
 
@@ -302,7 +308,9 @@ class TestMetadataInspectorLongComments:
         assert "locale-aware" in money_col.comment
 
     @pytest.mark.asyncio
-    async def test_long_comment_json_serialization(self, pg_inspector: MetadataInspector):
+    async def test_long_comment_json_serialization(
+        self, pg_inspector: MetadataInspector
+    ):
         """Test that very long comments serialize correctly to JSON."""
         import json
 
@@ -342,7 +350,9 @@ class TestMetadataInspectorLongComments:
         table_info = await pg_inspector.describe_table("products", "public")
 
         # Count columns with comments
-        cols_with_comments = {c.name: c.comment for c in table_info.columns if c.comment}
+        cols_with_comments = {
+            c.name: c.comment for c in table_info.columns if c.comment
+        }
 
         # Should have many column comments (we added 15+ in products)
         assert len(cols_with_comments) >= 10, (
@@ -354,7 +364,10 @@ class TestMetadataInspectorLongComments:
             assert "Stock Keeping Unit" in cols_with_comments["sku"]
 
         if "price" in cols_with_comments:
-            assert "USD" in cols_with_comments["price"] or "selling" in cols_with_comments["price"]
+            assert (
+                "USD" in cols_with_comments["price"]
+                or "selling" in cols_with_comments["price"]
+            )
 
 
 class TestMetadataInspectorEdgeCases:

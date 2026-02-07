@@ -284,17 +284,23 @@ class TestSSHTunnelMySQLMCP:
 
     @pytest.mark.asyncio
     async def test_mcp_execute_query(self, mysql_tunnel_mcp_server):
-        result = await mysql_tunnel_mcp_server.handle_execute_query({
-            "query": "SELECT name, price FROM products ORDER BY price DESC LIMIT 3",
-        })
+        result = await mysql_tunnel_mcp_server.handle_execute_query(
+            {
+                "query": "SELECT name, price FROM products ORDER BY price DESC LIMIT 3",
+            }
+        )
         assert len(result) > 0
         assert "name" in result[0].text
 
     @pytest.mark.asyncio
     async def test_mcp_sample_data(self, mysql_tunnel_mcp_server):
-        result = await mysql_tunnel_mcp_server.handle_sample_data({
-            "table": "products", "schema": "devdb", "limit": 3,
-        })
+        result = await mysql_tunnel_mcp_server.handle_sample_data(
+            {
+                "table": "products",
+                "schema": "devdb",
+                "limit": 3,
+            }
+        )
         assert len(result) > 0
         assert "product_id" in result[0].text
 
@@ -327,16 +333,22 @@ class TestSSHTunnelPostgresMCP:
 
     @pytest.mark.asyncio
     async def test_mcp_execute_query(self, pg_tunnel_mcp_server):
-        result = await pg_tunnel_mcp_server.handle_execute_query({
-            "query": "SELECT name, price FROM products ORDER BY price DESC LIMIT 3",
-        })
+        result = await pg_tunnel_mcp_server.handle_execute_query(
+            {
+                "query": "SELECT name, price FROM products ORDER BY price DESC LIMIT 3",
+            }
+        )
         assert len(result) > 0
         assert "name" in result[0].text
 
     @pytest.mark.asyncio
     async def test_mcp_sample_data(self, pg_tunnel_mcp_server):
-        result = await pg_tunnel_mcp_server.handle_sample_data({
-            "table": "products", "schema": "public", "limit": 3,
-        })
+        result = await pg_tunnel_mcp_server.handle_sample_data(
+            {
+                "table": "products",
+                "schema": "public",
+                "limit": 3,
+            }
+        )
         assert len(result) > 0
         assert "product_id" in result[0].text

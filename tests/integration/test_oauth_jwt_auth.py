@@ -74,9 +74,11 @@ def jwks_response(rsa_keypair):
 
     # Convert to base64url encoding
     def int_to_base64url(n: int, length: int) -> str:
-        return base64.urlsafe_b64encode(
-            n.to_bytes(length, byteorder="big")
-        ).decode().rstrip("=")
+        return (
+            base64.urlsafe_b64encode(n.to_bytes(length, byteorder="big"))
+            .decode()
+            .rstrip("=")
+        )
 
     n = int_to_base64url(numbers.n, 256)  # 2048 bits = 256 bytes
     e = int_to_base64url(numbers.e, 3)  # exponent is small
@@ -116,7 +118,9 @@ def create_signed_jwt(
     default_headers = {"kid": "test-key-id", "alg": "RS256"}
     if headers:
         default_headers.update(headers)
-    return jwt.encode(claims, private_key_pem, algorithm="RS256", headers=default_headers)
+    return jwt.encode(
+        claims, private_key_pem, algorithm="RS256", headers=default_headers
+    )
 
 
 # =============================================================================
@@ -158,7 +162,9 @@ class TestJWTTokenVerifierBasics:
     def test_verifier_jwks_uri(self, jwt_config):
         """Test JWKS URI construction."""
         verifier = JWTTokenVerifier(jwt_config)
-        assert verifier.jwks_uri == "https://test-issuer.example.com/.well-known/jwks.json"
+        assert (
+            verifier.jwks_uri == "https://test-issuer.example.com/.well-known/jwks.json"
+        )
 
     def test_verifier_issuer_normalization(self):
         """Test issuer URL normalization (trailing slash)."""
@@ -553,9 +559,7 @@ class TestJWTScopeValidation:
         mock_client.get_signing_key_from_jwt.return_value = mock_signing_key
         return mock_client
 
-    async def test_required_scopes_present(
-        self, rsa_private_key_pem, mock_jwks_client
-    ):
+    async def test_required_scopes_present(self, rsa_private_key_pem, mock_jwks_client):
         """Test token with all required scopes passes."""
         config = JWTVerifierConfig(
             issuer="https://test-issuer.example.com/",
@@ -582,9 +586,7 @@ class TestJWTScopeValidation:
         assert result is not None
         assert result.scopes == ["read", "write", "admin"]
 
-    async def test_required_scopes_missing(
-        self, rsa_private_key_pem, mock_jwks_client
-    ):
+    async def test_required_scopes_missing(self, rsa_private_key_pem, mock_jwks_client):
         """Test token missing required scopes is rejected."""
         config = JWTVerifierConfig(
             issuer="https://test-issuer.example.com/",
@@ -610,9 +612,7 @@ class TestJWTScopeValidation:
 
         assert result is None
 
-    async def test_no_required_scopes(
-        self, rsa_private_key_pem, mock_jwks_client
-    ):
+    async def test_no_required_scopes(self, rsa_private_key_pem, mock_jwks_client):
         """Test token passes when no scopes are required."""
         config = JWTVerifierConfig(
             issuer="https://test-issuer.example.com/",
@@ -784,9 +784,7 @@ class TestOAuthASGIApp:
         )
         return verifier
 
-    async def test_valid_token_passes(
-        self, mock_session_manager, mock_token_verifier
-    ):
+    async def test_valid_token_passes(self, mock_session_manager, mock_token_verifier):
         """Test that valid tokens are accepted."""
         from db_connect_mcp.server import _OAuthMCPASGIApp
 
@@ -819,6 +817,7 @@ class TestOAuthASGIApp:
         receive = AsyncMock()
 
         sent_responses = []
+
         async def capture_send(message):
             sent_responses.append(message)
 
@@ -847,6 +846,7 @@ class TestOAuthASGIApp:
         receive = AsyncMock()
 
         sent_responses = []
+
         async def capture_send(message):
             sent_responses.append(message)
 
@@ -878,6 +878,7 @@ class TestOAuthASGIApp:
         receive = AsyncMock()
 
         sent_responses = []
+
         async def capture_send(message):
             sent_responses.append(message)
 
@@ -938,12 +939,12 @@ class TestSecurityEdgeCases:
             "exp": int(time.time()) + 3600,
             "iat": int(time.time()),
         }
-        header_b64 = base64.urlsafe_b64encode(
-            json.dumps(header).encode()
-        ).decode().rstrip("=")
-        payload_b64 = base64.urlsafe_b64encode(
-            json.dumps(payload).encode()
-        ).decode().rstrip("=")
+        header_b64 = (
+            base64.urlsafe_b64encode(json.dumps(header).encode()).decode().rstrip("=")
+        )
+        payload_b64 = (
+            base64.urlsafe_b64encode(json.dumps(payload).encode()).decode().rstrip("=")
+        )
         malicious_token = f"{header_b64}.{payload_b64}."
 
         # This should be rejected because RS256 is required
@@ -1031,7 +1032,9 @@ class TestJWKSClient:
         mock_client.get_signing_key_from_jwt.return_value = mock_signing_key
 
         # First call should create client
-        with patch("db_connect_mcp.auth.jwt_verifier.PyJWKClient", return_value=mock_client):
+        with patch(
+            "db_connect_mcp.auth.jwt_verifier.PyJWKClient", return_value=mock_client
+        ):
             client1 = await verifier._get_jwks_client()
             assert client1 is mock_client
 
