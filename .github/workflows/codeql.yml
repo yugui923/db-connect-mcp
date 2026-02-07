@@ -6,26 +6,29 @@ on:
   pull_request:
     branches: [main]
   schedule:
-    - cron: "0 6 * * 1" # Weekly on Monday
+    - cron: "0 6 * * 1"
 
 jobs:
   analyze:
-    name: Analyze
+    name: Analyze Python
     runs-on: ubuntu-latest
     permissions:
       security-events: write
-      contents: read
+      packages: read
       actions: read
+      contents: read
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
         with:
           languages: python
-          source-root: src
+          build-mode: none
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3
         with:
-          upload: always
+          category: "/language:python"
