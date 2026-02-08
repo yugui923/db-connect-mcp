@@ -240,7 +240,9 @@ class TestPostgreSQLDirectMCPClient:
     async def test_execute_query_simple(self, pg_client: ClientSession):
         """Test execute_query with simple SELECT."""
         data = await call_tool_checked(
-            pg_client, "execute_query", {"query": "SELECT 1 as num, 'hello' as greeting"}
+            pg_client,
+            "execute_query",
+            {"query": "SELECT 1 as num, 'hello' as greeting"},
         )
 
         assert data["row_count"] == 1
@@ -322,9 +324,7 @@ class TestPostgreSQLDirectMCPClient:
     @pytest.mark.asyncio
     async def test_sample_data_default(self, pg_client: ClientSession):
         """Test sample_data with default parameters."""
-        data = await call_tool_checked(
-            pg_client, "sample_data", {"table": "products"}
-        )
+        data = await call_tool_checked(pg_client, "sample_data", {"table": "products"})
 
         assert "row_count" in data
         assert "columns" in data
@@ -652,7 +652,9 @@ class TestClickHouseMCPClient:
     async def test_execute_query(self, ch_client: ClientSession):
         """Test execute_query on ClickHouse."""
         data = await call_tool_checked(
-            ch_client, "execute_query", {"query": "SELECT 1 as num, 'hello' as greeting"}
+            ch_client,
+            "execute_query",
+            {"query": "SELECT 1 as num, 'hello' as greeting"},
         )
         assert data["row_count"] == 1
 
@@ -696,7 +698,9 @@ class TestClickHouseMCPClient:
         """Test explain_query on ClickHouse."""
         await skip_if_tool_unavailable(ch_client, "explain_query")
 
-        data = await call_tool_checked(ch_client, "explain_query", {"query": "SELECT 1"})
+        data = await call_tool_checked(
+            ch_client, "explain_query", {"query": "SELECT 1"}
+        )
         assert "plan" in data
 
 
