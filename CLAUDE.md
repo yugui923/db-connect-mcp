@@ -6,9 +6,25 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This is a **read-only** Multi-Database MCP (Model Context Protocol) server that provides safe database exploration and analysis capabilities for PostgreSQL, MySQL, and ClickHouse databases. The server enforces read-only access at multiple levels and is designed for exploratory data analysis without risk of data modification.
 
-## Important: Run Tests After Changes
+## Pre-Commit Requirements
 
-After every code change, run `uv run pytest -n 6` and `uv run ruff check .` to verify no regressions are introduced.
+**IMPORTANT:** Before every commit and push, ALL of the following checks must pass:
+
+```bash
+# 1. Format code
+uv run ruff format .
+
+# 2. Lint code
+uv run ruff check .
+
+# 3. Type checking
+npx pyright
+
+# 4. Run all tests
+uv run pytest -n 6
+```
+
+Do NOT commit or push if any of these checks fail. Fix all issues first.
 
 ## Development Commands
 
