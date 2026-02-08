@@ -89,6 +89,7 @@ python_functions = ["test_*"]
 
 [tool.coverage.run]
 source = ["src/db_connect_mcp"]
+relative_files = true
 omit = ["tests/*", "**/__pycache__/*"]
 
 [tool.coverage.report]
