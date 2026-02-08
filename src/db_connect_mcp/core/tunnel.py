@@ -217,7 +217,7 @@ class SSHTunnelManager:
             paramiko.RSAKey,
             paramiko.Ed25519Key,
             paramiko.ECDSAKey,
-            paramiko.DSSKey,
+            paramiko.DSSKey,  # type: ignore[attr-defined]  # DSSKey exists but missing from stubs
         ]
         for key_class in key_classes:
             try:
