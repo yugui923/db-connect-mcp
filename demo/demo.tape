@@ -1,5 +1,9 @@
 # VHS tape file for db-connect-mcp demo
 # Run with: vhs demo/demo.tape
+#
+# Alternative (if VHS doesn't work in containers):
+#   asciinema rec -c "uv run python demo/demo.py 2>/dev/null" demo/demo.cast
+#   agg --theme monokai demo/demo.cast demo/demo.gif
 
 Output demo/demo.gif
 Set Shell bash
