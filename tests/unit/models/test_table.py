@@ -277,7 +277,9 @@ class TestTableInfo:
     def test_total_size_bytes_with_index(self):
         """Test total_size_bytes includes index size."""
         table = TableInfo(
-            name="users", size_bytes=1024 * 1024 * 100, index_size_bytes=1024 * 1024 * 20
+            name="users",
+            size_bytes=1024 * 1024 * 100,
+            index_size_bytes=1024 * 1024 * 20,
         )
         assert table.total_size_bytes == 1024 * 1024 * 120
 
