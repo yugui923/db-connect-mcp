@@ -10,6 +10,16 @@
 
 A read-only MCP (Model Context Protocol) server for exploratory data analysis across multiple database systems. This server provides safe, read-only access to PostgreSQL, MySQL, and ClickHouse databases with comprehensive analysis capabilities.
 
+## Demo
+
+![db-connect-mcp demo](demo/demo.gif)
+
+To regenerate the demo GIF (requires [VHS](https://github.com/charmbracelet/vhs)):
+
+```bash
+vhs demo/demo.tape
+```
+
 ## Quick Start
 
 1. **Install:**
@@ -71,6 +81,27 @@ A read-only MCP (Model Context Protocol) server for exploratory data analysis ac
 - **Automatic limits** - Queries are automatically limited to prevent large result sets
 - **Connection string safety** - Automatically adds read-only parameters
 - **Database-specific safety** - Each adapter implements appropriate safety measures
+
+### 💡 Best Practices
+
+> **Tip:** db-connect-mcp works best with databases that have **proper comments on tables and columns**. When your database includes descriptive comments, the MCP server can provide richer context to AI assistants, leading to better understanding of your data model and more accurate query suggestions.
+
+**Adding comments in PostgreSQL:**
+
+```sql
+COMMENT ON TABLE users IS 'Registered user accounts with profile information';
+COMMENT ON COLUMN users.email IS 'Primary email address, used for authentication';
+COMMENT ON COLUMN users.is_verified IS 'Whether email has been verified via confirmation link';
+```
+
+**Adding comments in MySQL:**
+
+```sql
+ALTER TABLE users COMMENT = 'Registered user accounts with profile information';
+ALTER TABLE users MODIFY COLUMN email VARCHAR(255) COMMENT 'Primary email address, used for authentication';
+```
+
+The server automatically retrieves and displays these comments when describing tables, helping AI assistants understand the purpose and semantics of your data.
 
 ### 🔐 SSH Tunnel Support
 
