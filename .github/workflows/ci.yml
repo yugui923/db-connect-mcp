@@ -63,12 +63,10 @@ jobs:
           PG_TEST_DATABASE_URL: postgresql+asyncpg://testuser:testpass@localhost:5432/testdb
         run: uv run pytest -n 6 --cov=src/db_connect_mcp --cov-report=xml --cov-report=term
 
-      - name: Upload coverage to Codecov
+      - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          files: ./coverage.xml
-          fail_ci_if_error: false
 
   build:
     runs-on: ubuntu-latest
