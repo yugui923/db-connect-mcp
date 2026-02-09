@@ -14,12 +14,6 @@ A read-only MCP (Model Context Protocol) server for exploratory data analysis ac
 
 ![db-connect-mcp demo](demo/demo.gif)
 
-To regenerate the demo GIF (requires [VHS](https://github.com/charmbracelet/vhs)):
-
-```bash
-vhs demo/demo.tape
-```
-
 ## Quick Start
 
 1. **Install:**

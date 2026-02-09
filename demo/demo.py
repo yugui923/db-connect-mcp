@@ -18,6 +18,7 @@ import json
 import logging
 import os
 import sys
+import time
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
@@ -27,6 +28,10 @@ logging.getLogger("mcp").setLevel(logging.WARNING)
 logging.getLogger("db_connect_mcp").setLevel(logging.WARNING)
 logging.getLogger("paramiko").setLevel(logging.WARNING)
 logging.getLogger("sshtunnel").setLevel(logging.WARNING)
+
+# Demo timing constants (seconds)
+TOOL_CALL_DELAY = 1.5  # Delay before calling tool (simulates thinking)
+RESPONSE_DELAY = 4.0  # Delay after tool response (lets user read output)
 
 # ANSI color codes for terminal output
 CYAN = "\033[96m"
@@ -59,11 +64,6 @@ def tool_call(name: str) -> None:
 def success(text: str) -> None:
     """Print success message."""
     print(f"{GREEN}✓{RESET} {text}")
-
-
-def format_json(data: dict, indent: int = 2) -> str:
-    """Format JSON with color highlighting."""
-    return json.dumps(data, indent=indent, default=str)
 
 
 def print_table(
@@ -101,17 +101,26 @@ def print_table(
 async def call_tool(client: ClientSession, name: str, args: dict | None = None) -> dict:
     """Call an MCP tool and return the parsed result."""
     tool_call(name)
+    time.sleep(TOOL_CALL_DELAY)  # Simulate thinking before call
+
     response = await client.call_tool(name, arguments=args or {})
 
     if response.isError:
         raise RuntimeError(f"Tool error: {response.content}")
 
     # Parse the JSON response from the first text content
+    result = {}
     for content in response.content:
         if hasattr(content, "text"):
-            return json.loads(content.text)
+            result = json.loads(content.text)
+            break
 
-    return {}
+    return result
+
+
+def pause_for_reading() -> None:
+    """Pause to let user read the output."""
+    time.sleep(RESPONSE_DELAY)
 
 
 async def run_demo() -> None:
@@ -151,6 +160,7 @@ async def run_demo() -> None:
             tools = await client.list_tools()
             tool_names = [t.name for t in tools.tools]
             print(f"  {', '.join(tool_names)}")
+            pause_for_reading()
 
             # ─────────────────────────────────────────────────────────────
             header("1. Database Information")
@@ -161,6 +171,7 @@ async def run_demo() -> None:
             print(f"  Version:    {db_info.get('version', 'unknown')}")
             print(f"  Read-only:  {GREEN}{db_info.get('read_only', True)}{RESET}")
             print(f"  Database:   {db_info.get('database', 'unknown')}")
+            pause_for_reading()
 
             # ─────────────────────────────────────────────────────────────
             header("2. Schema Exploration")
@@ -169,6 +180,7 @@ async def run_demo() -> None:
             schemas = await call_tool(client, "list_schemas")
             schema_names = [s["name"] for s in schemas]
             print(f"  Schemas: {', '.join(schema_names)}")
+            pause_for_reading()
 
             # List tables in public schema
             subheader("Tables in 'public' schema")
@@ -183,6 +195,7 @@ async def run_demo() -> None:
                 )
             if len(tables) > 8:
                 print(f"  {DIM}... and {len(tables) - 8} more{RESET}")
+            pause_for_reading()
 
             # ─────────────────────────────────────────────────────────────
             header("3. Table Structure")
@@ -218,6 +231,7 @@ async def run_demo() -> None:
                 for idx in indexes[:3]:
                     unique = "UNIQUE " if idx.get("is_unique") else ""
                     print(f"    • {unique}{idx['name']}: {idx.get('columns', [])}")
+            pause_for_reading()
 
             # ─────────────────────────────────────────────────────────────
             header("4. Data Sampling")
@@ -230,6 +244,7 @@ async def run_demo() -> None:
                 {"table": target_table, "schema": "public", "limit": 5},
             )
             print_table(sample.get("rows", []), sample.get("columns"), max_rows=5)
+            pause_for_reading()
 
             # ─────────────────────────────────────────────────────────────
             header("5. Column Analysis")
@@ -256,6 +271,7 @@ async def run_demo() -> None:
                     print(f"  Min value:      {stats.get('min_value')}")
                 if stats.get("max_value"):
                     print(f"  Max value:      {stats.get('max_value')}")
+            pause_for_reading()
 
             # ─────────────────────────────────────────────────────────────
             header("6. Custom Query")
@@ -268,17 +284,7 @@ async def run_demo() -> None:
             print(
                 f"  Result: {BOLD}{result.get('rows', [{}])[0].get('total', 0):,}{RESET} rows"
             )
-
-            # Another query with grouping
-            if any(c["name"] == "created_at" for c in columns):
-                query2 = f"""
-                SELECT DATE_TRUNC('month', created_at) as month, COUNT(*) as count
-                FROM {target_table}
-                GROUP BY 1 ORDER BY 1 DESC LIMIT 3
-                """.strip()
-                subheader("Monthly distribution (last 3 months)")
-                result2 = await call_tool(client, "execute_query", {"query": query2})
-                print_table(result2.get("rows", []), ["month", "count"])
+            pause_for_reading()
 
             # ─────────────────────────────────────────────────────────────
             header("7. Table Relationships")
@@ -300,6 +306,7 @@ async def run_demo() -> None:
                     print(f"  {DIM}No foreign keys defined for this table{RESET}")
             except Exception:
                 print(f"  {DIM}Relationship discovery not available{RESET}")
+            pause_for_reading()
 
             # ─────────────────────────────────────────────────────────────
             print(f"\n{GREEN}{BOLD}Demo complete!{RESET}")
