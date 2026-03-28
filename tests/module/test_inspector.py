@@ -384,3 +384,108 @@ class TestMetadataInspectorEdgeCases:
         """Test describe_table with non-existent table raises appropriate error."""
         with pytest.raises(Exception):  # Exact exception type depends on adapter
             await pg_inspector.describe_table("nonexistent_table", "public")
+
+
+class TestExpressionBasedIndexes:
+    """Test that expression-based indexes don't crash describe_table."""
+
+    @pytest.fixture(autouse=True)
+    async def _setup_expression_index_table(self):
+        """Create a test table with expression-based indexes.
+
+        Uses a separate writable connection since pg_connection is read-only.
+        """
+        import os
+
+        from sqlalchemy import text
+        from sqlalchemy.ext.asyncio import create_async_engine
+
+        url = os.getenv("PG_TEST_DATABASE_URL")
+        if not url:
+            pytest.skip("PG_TEST_DATABASE_URL not set")
+
+        engine = create_async_engine(url)
+        async with engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "CREATE TABLE IF NOT EXISTS _test_expr_indexes ("
+                    "  id serial PRIMARY KEY,"
+                    "  name text NOT NULL,"
+                    "  email text NOT NULL,"
+                    "  city text"
+                    ")"
+                )
+            )
+            await conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS idx_expr_lower_name "
+                    "ON _test_expr_indexes (lower(name))"
+                )
+            )
+            await conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS idx_expr_mixed "
+                    "ON _test_expr_indexes (id, lower(email))"
+                )
+            )
+            await conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS idx_expr_normal "
+                    "ON _test_expr_indexes (name, email)"
+                )
+            )
+
+        yield
+
+        async with engine.begin() as conn:
+            await conn.execute(text("DROP TABLE IF EXISTS _test_expr_indexes"))
+        await engine.dispose()
+
+    @pytest.mark.asyncio
+    async def test_describe_table_with_expression_index(
+        self, pg_inspector: MetadataInspector
+    ):
+        """describe_table should not fail on tables with expression indexes."""
+        table_info = await pg_inspector.describe_table("_test_expr_indexes", "public")
+        assert table_info.name == "_test_expr_indexes"
+        assert len(table_info.indexes) >= 3
+
+    @pytest.mark.asyncio
+    async def test_expression_index_columns_are_strings(
+        self, pg_inspector: MetadataInspector
+    ):
+        """All index column entries should be strings, never None."""
+        table_info = await pg_inspector.describe_table("_test_expr_indexes", "public")
+        for idx in table_info.indexes:
+            for col in idx.columns:
+                assert isinstance(col, str), (
+                    f"Index {idx.name} has non-string column: {col!r}"
+                )
+                assert col, f"Index {idx.name} has empty column name"
+
+    @pytest.mark.asyncio
+    async def test_expression_index_contains_expression_text(
+        self, pg_inspector: MetadataInspector
+    ):
+        """Expression-based index should include expression text in columns."""
+        table_info = await pg_inspector.describe_table("_test_expr_indexes", "public")
+        idx_map = {idx.name: idx for idx in table_info.indexes}
+
+        lower_name_idx = idx_map.get("idx_expr_lower_name")
+        assert lower_name_idx is not None
+        assert any("lower" in col for col in lower_name_idx.columns)
+
+        mixed_idx = idx_map.get("idx_expr_mixed")
+        assert mixed_idx is not None
+        assert "id" in mixed_idx.columns
+        assert any("lower" in col for col in mixed_idx.columns)
+
+    @pytest.mark.asyncio
+    async def test_normal_index_unchanged(self, pg_inspector: MetadataInspector):
+        """Normal column indexes should still work as before."""
+        table_info = await pg_inspector.describe_table("_test_expr_indexes", "public")
+        idx_map = {idx.name: idx for idx in table_info.indexes}
+
+        normal_idx = idx_map.get("idx_expr_normal")
+        assert normal_idx is not None
+        assert normal_idx.columns == ["name", "email"]
