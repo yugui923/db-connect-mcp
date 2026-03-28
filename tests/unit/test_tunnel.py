@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 import paramiko
 import pytest
 from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import ec, ed25519, rsa
+from cryptography.hazmat.primitives.asymmetric import dsa, ec, ed25519, rsa
 from pydantic import ValidationError
 
 from db_connect_mcp.core.tunnel import (
@@ -71,6 +71,16 @@ def _generate_encrypted_rsa_pkcs8(passphrase: bytes) -> bytes:
         serialization.Encoding.PEM,
         serialization.PrivateFormat.PKCS8,
         serialization.BestAvailableEncryption(passphrase),
+    )
+
+
+def _generate_dsa_pkcs8() -> bytes:
+    """Generate a PKCS#8 PEM DSA private key."""
+    key = dsa.generate_private_key(key_size=2048)
+    return key.private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.PKCS8,
+        serialization.NoEncryption(),
     )
 
 
@@ -740,6 +750,45 @@ class TestPKCS8KeyParsing:
         result = SSHTunnelManager._parse_private_key(b64)
         assert isinstance(result, paramiko.RSAKey)
 
+    def test_dsa_pkcs8_inline(self):
+        """DSA key in PKCS#8 format should parse successfully."""
+        pkcs8_pem = _generate_dsa_pkcs8()
+        result = SSHTunnelManager._parse_private_key(pkcs8_pem.decode("utf-8"))
+        assert isinstance(result, paramiko.DSSKey)  # type: ignore[attr-defined]
+
+
+class TestPasswordRequiredDetection:
+    """Test that encrypted keys without passphrase give actionable errors."""
+
+    def test_encrypted_traditional_pem_no_passphrase(self):
+        """Encrypted traditional PEM key without passphrase should mention passphrase."""
+        rsa_key = paramiko.RSAKey.generate(2048)
+        key_io = StringIO()
+        rsa_key.write_private_key(key_io, password="secret123")
+        encrypted_pem = key_io.getvalue()
+
+        with pytest.raises(SSHTunnelError, match="passphrase"):
+            SSHTunnelManager._parse_private_key(encrypted_pem)
+
+
+class TestTimeBudget:
+    """Test that the time budget mechanism works."""
+
+    def test_budget_exceeded_raises_error(self):
+        """Exceeding the time budget should raise SSHTunnelError."""
+        from unittest.mock import patch
+
+        # Make every call to time.monotonic return a value past the budget
+        with patch("db_connect_mcp.core.tunnel.time") as mock_time:
+            mock_time.monotonic.side_effect = [0.0, 0.0, 999.0]
+            with pytest.raises(SSHTunnelError, match="exceeded time budget"):
+                # Use garbage PEM body so decoding succeeds but parsing fails
+                SSHTunnelManager._parse_private_key(
+                    "-----BEGIN RSA PRIVATE KEY-----\n"
+                    "garbage\n"
+                    "-----END RSA PRIVATE KEY-----"
+                )
+
 
 class TestPuTTYPPKRejection:
     """Test that PuTTY PPK keys are rejected with clear instructions."""
@@ -841,6 +890,6 @@ class TestFileBasedKeyParsing:
             manager.start()
 
             call_kwargs = mock_class.call_args[1]
-            assert isinstance(call_kwargs["ssh_pkey"], paramiko.PKey)
+            assert isinstance(call_kwargs["ssh_pkey"], paramiko.RSAKey)
         finally:
             Path(key_path).unlink(missing_ok=True)

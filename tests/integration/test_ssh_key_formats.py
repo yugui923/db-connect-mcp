@@ -42,16 +42,24 @@ def _install_pubkeys_on_bastion(pubkeys: list[str]) -> None:
         os.getenv("SSH_HOST", "localhost"),
         port=int(os.getenv("SSH_PORT", "2222")),
         username=os.getenv("SSH_USERNAME", "tunneluser"),
-        password=os.getenv("SSH_PASSWORD", "tunnelpassword"),
+        password=os.getenv("SSH_PASSWORD"),
     )
-    all_keys = "\n".join(pubkeys)
-    client.exec_command(
+
+    _, stdout, _ = client.exec_command(
         "mkdir -p /home/tunneluser/.ssh && chmod 700 /home/tunneluser/.ssh"
     )
-    client.exec_command(
-        f'echo "{all_keys}" > /home/tunneluser/.ssh/authorized_keys '
+    assert stdout.channel.recv_exit_status() == 0, "Failed to create .ssh directory"
+
+    # Pipe key content via stdin to avoid shell injection from key strings
+    all_keys = "\n".join(pubkeys) + "\n"
+    stdin, stdout, _ = client.exec_command(
+        "cat > /home/tunneluser/.ssh/authorized_keys "
         "&& chmod 600 /home/tunneluser/.ssh/authorized_keys"
     )
+    stdin.write(all_keys)
+    stdin.channel.shutdown_write()
+    assert stdout.channel.recv_exit_status() == 0, "Failed to write authorized_keys"
+
     client.close()
 
 
@@ -316,6 +324,7 @@ class TestKeyFormatDatabaseAccess:
 
             async with connection.get_connection() as conn:
                 result = await conn.execute(text("SELECT COUNT(*) FROM products"))
-                assert result.scalar() > 0
+                count = result.scalar()
+                assert count is not None and count > 0
         finally:
             await connection.dispose()
