@@ -171,6 +171,13 @@ class SSHTunnelManager:
                     "encoded key. Please convert to PEM format: "
                     "openssl pkey -inform DER -in key.der -outform PEM -o key.pem"
                 )
+            except OSError as e:
+                raise SSHTunnelError(
+                    f"Cannot read SSH private key file "
+                    f"'{self.config.ssh_private_key_path}': {e}. "
+                    "Check file permissions (should be 600) and that "
+                    "the path points to a regular file."
+                ) from e
             passphrase = self.config.ssh_private_key_passphrase
             pkey = self._parse_private_key(key_content, passphrase)
             params["ssh_pkey"] = pkey
@@ -240,6 +247,9 @@ class SSHTunnelManager:
             re.DOTALL,
         )
         if not m:
+            logger.debug(
+                "PEM normalization skipped: content does not match PEM structure"
+            )
             return pem  # Not valid PEM structure, return as-is for error handling later
 
         header, body, footer = m.group(1), m.group(2), m.group(3)
@@ -289,7 +299,7 @@ class SSHTunnelManager:
         if fmt == KeyFormat.BASE64_ENCODED:
             try:
                 decoded = base64.b64decode(stripped).decode("utf-8")
-            except Exception as e:
+            except (binascii.Error, UnicodeDecodeError) as e:
                 raise SSHTunnelError(
                     f"SSH private key could not be base64-decoded: {e}"
                 ) from e
@@ -520,8 +530,15 @@ class SSHTunnelManager:
                 )
                 logger.debug("Key parsed as %s via PKCS#8 last resort", pkey.get_name())
                 return pkey
-            except Exception as e:
+            except SSHTunnelError as e:
                 logger.debug("Last-resort PKCS#8 failed: %s", e)
+                errors.append(("PKCS#8 (last resort)", e))
+            except Exception as e:
+                logger.warning(
+                    "Last-resort PKCS#8 raised unexpected %s: %s",
+                    type(e).__name__,
+                    e,
+                )
                 errors.append(("PKCS#8 (last resort)", e))
 
         details = "; ".join(f"{name}: {err}" for name, err in errors[-3:])

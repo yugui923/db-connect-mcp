@@ -45,22 +45,29 @@ def _install_pubkeys_on_bastion(pubkeys: list[str]) -> None:
         password=os.getenv("SSH_PASSWORD"),
     )
 
-    _, stdout, _ = client.exec_command(
-        "mkdir -p /home/tunneluser/.ssh && chmod 700 /home/tunneluser/.ssh"
-    )
-    assert stdout.channel.recv_exit_status() == 0, "Failed to create .ssh directory"
+    try:
+        _, stdout, stderr = client.exec_command(
+            "mkdir -p /home/tunneluser/.ssh && chmod 700 /home/tunneluser/.ssh"
+        )
+        rc = stdout.channel.recv_exit_status()
+        assert rc == 0, (
+            f"Failed to create .ssh directory (exit {rc}): {stderr.read().decode()}"
+        )
 
-    # Pipe key content via stdin to avoid shell injection from key strings
-    all_keys = "\n".join(pubkeys) + "\n"
-    stdin, stdout, _ = client.exec_command(
-        "cat > /home/tunneluser/.ssh/authorized_keys "
-        "&& chmod 600 /home/tunneluser/.ssh/authorized_keys"
-    )
-    stdin.write(all_keys)
-    stdin.channel.shutdown_write()
-    assert stdout.channel.recv_exit_status() == 0, "Failed to write authorized_keys"
-
-    client.close()
+        # Pipe key content via stdin to avoid shell injection from key strings
+        all_keys = "\n".join(pubkeys) + "\n"
+        stdin, stdout, stderr = client.exec_command(
+            "cat > /home/tunneluser/.ssh/authorized_keys "
+            "&& chmod 600 /home/tunneluser/.ssh/authorized_keys"
+        )
+        stdin.write(all_keys)
+        stdin.channel.shutdown_write()
+        rc = stdout.channel.recv_exit_status()
+        assert rc == 0, (
+            f"Failed to write authorized_keys (exit {rc}): {stderr.read().decode()}"
+        )
+    finally:
+        client.close()
 
 
 @pytest.fixture(scope="module")

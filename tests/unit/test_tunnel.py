@@ -413,8 +413,6 @@ class TestSSHTunnelManagerMocked:
         mock_class, mock_instance = mock_tunnel_forwarder
 
         # Generate a real RSA key for testing
-        from io import StringIO
-
         rsa_key = paramiko.RSAKey.generate(2048)
         key_io = StringIO()
         rsa_key.write_private_key(key_io)
@@ -435,8 +433,6 @@ class TestSSHTunnelManagerMocked:
     def test_inline_key_takes_precedence_over_file_path(self, mock_tunnel_forwarder):
         """Inline key should take precedence over file path when both are set."""
         mock_class, mock_instance = mock_tunnel_forwarder
-
-        from io import StringIO
 
         rsa_key = paramiko.RSAKey.generate(2048)
         key_io = StringIO()
@@ -473,8 +469,6 @@ class TestSSHTunnelManagerMocked:
     def test_base64_encoded_inline_key(self, mock_tunnel_forwarder):
         """Base64-encoded PEM key should be decoded and parsed."""
         mock_class, mock_instance = mock_tunnel_forwarder
-
-        from io import StringIO
 
         rsa_key = paramiko.RSAKey.generate(2048)
         key_io = StringIO()
@@ -700,6 +694,36 @@ class TestEscapeNormalization:
         assert result == pem
 
 
+class TestPEMNormalization:
+    """Test _normalize_pem handles various PEM structures."""
+
+    def test_rewraps_single_line_body(self):
+        """Single-line PEM body should be re-wrapped at 64 chars."""
+        pem = "-----BEGIN RSA PRIVATE KEY-----AAAA-----END RSA PRIVATE KEY-----"
+        result = SSHTunnelManager._normalize_pem(pem)
+        assert result.startswith("-----BEGIN RSA PRIVATE KEY-----\n")
+        assert "AAAA" in result
+
+    def test_preserves_encrypted_pem_metadata(self):
+        """RFC 1421 headers (Proc-Type, DEK-Info) must not be stripped."""
+        pem = (
+            "-----BEGIN RSA PRIVATE KEY-----\n"
+            "Proc-Type: 4,ENCRYPTED\n"
+            "DEK-Info: AES-256-CBC,AABBCCDD\n"
+            "\n"
+            "dGVzdGRhdGE=\n"
+            "-----END RSA PRIVATE KEY-----"
+        )
+        result = SSHTunnelManager._normalize_pem(pem)
+        assert "Proc-Type: 4,ENCRYPTED" in result
+        assert "DEK-Info: AES-256-CBC,AABBCCDD" in result
+
+    def test_returns_non_pem_unchanged(self):
+        """Content without PEM structure should be returned as-is."""
+        content = "not a PEM key at all"
+        assert SSHTunnelManager._normalize_pem(content) == content
+
+
 class TestPKCS8KeyParsing:
     """Test parsing of PKCS#8 format keys."""
 
@@ -891,5 +915,26 @@ class TestFileBasedKeyParsing:
 
             call_kwargs = mock_class.call_args[1]
             assert isinstance(call_kwargs["ssh_pkey"], paramiko.RSAKey)
+        finally:
+            Path(key_path).unlink(missing_ok=True)
+
+    def test_file_path_binary_der_raises_error(self):
+        """Binary (DER) key file should raise SSHTunnelError with guidance."""
+        # Write raw binary bytes that are not valid UTF-8
+        with tempfile.NamedTemporaryFile(mode="wb", suffix=".der", delete=False) as f:
+            f.write(b"\x30\x82\x01\x22\x30\x0d\x06\x09\xff\xfe\xfd")
+            key_path = f.name
+
+        try:
+            config = SSHTunnelConfig(
+                ssh_host="bastion.example.com",
+                ssh_username="user",
+                ssh_private_key_path=key_path,
+                remote_port=5432,
+            )
+
+            manager = SSHTunnelManager(config)
+            with pytest.raises(SSHTunnelError, match="non-UTF-8"):
+                manager.start()
         finally:
             Path(key_path).unlink(missing_ok=True)
