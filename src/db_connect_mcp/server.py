@@ -915,11 +915,12 @@ def _load_ssh_tunnel_config() -> Optional[SSHTunnelConfig]:
     remote_host = os.getenv("SSH_REMOTE_HOST")
     local_host = os.getenv("SSH_LOCAL_HOST", "127.0.0.1")
 
-    ssh_port = _parse_int_env("SSH_PORT", os.getenv("SSH_PORT"), default=22)
+    ssh_port = _parse_int_env("SSH_PORT", os.getenv("SSH_PORT"), default=22) or 22
     remote_port = _parse_int_env("SSH_REMOTE_PORT", os.getenv("SSH_REMOTE_PORT"))
     local_port = _parse_int_env("SSH_LOCAL_PORT", os.getenv("SSH_LOCAL_PORT"))
-    tunnel_timeout = _parse_int_env(
-        "SSH_TUNNEL_TIMEOUT", os.getenv("SSH_TUNNEL_TIMEOUT"), default=10
+    tunnel_timeout = (
+        _parse_int_env("SSH_TUNNEL_TIMEOUT", os.getenv("SSH_TUNNEL_TIMEOUT"), default=10)
+        or 10
     )
 
     return SSHTunnelConfig(
