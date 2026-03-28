@@ -1,3 +1,24 @@
-# Auto detect text files and perform LF normalization
-* text=auto
-*.sh text eol=lf
+# Default: all text files get LF
+* text=auto eol=lf
+
+# Explicitly force LF on common types
+*.py    text eol=lf
+*.ts    text eol=lf
+*.tsx   text eol=lf
+*.js    text eol=lf
+*.json  text eol=lf
+*.sh    text eol=lf
+*.md    text eol=lf
+*.yaml  text eol=lf
+*.toml  text eol=lf
+
+# Windows-specific files that legitimately need CRLF
+*.bat   text eol=crlf
+*.cmd   text eol=crlf
+*.ps1   text eol=crlf
+
+# Binary files — no conversion
+*.png   binary
+*.jpg   binary
+*.pdf   binary
+*.zip   binary

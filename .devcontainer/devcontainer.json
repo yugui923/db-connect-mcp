@@ -2,9 +2,6 @@
   "name": "dev-${localWorkspaceFolderBasename}",
   "dockerComposeFile": "docker-compose.yml",
   "service": "devcontainer",
-  "runArgs": [
-    "--hostname=${localWorkspaceFolderBasename}"
-  ],
   "workspaceFolder": "/workspace",
   "containerEnv": {
     "AGENT_ID": "${localWorkspaceFolderBasename}",
@@ -103,7 +100,7 @@
       }
     }
   },
-  "postCreateCommand": "echo '\n========================================\n  Dev Container Ready!\n========================================\n  Base:      Ubuntu 24.04\n  User:      vscode\n  Shell:     zsh (autosuggestions, syntax-highlighting)\n  Network:   host mode\n----------------------------------------\n  Runtime Manager: mise\n    - Python 3.13\n    - Node 22\n  Package Managers: uv, npm\n----------------------------------------\n  Python Tools:  ruff, black, mypy, pytest\n  Node Tools:    typescript, tsx, prettier, eslint\n  DB Clients:    sqlite3, mysql-client, postgresql-client\n  AI:            Claude Code\n========================================\n'",
+  "postCreateCommand": "echo '\n========================================\n  Dev Container Ready!\n========================================\n  Base:      Ubuntu 24.04 (init: tini)\n  User:      vscode\n  Shell:     zsh (autosuggestions, syntax-highlighting)\n  Network:   host mode\n----------------------------------------\n  Runtime Manager: mise\n    - Python 3.13\n    - Node 22\n  Package Managers: uv, npm\n----------------------------------------\n  Python Tools:  ruff, black, mypy, pytest\n  Node Tools:    typescript, tsx, prettier, eslint\n  DB Clients:    sqlite3, mysql-client, postgresql-client\n  System:        htop, strace, lsof, tree, man\n  AI:            Claude Code\n========================================\n'",
   "remoteUser": "vscode",
   "forwardPorts": [
     2222,

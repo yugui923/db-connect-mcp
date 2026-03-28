@@ -1,5 +1,5 @@
 # Yuri devcontainer Dockerfile
-# Last updated: 2025-01-31
+# Last updated: 2026-02-19
 
 # This Dockerfile sets up a development environment with:
 # - Ubuntu 24.04 base image
@@ -11,9 +11,9 @@
 
 FROM mcr.microsoft.com/devcontainers/base:ubuntu-24.04
 
-# Install system dependencies needed for development
-RUN apt-get update
-RUN apt-get install -y \
+# Install system dependencies in a single layer
+RUN DEBIAN_FRONTEND=noninteractive apt-get update \
+    && apt-get install -y --no-install-recommends \
     # Build essentials for native extensions
     build-essential \
     # SSL/crypto libraries
@@ -26,8 +26,17 @@ RUN apt-get install -y \
     # Useful utilities
     jq curl wget git unzip zip \
     # Shell
-    zsh
-RUN apt-get clean
+    zsh \
+    # Process/system inspection
+    htop procps lsof strace \
+    # File utilities
+    tree file less \
+    # Man pages
+    man-db manpages \
+    # Terminal editors (fallback)
+    vim-tiny nano \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
 
 # Switch to vscode user for tool installation
@@ -68,15 +77,15 @@ RUN mise exec node -- npm install -g \
     prettier \
     eslint
 
-    
+
 # Install global Python tools via uv
 RUN uv tool install ruff && \
     uv tool install black && \
     uv tool install mypy && \
     uv tool install pytest
-    
 
-# Install ZSH plugins and themes
+
+# Install ZSH plugins
 RUN git clone https://github.com/zsh-users/zsh-autosuggestions \
   ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zsh-autosuggestions
 RUN git clone https://github.com/zsh-users/zsh-syntax-highlighting.git \

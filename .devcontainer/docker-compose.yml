@@ -1,5 +1,5 @@
 # Yuri devcontainer docker-compose.yml
-# Last updated: 2025-02-04
+# Last updated: 2026-02-19
 
 # Used by VS Code Dev Containers extension
 # Development container with database sidecars for testing
@@ -15,6 +15,9 @@ services:
     build:
       context: ..
       dockerfile: .devcontainer/Dockerfile
+    init: true
+    shm_size: "4gb"
+    hostname: "db-connect-mcp"
     volumes:
       - ..:/workspace
       - claude-code-data:/home/vscode/.claude
