@@ -43,11 +43,19 @@ class SSHTunnelConfig(BaseModel):
     ssh_private_key: Optional[str] = Field(
         default=None,
         repr=False,
-        description="SSH private key content (raw PEM or base64-encoded PEM)",
+        description=(
+            "SSH private key content. Supported formats: PEM (PKCS#1), "
+            "OpenSSH, PKCS#8 (encrypted/unencrypted), and base64-encoded "
+            "variants. Keys with escaped newlines (from env vars/JSON) are "
+            "auto-normalized. PuTTY PPK is detected but not supported."
+        ),
     )
     ssh_private_key_path: Optional[str] = Field(
         default=None,
-        description="Path to SSH private key file",
+        description=(
+            "Path to SSH private key file. Supports the same formats "
+            "as ssh_private_key (PEM, OpenSSH, PKCS#8)."
+        ),
     )
     ssh_private_key_passphrase: Optional[str] = Field(
         default=None,

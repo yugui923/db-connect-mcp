@@ -1,18 +1,41 @@
 """SSH tunnel management for secure database connections."""
 
 import base64
+import binascii
+import enum
 import logging
+import re
+import time
 from io import StringIO
 from pathlib import Path
-from typing import Optional
 from urllib.parse import urlparse, urlunparse
 
 import paramiko
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import dsa, ec, ed25519, rsa
 from sshtunnel import SSHTunnelForwarder
 
 from db_connect_mcp.models.config import SSHTunnelConfig
 
 logger = logging.getLogger(__name__)
+
+# Maximum time allowed for the entire key parsing pipeline (seconds).
+# Leaves ~1s headroom within the user's expected 5s connection time.
+_KEY_PARSE_BUDGET_SECONDS = 4.0
+
+
+class KeyFormat(enum.Enum):
+    """Detected SSH private key format."""
+
+    PEM_RSA = "pem_rsa"
+    PEM_DSA = "pem_dsa"
+    PEM_EC = "pem_ec"
+    PEM_OPENSSH = "pem_openssh"
+    PEM_PKCS8 = "pem_pkcs8"
+    PEM_PKCS8_ENC = "pem_pkcs8_enc"
+    PUTTY_PPK = "putty_ppk"
+    BASE64_ENCODED = "base64_encoded"
+    UNKNOWN = "unknown"
 
 
 class SSHTunnelError(Exception):
@@ -32,8 +55,8 @@ class SSHTunnelManager:
             config: SSH tunnel configuration
         """
         self.config = config
-        self._tunnel: Optional[SSHTunnelForwarder] = None
-        self._local_bind_port: Optional[int] = None
+        self._tunnel: SSHTunnelForwarder | None = None
+        self._local_bind_port: int | None = None
 
     def start(self) -> int:
         """
@@ -119,16 +142,15 @@ class SSHTunnelManager:
             Dictionary of authentication parameters
 
         Raises:
-            SSHTunnelError: If private key file not found
+            SSHTunnelError: If private key file not found or cannot be parsed
         """
-        params = {}
+        params: dict[str, object] = {}
 
         if self.config.ssh_password:
             params["ssh_password"] = self.config.ssh_password
 
         if self.config.ssh_private_key:
             # Inline key takes precedence over file path
-            # Key is fully decrypted during parsing, so no need to pass passphrase
             passphrase = self.config.ssh_private_key_passphrase
             pkey = self._parse_private_key(self.config.ssh_private_key, passphrase)
             params["ssh_pkey"] = pkey
@@ -138,24 +160,85 @@ class SSHTunnelManager:
                 raise SSHTunnelError(
                     f"SSH private key not found: {self.config.ssh_private_key_path}"
                 )
-            params["ssh_pkey"] = str(key_path)
-
-            if self.config.ssh_private_key_passphrase:
-                params["ssh_private_key_password"] = (
-                    self.config.ssh_private_key_passphrase
-                )
+            # Read file and parse through our format-detection pipeline
+            # so that PKCS#8, OpenSSH, and escaped keys in files all work.
+            try:
+                key_content = key_path.read_text(encoding="utf-8")
+            except UnicodeDecodeError as e:
+                raise SSHTunnelError(
+                    f"SSH private key file '{self.config.ssh_private_key_path}' "
+                    "contains non-UTF-8 content. It may be a binary (DER) "
+                    "encoded key. Please convert to PEM format: "
+                    "openssl pkey -inform DER -in key.der -outform PEM -o key.pem"
+                ) from e
+            except OSError as e:
+                raise SSHTunnelError(
+                    f"Cannot read SSH private key file "
+                    f"'{self.config.ssh_private_key_path}': {e}. "
+                    "Check file permissions (should be 600) and that "
+                    "the path points to a regular file."
+                ) from e
+            passphrase = self.config.ssh_private_key_passphrase
+            pkey = self._parse_private_key(key_content, passphrase)
+            params["ssh_pkey"] = pkey
 
         return params
 
+    # ------------------------------------------------------------------
+    # Key format detection and parsing
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _detect_key_format(content: str) -> KeyFormat:
+        """Detect the SSH private key format from its content prefix."""
+        stripped = content.strip()
+
+        if stripped.startswith("-----BEGIN RSA PRIVATE KEY-----"):
+            return KeyFormat.PEM_RSA
+        if stripped.startswith("-----BEGIN DSA PRIVATE KEY-----"):
+            return KeyFormat.PEM_DSA
+        if stripped.startswith("-----BEGIN EC PRIVATE KEY-----"):
+            return KeyFormat.PEM_EC
+        if stripped.startswith("-----BEGIN OPENSSH PRIVATE KEY-----"):
+            return KeyFormat.PEM_OPENSSH
+        if stripped.startswith("-----BEGIN ENCRYPTED PRIVATE KEY-----"):
+            return KeyFormat.PEM_PKCS8_ENC
+        if stripped.startswith("-----BEGIN PRIVATE KEY-----"):
+            return KeyFormat.PEM_PKCS8
+        if stripped.startswith("PuTTY-User-Key-File-"):
+            return KeyFormat.PUTTY_PPK
+
+        # Check if this is base64-encoded content that decodes to a known format
+        try:
+            decoded = base64.b64decode(stripped).decode("utf-8")
+            if decoded.strip().startswith("-----BEGIN"):
+                return KeyFormat.BASE64_ENCODED
+        except (binascii.Error, UnicodeDecodeError):
+            pass  # Not base64 or not text — expected for non-base64 keys
+
+        return KeyFormat.UNKNOWN
+
+    @staticmethod
+    def _normalize_escape_sequences(content: str) -> str:
+        """Replace literal two-char escape sequences with real characters.
+
+        Handles keys from environment variables or JSON config where newlines
+        are stored as literal backslash-n (``\\n``) instead of real newlines.
+        """
+        # Replace literal \r\n, \r, and \n with real newlines
+        content = content.replace("\\r\\n", "\n")
+        content = content.replace("\\r", "\r")
+        content = content.replace("\\n", "\n")
+        return content
+
     @staticmethod
     def _normalize_pem(pem: str) -> str:
-        """
-        Ensure PEM content has proper line breaks (64-char body lines).
+        """Ensure PEM content has proper line breaks (64-char body lines).
 
         Handles PEM that was concatenated into a single line.
+        Preserves RFC 1421 encapsulated headers (e.g. Proc-Type, DEK-Info)
+        found in encrypted traditional PEM keys.
         """
-        import re
-
         pem = pem.strip()
         # Match header, body, footer — allowing missing newlines
         m = re.match(
@@ -164,68 +247,306 @@ class SSHTunnelManager:
             re.DOTALL,
         )
         if not m:
+            logger.debug(
+                "PEM normalization skipped: content does not match PEM structure"
+            )
             return pem  # Not valid PEM structure, return as-is for error handling later
 
         header, body, footer = m.group(1), m.group(2), m.group(3)
+
+        # Detect RFC 1421 metadata headers (e.g. "Proc-Type: 4,ENCRYPTED").
+        # These appear as "Key: Value" lines before a blank line separator.
+        # If present, return the PEM as-is to avoid corrupting the metadata.
+        body_stripped = body.strip()
+        if body_stripped and re.match(r"[A-Za-z][A-Za-z0-9-]*:\s", body_stripped):
+            return header + "\n" + body_stripped + "\n" + footer
+
         # Strip all whitespace from body and re-wrap at 64 chars
         body_clean = re.sub(r"\s+", "", body)
         lines = [body_clean[i : i + 64] for i in range(0, len(body_clean), 64)]
         return header + "\n" + "\n".join(lines) + "\n" + footer
 
     @staticmethod
-    def _decode_key_content(key_content: str) -> str:
-        """
-        Decode key content, handling both raw PEM and base64-encoded PEM.
+    def _decode_key_content(key_content: str) -> tuple[str, KeyFormat]:
+        """Decode key content with full format detection.
 
-        If the content starts with '-----BEGIN', it is treated as raw PEM.
-        Otherwise, it is base64-decoded first. In both cases, PEM line
-        formatting is normalized.
+        Normalizes escape sequences, detects the key format, unwraps base64
+        encoding, and normalizes PEM line formatting.
+
+        Returns:
+            Tuple of (normalized content, detected format).
 
         Raises:
-            SSHTunnelError: If base64 decoding fails
+            SSHTunnelError: If the key content cannot be decoded or is in an
+                unsupported format (PuTTY PPK).
         """
-        stripped = key_content.strip()
-        if stripped.startswith("-----BEGIN"):
-            return SSHTunnelManager._normalize_pem(stripped)
+        # Step 1: normalize escape sequences from env vars / JSON
+        content = SSHTunnelManager._normalize_escape_sequences(key_content)
+        stripped = content.strip()
+
+        # Step 2: detect format
+        fmt = SSHTunnelManager._detect_key_format(stripped)
+
+        # Step 3: reject PuTTY PPK early with clear guidance
+        if fmt == KeyFormat.PUTTY_PPK:
+            raise SSHTunnelError(
+                "SSH private key is in PuTTY PPK format, which is not directly supported. "
+                "Please convert to OpenSSH format using: "
+                "puttygen key.ppk -O private-openssh -o key.pem"
+            )
+
+        # Step 4: unwrap base64 encoding
+        if fmt == KeyFormat.BASE64_ENCODED:
+            try:
+                decoded = base64.b64decode(stripped).decode("utf-8")
+            except (binascii.Error, UnicodeDecodeError) as e:
+                raise SSHTunnelError(
+                    f"SSH private key could not be base64-decoded: {e}"
+                ) from e
+            stripped = decoded.strip()
+            fmt = SSHTunnelManager._detect_key_format(stripped)
+
+        # Step 5: normalize PEM if it's a PEM format
+        if fmt in (
+            KeyFormat.PEM_RSA,
+            KeyFormat.PEM_DSA,
+            KeyFormat.PEM_EC,
+            KeyFormat.PEM_OPENSSH,
+            KeyFormat.PEM_PKCS8,
+            KeyFormat.PEM_PKCS8_ENC,
+        ):
+            stripped = SSHTunnelManager._normalize_pem(stripped)
+
+        # Step 6: for UNKNOWN format, try legacy base64 decode as last resort
+        if fmt == KeyFormat.UNKNOWN:
+            try:
+                decoded = base64.b64decode(stripped).decode("utf-8")
+                if decoded.strip().startswith("-----BEGIN"):
+                    stripped = SSHTunnelManager._normalize_pem(decoded.strip())
+                    fmt = SSHTunnelManager._detect_key_format(stripped)
+                else:
+                    raise SSHTunnelError(
+                        "SSH private key: base64-decoded content is not a valid PEM key"
+                    )
+            except SSHTunnelError:
+                raise
+            except Exception as e:
+                raise SSHTunnelError(
+                    f"SSH private key is not valid PEM and could not be "
+                    f"base64-decoded: {e}"
+                ) from e
+
+        return stripped, fmt
+
+    @staticmethod
+    def _convert_crypto_key_to_paramiko(
+        private_key: (
+            rsa.RSAPrivateKey
+            | ec.EllipticCurvePrivateKey
+            | ed25519.Ed25519PrivateKey
+            | dsa.DSAPrivateKey
+        ),
+    ) -> paramiko.PKey:
+        """Convert a ``cryptography`` private key to a paramiko PKey.
+
+        RSA, EC, and DSA keys are serialized to TraditionalOpenSSL PEM.
+        Ed25519 keys use OpenSSH PEM (no traditional format exists).
+        """
+        if isinstance(private_key, rsa.RSAPrivateKey):
+            pem = private_key.private_bytes(
+                serialization.Encoding.PEM,
+                serialization.PrivateFormat.TraditionalOpenSSL,
+                serialization.NoEncryption(),
+            )
+            return paramiko.RSAKey.from_private_key(StringIO(pem.decode("utf-8")))
+
+        if isinstance(private_key, ec.EllipticCurvePrivateKey):
+            pem = private_key.private_bytes(
+                serialization.Encoding.PEM,
+                serialization.PrivateFormat.TraditionalOpenSSL,
+                serialization.NoEncryption(),
+            )
+            return paramiko.ECDSAKey.from_private_key(StringIO(pem.decode("utf-8")))
+
+        if isinstance(private_key, ed25519.Ed25519PrivateKey):
+            # Ed25519 has no TraditionalOpenSSL format — use OpenSSH PEM
+            pem = private_key.private_bytes(
+                serialization.Encoding.PEM,
+                serialization.PrivateFormat.OpenSSH,
+                serialization.NoEncryption(),
+            )
+            return paramiko.Ed25519Key.from_private_key(StringIO(pem.decode("utf-8")))
+
+        if isinstance(private_key, dsa.DSAPrivateKey):
+            pem = private_key.private_bytes(
+                serialization.Encoding.PEM,
+                serialization.PrivateFormat.TraditionalOpenSSL,
+                serialization.NoEncryption(),
+            )
+            return paramiko.DSSKey.from_private_key(  # type: ignore[attr-defined]
+                StringIO(pem.decode("utf-8"))
+            )
+
+        raise SSHTunnelError(
+            f"Unsupported key type for conversion: {type(private_key).__name__}"
+        )
+
+    @staticmethod
+    def _parse_pkcs8_key(
+        pem_bytes: bytes, passphrase: str | None = None
+    ) -> paramiko.PKey:
+        """Parse a PKCS#8 PEM key via the ``cryptography`` library.
+
+        Loads the key with ``load_pem_private_key``, detects the algorithm,
+        and converts to a paramiko PKey object.
+        """
+        pw = passphrase.encode("utf-8") if passphrase else None
         try:
-            decoded = base64.b64decode(stripped).decode("utf-8")
+            private_key = serialization.load_pem_private_key(pem_bytes, password=pw)
+        except Exception as e:
+            raise SSHTunnelError(f"Failed to load PKCS#8 private key: {e}") from e
+        try:
+            return SSHTunnelManager._convert_crypto_key_to_paramiko(private_key)  # type: ignore[arg-type]
+        except SSHTunnelError:
+            raise
         except Exception as e:
             raise SSHTunnelError(
-                f"SSH private key is not valid PEM and could not be base64-decoded: {e}"
+                f"PKCS#8 key loaded but conversion to paramiko failed: {e}"
             ) from e
-        if not decoded.strip().startswith("-----BEGIN"):
-            raise SSHTunnelError(
-                "SSH private key: base64-decoded content is not a valid PEM key"
-            )
-        return SSHTunnelManager._normalize_pem(decoded.strip())
 
     @staticmethod
     def _parse_private_key(
-        key_content: str, passphrase: Optional[str] = None
+        key_content: str, passphrase: str | None = None
     ) -> paramiko.PKey:
-        """
-        Parse a private key string into a paramiko PKey object.
+        """Parse a private key string into a paramiko PKey object.
 
-        Accepts raw PEM or base64-encoded PEM content.
-        Tries RSA, Ed25519, ECDSA, and DSS key types in order.
+        Supports PEM (PKCS#1), OpenSSH, PKCS#8 (encrypted and unencrypted),
+        base64-encoded variants of all the above, and keys with escaped
+        newlines from environment variables or JSON config.
+
+        PuTTY PPK keys are detected and rejected with conversion instructions.
+
+        A 4-second time budget prevents pathological fallback chains from
+        blocking the connection flow.
 
         Raises:
             SSHTunnelError: If the key cannot be parsed as any supported type
         """
-        pem = SSHTunnelManager._decode_key_content(key_content)
-        key_classes = [
+        start = time.monotonic()
+
+        def _check_budget() -> None:
+            if time.monotonic() - start > _KEY_PARSE_BUDGET_SECONDS:
+                raise SSHTunnelError(
+                    "SSH key parsing exceeded time budget "
+                    f"({_KEY_PARSE_BUDGET_SECONDS:.0f}s). "
+                    "The key may be corrupt or in an unsupported format."
+                )
+
+        # Decode, normalize, and detect format
+        pem, fmt = SSHTunnelManager._decode_key_content(key_content)
+        _check_budget()
+        logger.debug("Detected SSH key format: %s", fmt.value)
+
+        # Collect errors from each attempt for diagnostic output
+        errors: list[tuple[str, Exception]] = []
+
+        # --- PKCS#8 fast path (paramiko cannot handle this natively) ---
+        if fmt in (KeyFormat.PEM_PKCS8, KeyFormat.PEM_PKCS8_ENC):
+            try:
+                logger.debug("Attempting PKCS#8 fast path for format: %s", fmt.value)
+                pkey = SSHTunnelManager._parse_pkcs8_key(
+                    pem.encode("utf-8"), passphrase
+                )
+                logger.debug("Key parsed as %s via PKCS#8", pkey.get_name())
+                return pkey
+            except SSHTunnelError:
+                raise
+            except Exception as e:
+                logger.warning(
+                    "PKCS#8 parsing raised unexpected %s: %s; "
+                    "falling back to brute-force",
+                    type(e).__name__,
+                    e,
+                )
+                errors.append(("PKCS#8", e))
+                _check_budget()
+                # Fall through to brute-force as last resort
+
+        # --- Traditional PEM / OpenSSH path ---
+        # Map detected format to the most likely paramiko class
+        _format_to_classes: dict[KeyFormat, list[type[paramiko.PKey]]] = {
+            KeyFormat.PEM_RSA: [paramiko.RSAKey],
+            KeyFormat.PEM_DSA: [
+                paramiko.DSSKey,  # type: ignore[attr-defined]
+            ],
+            KeyFormat.PEM_EC: [paramiko.ECDSAKey],
+            KeyFormat.PEM_OPENSSH: [
+                paramiko.Ed25519Key,
+                paramiko.RSAKey,
+                paramiko.ECDSAKey,
+                paramiko.DSSKey,  # type: ignore[attr-defined]
+            ],
+        }
+
+        all_classes: list[type[paramiko.PKey]] = [
             paramiko.RSAKey,
             paramiko.Ed25519Key,
             paramiko.ECDSAKey,
-            paramiko.DSSKey,  # type: ignore[attr-defined]  # DSSKey exists but missing from stubs
+            paramiko.DSSKey,  # type: ignore[attr-defined]
         ]
-        for key_class in key_classes:
-            try:
-                return key_class.from_private_key(StringIO(pem), password=passphrase)
-            except Exception:
+
+        preferred = _format_to_classes.get(fmt, [])
+        tried: set[type[paramiko.PKey]] = set()
+
+        # Try preferred class(es) first, then remaining
+        for key_class in [*preferred, *all_classes]:
+            if key_class in tried:
                 continue
+            _check_budget()
+            tried.add(key_class)
+            try:
+                logger.debug("Trying paramiko %s", key_class.__name__)
+                pkey = key_class.from_private_key(StringIO(pem), password=passphrase)
+                logger.debug("Key parsed as %s", pkey.get_name())
+                return pkey
+            except paramiko.PasswordRequiredException as e:
+                raise SSHTunnelError(
+                    "SSH private key is encrypted but no passphrase was "
+                    "provided. Set ssh_private_key_passphrase in your "
+                    "configuration."
+                ) from e
+            except Exception as e:
+                logger.debug("%s failed: %s", key_class.__name__, e)
+                errors.append((key_class.__name__, e))
+                continue
+
+        # Last resort: attempt PKCS#8 conversion for unrecognized PEM headers
+        if fmt not in (KeyFormat.PEM_PKCS8, KeyFormat.PEM_PKCS8_ENC):
+            _check_budget()
+            try:
+                logger.debug("Trying last-resort PKCS#8 conversion")
+                pkey = SSHTunnelManager._parse_pkcs8_key(
+                    pem.encode("utf-8"), passphrase
+                )
+                logger.debug("Key parsed as %s via PKCS#8 last resort", pkey.get_name())
+                return pkey
+            except SSHTunnelError as e:
+                logger.debug("Last-resort PKCS#8 failed: %s", e)
+                errors.append(("PKCS#8 (last resort)", e))
+            except Exception as e:
+                logger.warning(
+                    "Last-resort PKCS#8 raised unexpected %s: %s",
+                    type(e).__name__,
+                    e,
+                )
+                errors.append(("PKCS#8 (last resort)", e))
+
+        details = "; ".join(f"{name}: {err}" for name, err in errors[-3:])
         raise SSHTunnelError(
-            "Failed to parse inline SSH private key: unsupported key type or invalid key content"
+            f"Failed to parse SSH private key. Last errors: {details}. "
+            "Supported formats: RSA, DSA, ECDSA, Ed25519 in PEM, "
+            "OpenSSH, or PKCS#8 encoding. PuTTY PPK keys must be converted "
+            "first (puttygen key.ppk -O private-openssh -o key.pem)."
         )
 
     def ensure_active(self) -> bool:
@@ -259,7 +580,7 @@ class SSHTunnelManager:
         return self._tunnel is not None and self._tunnel.is_active
 
     @property
-    def local_bind_port(self) -> Optional[int]:
+    def local_bind_port(self) -> int | None:
         """Get the local port where tunnel is listening."""
         return self._local_bind_port
 

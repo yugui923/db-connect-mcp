@@ -660,6 +660,10 @@ See the [Development Guide](docs/guides/DEVELOPMENT.md#running-tests) and [Testi
 - The server automatically limits results to prevent memory issues
 - For large analyses, consider using more specific queries
 
+## Author
+
+Created by [Yuri Gui](https://github.com/yugui923).
+
 ## Contributing
 
 Contributions are welcome! The server is designed to be read-only and safe by default. Any new features should maintain these safety guarantees.
