@@ -4,10 +4,11 @@ from .analyzer import StatisticsAnalyzer
 from .connection import DatabaseConnection
 from .executor import QueryExecutor
 from .inspector import MetadataInspector
-from .tunnel import SSHTunnelError, SSHTunnelManager, rewrite_database_url
+from .tunnel import KeyFormat, SSHTunnelError, SSHTunnelManager, rewrite_database_url
 
 __all__ = [
     "DatabaseConnection",
+    "KeyFormat",
     "MetadataInspector",
     "QueryExecutor",
     "StatisticsAnalyzer",

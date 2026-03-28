@@ -1,18 +1,77 @@
 """Unit tests for SSH tunnel configuration and URL rewriting."""
 
 import base64
+import tempfile
+from io import StringIO
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import paramiko
 import pytest
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import ec, ed25519, rsa
 from pydantic import ValidationError
 
 from db_connect_mcp.core.tunnel import (
+    KeyFormat,
     SSHTunnelError,
     SSHTunnelManager,
     rewrite_database_url,
 )
 from db_connect_mcp.models.config import SSHTunnelConfig
+
+
+# ---------------------------------------------------------------------------
+# Helpers: generate keys in various formats for testing
+# ---------------------------------------------------------------------------
+
+
+def _generate_rsa_pem() -> str:
+    """Generate a traditional PEM RSA private key."""
+    key = paramiko.RSAKey.generate(2048)
+    key_io = StringIO()
+    key.write_private_key(key_io)
+    return key_io.getvalue()
+
+
+def _generate_rsa_pkcs8() -> bytes:
+    """Generate a PKCS#8 PEM RSA private key."""
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    return key.private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.PKCS8,
+        serialization.NoEncryption(),
+    )
+
+
+def _generate_ec_pkcs8() -> bytes:
+    """Generate a PKCS#8 PEM EC private key."""
+    key = ec.generate_private_key(ec.SECP256R1())
+    return key.private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.PKCS8,
+        serialization.NoEncryption(),
+    )
+
+
+def _generate_ed25519_pkcs8() -> bytes:
+    """Generate a PKCS#8 PEM Ed25519 private key."""
+    key = ed25519.Ed25519PrivateKey.generate()
+    return key.private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.PKCS8,
+        serialization.NoEncryption(),
+    )
+
+
+def _generate_encrypted_rsa_pkcs8(passphrase: bytes) -> bytes:
+    """Generate an encrypted PKCS#8 PEM RSA private key."""
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    return key.private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.PKCS8,
+        serialization.BestAvailableEncryption(passphrase),
+    )
 
 
 class TestSSHTunnelConfig:
@@ -265,29 +324,31 @@ class TestSSHTunnelManagerMocked:
         assert call_kwargs["ssh_password"] == "secret"
 
     def test_tunnel_passes_key_auth(self, mock_tunnel_forwarder):
-        """Key auth params should be passed to forwarder."""
+        """Key file should be read and parsed into a PKey object."""
         mock_class, mock_instance = mock_tunnel_forwarder
 
-        # Mock path exists - need to mock the Path class properly
-        with patch("db_connect_mcp.core.tunnel.Path") as mock_path:
-            mock_path_instance = MagicMock()
-            mock_path_instance.exists.return_value = True
-            mock_path_instance.__str__ = MagicMock(return_value="/path/to/key")
-            mock_path.return_value = mock_path_instance
+        # Generate a real key and write it to a temp file
+        pem_content = _generate_rsa_pem()
 
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".pem", delete=False) as f:
+            f.write(pem_content)
+            key_path = f.name
+
+        try:
             config = SSHTunnelConfig(
                 ssh_host="bastion.example.com",
                 ssh_username="user",
-                ssh_private_key_path="/path/to/key",
-                ssh_private_key_passphrase="keypass",
+                ssh_private_key_path=key_path,
             )
 
             manager = SSHTunnelManager(config)
             manager.start()
 
             call_kwargs = mock_class.call_args[1]
-            assert call_kwargs["ssh_pkey"] == "/path/to/key"
-            assert call_kwargs["ssh_private_key_password"] == "keypass"
+            # File-based keys are now parsed through our pipeline
+            assert isinstance(call_kwargs["ssh_pkey"], paramiko.PKey)
+        finally:
+            Path(key_path).unlink(missing_ok=True)
 
     def test_tunnel_start_error_raises_exception(
         self, mock_tunnel_forwarder, valid_config
@@ -473,3 +534,313 @@ class TestDatabaseConfigWithSSHTunnel:
         )
 
         assert db_config.ssh_tunnel is None
+
+
+# ===================================================================
+# New tests for key format detection, escape normalization, PKCS#8
+# ===================================================================
+
+
+class TestKeyFormatDetection:
+    """Test _detect_key_format identifies each format correctly."""
+
+    def test_detect_pem_rsa(self):
+        assert (
+            SSHTunnelManager._detect_key_format(
+                "-----BEGIN RSA PRIVATE KEY-----\ndata\n-----END RSA PRIVATE KEY-----"
+            )
+            == KeyFormat.PEM_RSA
+        )
+
+    def test_detect_pem_dsa(self):
+        assert (
+            SSHTunnelManager._detect_key_format(
+                "-----BEGIN DSA PRIVATE KEY-----\ndata\n-----END DSA PRIVATE KEY-----"
+            )
+            == KeyFormat.PEM_DSA
+        )
+
+    def test_detect_pem_ec(self):
+        assert (
+            SSHTunnelManager._detect_key_format(
+                "-----BEGIN EC PRIVATE KEY-----\ndata\n-----END EC PRIVATE KEY-----"
+            )
+            == KeyFormat.PEM_EC
+        )
+
+    def test_detect_pem_openssh(self):
+        assert (
+            SSHTunnelManager._detect_key_format(
+                "-----BEGIN OPENSSH PRIVATE KEY-----\ndata\n"
+                "-----END OPENSSH PRIVATE KEY-----"
+            )
+            == KeyFormat.PEM_OPENSSH
+        )
+
+    def test_detect_pem_pkcs8(self):
+        assert (
+            SSHTunnelManager._detect_key_format(
+                "-----BEGIN PRIVATE KEY-----\ndata\n-----END PRIVATE KEY-----"
+            )
+            == KeyFormat.PEM_PKCS8
+        )
+
+    def test_detect_pem_pkcs8_encrypted(self):
+        assert (
+            SSHTunnelManager._detect_key_format(
+                "-----BEGIN ENCRYPTED PRIVATE KEY-----\ndata\n"
+                "-----END ENCRYPTED PRIVATE KEY-----"
+            )
+            == KeyFormat.PEM_PKCS8_ENC
+        )
+
+    def test_detect_putty_ppk_v2(self):
+        assert (
+            SSHTunnelManager._detect_key_format(
+                "PuTTY-User-Key-File-2: ssh-rsa\nEncryption: none\n"
+            )
+            == KeyFormat.PUTTY_PPK
+        )
+
+    def test_detect_putty_ppk_v3(self):
+        assert (
+            SSHTunnelManager._detect_key_format(
+                "PuTTY-User-Key-File-3: ssh-ed25519\nEncryption: none\n"
+            )
+            == KeyFormat.PUTTY_PPK
+        )
+
+    def test_detect_base64_encoded(self):
+        pem = "-----BEGIN RSA PRIVATE KEY-----\nfake\n-----END RSA PRIVATE KEY-----"
+        b64 = base64.b64encode(pem.encode()).decode()
+        assert SSHTunnelManager._detect_key_format(b64) == KeyFormat.BASE64_ENCODED
+
+    def test_detect_unknown(self):
+        assert (
+            SSHTunnelManager._detect_key_format("random garbage") == KeyFormat.UNKNOWN
+        )
+
+    def test_detect_with_leading_whitespace(self):
+        """Leading whitespace should be stripped before detection."""
+        assert (
+            SSHTunnelManager._detect_key_format(
+                "  \n  -----BEGIN RSA PRIVATE KEY-----\ndata\n"
+                "-----END RSA PRIVATE KEY-----"
+            )
+            == KeyFormat.PEM_RSA
+        )
+
+    def test_detect_pkcs8_not_confused_with_encrypted(self):
+        """ENCRYPTED PRIVATE KEY must be checked before PRIVATE KEY."""
+        assert (
+            SSHTunnelManager._detect_key_format(
+                "-----BEGIN ENCRYPTED PRIVATE KEY-----\ndata\n"
+                "-----END ENCRYPTED PRIVATE KEY-----"
+            )
+            == KeyFormat.PEM_PKCS8_ENC
+        )
+
+
+class TestEscapeNormalization:
+    """Test _normalize_escape_sequences handles various string encodings."""
+
+    def test_literal_backslash_n(self):
+        """Literal two-char \\n should be replaced with real newline."""
+        content = (
+            "-----BEGIN RSA PRIVATE KEY-----\\nMIIE\\n-----END RSA PRIVATE KEY-----"
+        )
+        result = SSHTunnelManager._normalize_escape_sequences(content)
+        assert "\\n" not in result
+        assert "\n" in result
+        assert result.startswith("-----BEGIN RSA PRIVATE KEY-----\n")
+
+    def test_literal_backslash_r_n(self):
+        """Literal \\r\\n should be replaced with real newline."""
+        content = "line1\\r\\nline2"
+        result = SSHTunnelManager._normalize_escape_sequences(content)
+        assert result == "line1\nline2"
+
+    def test_already_real_newlines(self):
+        """Content with real newlines should be unchanged."""
+        content = "-----BEGIN RSA PRIVATE KEY-----\nMIIE\n-----END RSA PRIVATE KEY-----"
+        result = SSHTunnelManager._normalize_escape_sequences(content)
+        assert result == content
+
+    def test_json_escaped_key_roundtrip(self):
+        """Key that was JSON-stringified then loaded should parse correctly."""
+        import json
+
+        original = (
+            "-----BEGIN RSA PRIVATE KEY-----\nMIIE\n-----END RSA PRIVATE KEY-----"
+        )
+        # Simulate what happens when a key is stored as a JSON string value:
+        # json.dumps adds \\n, json.loads converts back to \n
+        json_str = json.dumps(original)
+        loaded = json.loads(json_str)
+        result = SSHTunnelManager._normalize_escape_sequences(loaded)
+        # json.loads already converts \\n -> \n, so no change expected
+        assert result == original
+
+    def test_env_var_escaped_key(self):
+        """Simulate key from env var where newlines are literal \\n strings."""
+        pem = _generate_rsa_pem()
+        # Simulate env var: replace real newlines with literal \n
+        escaped = pem.replace("\n", "\\n")
+        result = SSHTunnelManager._normalize_escape_sequences(escaped)
+        assert result == pem
+
+
+class TestPKCS8KeyParsing:
+    """Test parsing of PKCS#8 format keys."""
+
+    def test_rsa_pkcs8_inline(self):
+        """RSA key in PKCS#8 format should parse successfully."""
+        pkcs8_pem = _generate_rsa_pkcs8()
+        result = SSHTunnelManager._parse_private_key(pkcs8_pem.decode("utf-8"))
+        assert isinstance(result, paramiko.RSAKey)
+
+    def test_ec_pkcs8_inline(self):
+        """EC key in PKCS#8 format should parse successfully."""
+        pkcs8_pem = _generate_ec_pkcs8()
+        result = SSHTunnelManager._parse_private_key(pkcs8_pem.decode("utf-8"))
+        assert isinstance(result, paramiko.ECDSAKey)
+
+    def test_ed25519_pkcs8_inline(self):
+        """Ed25519 key in PKCS#8 format should parse successfully."""
+        pkcs8_pem = _generate_ed25519_pkcs8()
+        result = SSHTunnelManager._parse_private_key(pkcs8_pem.decode("utf-8"))
+        assert isinstance(result, paramiko.Ed25519Key)
+
+    def test_encrypted_pkcs8_with_passphrase(self):
+        """Encrypted PKCS#8 key with correct passphrase should parse."""
+        enc_pem = _generate_encrypted_rsa_pkcs8(b"testpass")
+        result = SSHTunnelManager._parse_private_key(
+            enc_pem.decode("utf-8"), passphrase="testpass"
+        )
+        assert isinstance(result, paramiko.RSAKey)
+
+    def test_encrypted_pkcs8_wrong_passphrase(self):
+        """Encrypted PKCS#8 key with wrong passphrase should raise."""
+        enc_pem = _generate_encrypted_rsa_pkcs8(b"testpass")
+        with pytest.raises(SSHTunnelError, match="PKCS#8"):
+            SSHTunnelManager._parse_private_key(
+                enc_pem.decode("utf-8"), passphrase="wrongpass"
+            )
+
+    def test_encrypted_pkcs8_no_passphrase(self):
+        """Encrypted PKCS#8 key without passphrase should raise."""
+        enc_pem = _generate_encrypted_rsa_pkcs8(b"testpass")
+        with pytest.raises(SSHTunnelError):
+            SSHTunnelManager._parse_private_key(enc_pem.decode("utf-8"))
+
+    def test_base64_encoded_pkcs8(self):
+        """Base64-wrapped PKCS#8 key should parse after unwrapping."""
+        pkcs8_pem = _generate_rsa_pkcs8()
+        b64 = base64.b64encode(pkcs8_pem).decode("utf-8")
+        result = SSHTunnelManager._parse_private_key(b64)
+        assert isinstance(result, paramiko.RSAKey)
+
+
+class TestPuTTYPPKRejection:
+    """Test that PuTTY PPK keys are rejected with clear instructions."""
+
+    def test_ppk_v2_rejected_with_message(self):
+        """PPK v2 format should be rejected with conversion instructions."""
+        ppk_content = (
+            "PuTTY-User-Key-File-2: ssh-rsa\nEncryption: none\nComment: test-key\n"
+        )
+        with pytest.raises(SSHTunnelError, match="PuTTY PPK format") as exc_info:
+            SSHTunnelManager._parse_private_key(ppk_content)
+        assert "puttygen" in str(exc_info.value)
+
+    def test_ppk_v3_rejected_with_message(self):
+        """PPK v3 format should be rejected with conversion instructions."""
+        ppk_content = (
+            "PuTTY-User-Key-File-3: ssh-ed25519\nEncryption: none\nComment: test-key\n"
+        )
+        with pytest.raises(SSHTunnelError, match="PuTTY PPK format") as exc_info:
+            SSHTunnelManager._parse_private_key(ppk_content)
+        assert "puttygen" in str(exc_info.value)
+
+
+class TestEscapedKeyParsing:
+    """Test end-to-end parsing of keys with escaped newlines."""
+
+    def test_traditional_pem_with_escaped_newlines(self):
+        """PEM key with literal \\n should be parsed correctly."""
+        pem = _generate_rsa_pem()
+        escaped = pem.replace("\n", "\\n")
+        result = SSHTunnelManager._parse_private_key(escaped)
+        assert isinstance(result, paramiko.RSAKey)
+
+    def test_pkcs8_with_escaped_newlines(self):
+        """PKCS#8 key with literal \\n should be parsed correctly."""
+        pkcs8 = _generate_rsa_pkcs8().decode("utf-8")
+        escaped = pkcs8.replace("\n", "\\n")
+        result = SSHTunnelManager._parse_private_key(escaped)
+        assert isinstance(result, paramiko.RSAKey)
+
+
+class TestFileBasedKeyParsing:
+    """Test that file-based keys go through the format detection pipeline."""
+
+    @pytest.fixture
+    def mock_tunnel_forwarder(self):
+        """Mock SSHTunnelForwarder."""
+        with patch("db_connect_mcp.core.tunnel.SSHTunnelForwarder") as mock:
+            instance = MagicMock()
+            instance.local_bind_port = 54321
+            instance.is_active = True
+            mock.return_value = instance
+            yield mock, instance
+
+    def test_file_path_pkcs8_key(self, mock_tunnel_forwarder):
+        """PKCS#8 key file should be parsed through the pipeline."""
+        mock_class, _ = mock_tunnel_forwarder
+        pkcs8_pem = _generate_rsa_pkcs8()
+
+        with tempfile.NamedTemporaryFile(mode="wb", suffix=".pem", delete=False) as f:
+            f.write(pkcs8_pem)
+            key_path = f.name
+
+        try:
+            config = SSHTunnelConfig(
+                ssh_host="bastion.example.com",
+                ssh_username="user",
+                ssh_private_key_path=key_path,
+                remote_port=5432,
+            )
+
+            manager = SSHTunnelManager(config)
+            manager.start()
+
+            call_kwargs = mock_class.call_args[1]
+            assert isinstance(call_kwargs["ssh_pkey"], paramiko.RSAKey)
+        finally:
+            Path(key_path).unlink(missing_ok=True)
+
+    def test_file_path_escaped_key(self, mock_tunnel_forwarder):
+        """Key file with escaped newlines should be parsed correctly."""
+        mock_class, _ = mock_tunnel_forwarder
+        pem = _generate_rsa_pem()
+        escaped = pem.replace("\n", "\\n")
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".pem", delete=False) as f:
+            f.write(escaped)
+            key_path = f.name
+
+        try:
+            config = SSHTunnelConfig(
+                ssh_host="bastion.example.com",
+                ssh_username="user",
+                ssh_private_key_path=key_path,
+                remote_port=5432,
+            )
+
+            manager = SSHTunnelManager(config)
+            manager.start()
+
+            call_kwargs = mock_class.call_args[1]
+            assert isinstance(call_kwargs["ssh_pkey"], paramiko.PKey)
+        finally:
+            Path(key_path).unlink(missing_ok=True)
