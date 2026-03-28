@@ -1,13 +1,13 @@
 """SSH tunnel management for secure database connections."""
 
 import base64
+import binascii
 import enum
 import logging
 import re
 import time
 from io import StringIO
 from pathlib import Path
-import binascii
 from urllib.parse import urlparse, urlunparse
 
 import paramiko
@@ -164,13 +164,13 @@ class SSHTunnelManager:
             # so that PKCS#8, OpenSSH, and escaped keys in files all work.
             try:
                 key_content = key_path.read_text(encoding="utf-8")
-            except UnicodeDecodeError:
+            except UnicodeDecodeError as e:
                 raise SSHTunnelError(
                     f"SSH private key file '{self.config.ssh_private_key_path}' "
                     "contains non-UTF-8 content. It may be a binary (DER) "
                     "encoded key. Please convert to PEM format: "
                     "openssl pkey -inform DER -in key.der -outform PEM -o key.pem"
-                )
+                ) from e
             except OSError as e:
                 raise SSHTunnelError(
                     f"Cannot read SSH private key file "
