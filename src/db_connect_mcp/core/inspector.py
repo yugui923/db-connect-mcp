@@ -323,9 +323,23 @@ class MetadataInspector:
 
     def _index_from_sa(self, idx_data: dict) -> IndexInfo:
         """Convert SQLAlchemy index data to IndexInfo."""
+        column_names = idx_data["column_names"]
+        expressions = idx_data.get("expressions", [])
+
+        # SQLAlchemy returns None in column_names for expression-based indexes
+        # (e.g. lower(name)) and puts the expression text in "expressions".
+        # Substitute None entries with the corresponding expression string.
+        if expressions and None in column_names:
+            columns = [
+                expr if name is None else name
+                for name, expr in zip(column_names, expressions)
+            ]
+        else:
+            columns = [c for c in column_names if c is not None]
+
         return IndexInfo(
             name=idx_data["name"],
-            columns=idx_data["column_names"],
+            columns=columns,
             unique=idx_data.get("unique", False),
             index_type=idx_data.get("type"),
         )
