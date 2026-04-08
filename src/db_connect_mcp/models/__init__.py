@@ -4,6 +4,13 @@ from .capabilities import DatabaseCapabilities
 from .config import DatabaseConfig, SSHTunnelConfig
 from .database import DatabaseInfo, SchemaInfo
 from .query import ExplainPlan, QueryResult
+from .search import (
+    DEFAULT_SEARCH_OBJECT_TYPES,
+    SearchDetailLevel,
+    SearchObjectType,
+    SearchResultItem,
+    SearchResults,
+)
 from .statistics import ColumnStats, Distribution
 from .table import ColumnInfo, ConstraintInfo, IndexInfo, TableInfo
 
@@ -21,4 +28,9 @@ __all__ = [
     "ExplainPlan",
     "ColumnStats",
     "Distribution",
+    "SearchObjectType",
+    "SearchDetailLevel",
+    "SearchResultItem",
+    "SearchResults",
+    "DEFAULT_SEARCH_OBJECT_TYPES",
 ]

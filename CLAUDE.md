@@ -190,6 +190,7 @@ Tools are registered in `src/server.py` and include:
 - `sample_data`: Preview table data
 - `execute_query`: Run read-only SQL
 - `get_table_relationships`: Foreign key relationships
+- `search_objects`: Token-efficient cross-cutting search across schemas, tables, views, columns, and indexes with progressive disclosure (`names` / `summary` / `full` detail levels). Uses SQL LIKE patterns (`%`, `_`). Implemented in `src/db_connect_mcp/core/search.py` (`ObjectSearcher`) on top of `MetadataInspector`. Capped at 200 described tables per call (mitigated by `schema` / `table` filters).
 
 Tools are conditionally registered based on database capabilities from the adapter.
 

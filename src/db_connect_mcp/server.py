@@ -19,10 +19,12 @@ from db_connect_mcp.adapters import create_adapter
 from db_connect_mcp.core import (
     DatabaseConnection,
     MetadataInspector,
+    ObjectSearcher,
     QueryExecutor,
     StatisticsAnalyzer,
 )
 from db_connect_mcp.models.config import DatabaseConfig, SSHTunnelConfig
+from db_connect_mcp.models.search import SearchDetailLevel, SearchObjectType
 
 # Load environment variables
 load_dotenv()
@@ -44,6 +46,7 @@ MAX_RESPONSE_ANALYZE_COLUMN = 50000  # Column statistics
 MAX_RESPONSE_DESCRIBE_TABLE = 100000  # Detailed table structure
 MAX_RESPONSE_EXPLAIN_QUERY = 100000  # Query execution plans
 MAX_RESPONSE_EXECUTE_QUERY = 100000  # Query results (up to 1000 rows)
+MAX_RESPONSE_SEARCH_OBJECTS = 100000  # Cross-cutting object search results
 
 
 def truncate_json_response(data: str, max_length: int) -> str:
@@ -430,6 +433,7 @@ class DatabaseMCPServer:
         self.inspector: Optional[MetadataInspector] = None
         self.executor: Optional[QueryExecutor] = None
         self.analyzer: Optional[StatisticsAnalyzer] = None
+        self.searcher: Optional[ObjectSearcher] = None
         self.server = Server("db-connect-mcp")
 
     async def initialize(self) -> None:
@@ -439,6 +443,7 @@ class DatabaseMCPServer:
         self.inspector = MetadataInspector(self.connection, self.adapter)
         self.executor = QueryExecutor(self.connection, self.adapter)
         self.analyzer = StatisticsAnalyzer(self.connection, self.adapter)
+        self.searcher = ObjectSearcher(self.inspector)
 
         # Register MCP tool handlers
         await self._register_tools()
@@ -619,6 +624,95 @@ class DatabaseMCPServer:
                     },
                 },
                 "required": ["query"],
+            },
+        )
+
+    def _create_search_objects_tool(self) -> Tool:
+        """Create search_objects tool.
+
+        Token-efficient cross-cutting search across schemas, tables, views,
+        columns, and indexes. Inspired by bytebase/dbhub's search_objects.
+        Three detail levels (``names`` / ``summary`` / ``full``) let the
+        caller trade verbosity for tokens.
+        """
+        return Tool(
+            name="search_objects",
+            description=(
+                "Search and explore database objects (schemas, tables, views, "
+                "columns, indexes) with progressive disclosure for token "
+                "efficiency. Use SQL LIKE pattern (% matches any sequence, "
+                "_ matches one character) to match names. Three detail levels: "
+                "'names' (most token-efficient), 'summary' (default, key "
+                "metadata), 'full' (includes comments and full type info). "
+                "For column/index search, narrow with `schema` (and optionally "
+                "`table`) to avoid the per-call table cap."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "pattern": {
+                        "type": "string",
+                        "description": (
+                            "SQL LIKE pattern to match object names. Use '%' "
+                            "to match all, '%user%' for substring, '_d' for "
+                            "single-char wildcard."
+                        ),
+                    },
+                    "object_types": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "enum": [
+                                "schema",
+                                "table",
+                                "view",
+                                "column",
+                                "index",
+                            ],
+                        },
+                        "description": (
+                            "Types of objects to search. Defaults to all 5 "
+                            "types. Restricting types is faster."
+                        ),
+                    },
+                    "detail_level": {
+                        "type": "string",
+                        "enum": ["names", "summary", "full"],
+                        "default": "summary",
+                        "description": (
+                            "Response verbosity. 'names' returns just "
+                            "identifiers (cheapest), 'summary' adds key "
+                            "metadata, 'full' includes comments and type "
+                            "details."
+                        ),
+                    },
+                    "schema": {
+                        "type": "string",
+                        "description": (
+                            "Restrict search to a specific schema. Strongly "
+                            "recommended when searching columns or indexes."
+                        ),
+                    },
+                    "table": {
+                        "type": "string",
+                        "description": (
+                            "Restrict column/index search to a specific table. "
+                            "Without `schema`, matches a table of that name in "
+                            "any schema."
+                        ),
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "default": 100,
+                        "minimum": 1,
+                        "maximum": 1000,
+                        "description": (
+                            "Max items to return (1-1000). Total match count "
+                            "is reported separately in 'total_found'."
+                        ),
+                    },
+                },
+                "required": ["pattern"],
             },
         )
 
@@ -868,6 +962,75 @@ class DatabaseMCPServer:
             TextContent(
                 type="text",
                 text=truncate_json_response(response, MAX_RESPONSE_EXPLAIN_QUERY),
+            )
+        ]
+
+    async def handle_search_objects(
+        self, arguments: dict[str, Any]
+    ) -> list[TextContent]:
+        """Handle search_objects request.
+
+        Validates and coerces incoming arguments into the typed enums used by
+        :class:`ObjectSearcher`, then dumps the result with ``exclude_none``
+        so the response stays as token-efficient as the chosen detail level
+        allows.
+        """
+        if self.searcher is None:
+            raise RuntimeError("Server not initialized")
+
+        pattern = arguments.get("pattern")
+        if not isinstance(pattern, str) or not pattern:
+            raise ValueError("`pattern` is required and must be a non-empty string")
+
+        # Detail level
+        detail_raw = arguments.get("detail_level", "summary")
+        try:
+            detail_level = SearchDetailLevel(detail_raw)
+        except ValueError:
+            valid = ", ".join(d.value for d in SearchDetailLevel)
+            raise ValueError(
+                f"Invalid detail_level: {detail_raw!r}. Must be one of: {valid}"
+            )
+
+        # Object types
+        object_types_raw = arguments.get("object_types")
+        object_types: Optional[list[SearchObjectType]] = None
+        if object_types_raw is not None:
+            if not isinstance(object_types_raw, list):
+                raise ValueError("`object_types` must be a list of strings")
+            parsed: list[SearchObjectType] = []
+            for ot in object_types_raw:
+                try:
+                    parsed.append(SearchObjectType(ot))
+                except ValueError:
+                    valid = ", ".join(t.value for t in SearchObjectType)
+                    raise ValueError(
+                        f"Invalid object_type: {ot!r}. Must be one of: {valid}"
+                    )
+            object_types = parsed
+
+        schema = arguments.get("schema")
+        table = arguments.get("table")
+        limit = int(arguments.get("limit", 100))
+
+        results = await self.searcher.search(
+            pattern=pattern,
+            object_types=object_types,
+            detail_level=detail_level,
+            schema=schema,
+            table=table,
+            limit=limit,
+        )
+
+        # exclude_none keeps the JSON minimal — fields that don't apply to the
+        # chosen detail level or object type are dropped entirely.
+        response = json.dumps(
+            results.model_dump(mode="json", exclude_none=True), indent=2
+        )
+        return [
+            TextContent(
+                type="text",
+                text=truncate_json_response(response, MAX_RESPONSE_SEARCH_OBJECTS),
             )
         ]
 
@@ -1164,6 +1327,7 @@ async def main(
                 mcp_server._create_describe_table_tool(),
                 mcp_server._create_execute_query_tool(),
                 mcp_server._create_sample_data_tool(),
+                mcp_server._create_search_objects_tool(),
             ]
 
             # Add conditional tools
@@ -1192,6 +1356,7 @@ async def main(
                 "get_table_relationships": mcp_server.handle_get_relationships,
                 "analyze_column": mcp_server.handle_analyze_column,
                 "explain_query": mcp_server.handle_explain_query,
+                "search_objects": mcp_server.handle_search_objects,
             }
 
             handler = handlers.get(name)
