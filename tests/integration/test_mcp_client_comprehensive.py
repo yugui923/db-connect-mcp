@@ -3,13 +3,14 @@
 Tests ALL MCP tools across ALL supported database types using a real MCP client.
 This provides comprehensive coverage of the MCP protocol layer.
 
-Tools tested (9 total):
+Tools tested (10 total):
 - get_database_info
 - list_schemas
 - list_tables
 - describe_table
 - execute_query
 - sample_data
+- search_objects
 - get_table_relationships (conditional - requires foreign_keys capability)
 - analyze_column (conditional - requires advanced_stats capability)
 - explain_query (conditional - requires explain_plans capability)
@@ -499,6 +500,168 @@ class TestPostgreSQLDirectMCPClient:
         plan_text = data["plan"].lower()
         assert "join" in plan_text or "loop" in plan_text or "hash" in plan_text
 
+    # --- Tool: search_objects ---
+
+    @pytest.mark.asyncio
+    async def test_search_objects_registered(self, pg_client: ClientSession):
+        """Tool is registered and visible to MCP clients with a valid schema."""
+        tools = await pg_client.list_tools()
+        search = next((t for t in tools.tools if t.name == "search_objects"), None)
+        assert search is not None, "search_objects should always be registered"
+        # Verify the inputSchema is well-formed for an MCP client
+        assert search.inputSchema["type"] == "object"
+        assert "pattern" in search.inputSchema["properties"]
+        assert search.inputSchema["required"] == ["pattern"]
+
+    @pytest.mark.asyncio
+    async def test_search_objects_finds_seeded_table(self, pg_client: ClientSession):
+        """Searching for 'users' returns the seeded users table."""
+        data = await call_tool_checked(
+            pg_client,
+            "search_objects",
+            {
+                "pattern": "users",
+                "object_types": ["table"],
+                "schema": "public",
+            },
+        )
+        assert data["pattern"] == "users"
+        assert data["total_found"] >= 1
+        assert any(
+            r["name"] == "users" and r["object_type"] == "table"
+            for r in data["results"]
+        )
+
+    @pytest.mark.asyncio
+    async def test_search_objects_substring_pattern(self, pg_client: ClientSession):
+        """LIKE substring pattern matches multiple tables."""
+        data = await call_tool_checked(
+            pg_client,
+            "search_objects",
+            {
+                "pattern": "%order%",
+                "object_types": ["table"],
+                "schema": "public",
+            },
+        )
+        names = {r["name"] for r in data["results"]}
+        # The seed schema has both `orders` and `order_items`
+        assert "orders" in names
+        assert "order_items" in names
+
+    @pytest.mark.asyncio
+    async def test_search_objects_columns_with_table_filter(
+        self, pg_client: ClientSession
+    ):
+        """Column search restricted to a specific table returns one match."""
+        data = await call_tool_checked(
+            pg_client,
+            "search_objects",
+            {
+                "pattern": "user_id",
+                "object_types": ["column"],
+                "schema": "public",
+                "table": "users",
+                "detail_level": "summary",
+            },
+        )
+        assert data["total_found"] == 1
+        col = data["results"][0]
+        assert col["object_type"] == "column"
+        assert col["name"] == "user_id"
+        assert col["table"] == "users"
+        # Summary level populates these
+        assert col["primary_key"] is True
+        assert "data_type" in col
+
+    @pytest.mark.asyncio
+    async def test_search_objects_user_id_across_tables(self, pg_client: ClientSession):
+        """Without a `table` filter, user_id matches in users and orders."""
+        data = await call_tool_checked(
+            pg_client,
+            "search_objects",
+            {
+                "pattern": "user_id",
+                "object_types": ["column"],
+                "schema": "public",
+            },
+        )
+        tables_with_user_id = {r["table"] for r in data["results"]}
+        assert "users" in tables_with_user_id
+        assert "orders" in tables_with_user_id
+
+    @pytest.mark.asyncio
+    async def test_search_objects_names_level_excludes_metadata(
+        self, pg_client: ClientSession
+    ):
+        """detail_level=names should drop metadata fields entirely."""
+        data = await call_tool_checked(
+            pg_client,
+            "search_objects",
+            {
+                "pattern": "users",
+                "object_types": ["table"],
+                "schema": "public",
+                "detail_level": "names",
+            },
+        )
+        users = next(r for r in data["results"] if r["name"] == "users")
+        # exclude_none drops absent fields, so these keys should not exist
+        assert "row_count" not in users
+        assert "table_type" not in users
+        assert "comment" not in users
+        # Identification fields are still present
+        assert users["object_type"] == "table"
+        assert users["schema"] == "public"
+
+    @pytest.mark.asyncio
+    async def test_search_objects_truncation(self, pg_client: ClientSession):
+        """A small limit yields a truncation flag and partial results."""
+        data = await call_tool_checked(
+            pg_client,
+            "search_objects",
+            {
+                "pattern": "%",
+                "object_types": ["column"],
+                "schema": "public",
+                "limit": 2,
+            },
+        )
+        assert data["returned"] == 2
+        assert data["total_found"] > 2
+        assert data["truncated"] is True
+        assert "note" in data
+
+    @pytest.mark.asyncio
+    async def test_search_objects_invalid_pattern_returns_error(
+        self, pg_client: ClientSession
+    ):
+        """Empty pattern is rejected at the MCP layer."""
+        response = await pg_client.call_tool(
+            "search_objects", arguments={"pattern": ""}
+        )
+        assert response.isError
+
+    @pytest.mark.asyncio
+    async def test_search_objects_index_results(self, pg_client: ClientSession):
+        """Searching indexes on the users table returns at least one index."""
+        data = await call_tool_checked(
+            pg_client,
+            "search_objects",
+            {
+                "pattern": "%",
+                "object_types": ["index"],
+                "schema": "public",
+                "table": "users",
+                "detail_level": "summary",
+            },
+        )
+        assert data["total_found"] >= 1
+        for r in data["results"]:
+            assert r["object_type"] == "index"
+            assert r["table"] == "users"
+            assert "columns" in r and isinstance(r["columns"], list)
+
 
 # ============================================================================
 # MySQL Direct Tests
@@ -606,6 +769,29 @@ class TestMySQLDirectMCPClient:
             mysql_client, "explain_query", {"query": "SELECT 1"}
         )
         assert "plan" in data
+
+    @pytest.mark.asyncio
+    async def test_search_objects_mysql(self, mysql_client: ClientSession):
+        """Search_objects works through the MCP layer on MySQL too.
+
+        Pattern is `%` to avoid relying on a specific seeded table name in
+        the MySQL fixture, which differs from PostgreSQL.
+        """
+        data = await call_tool_checked(
+            mysql_client,
+            "search_objects",
+            {
+                "pattern": "%",
+                "object_types": ["table"],
+                "limit": 5,
+            },
+        )
+        assert data["pattern"] == "%"
+        # Either there are tables, or the user has an empty schema — both
+        # outcomes are valid; we just need the envelope shape to be correct.
+        assert "results" in data
+        assert "total_found" in data
+        assert "limit" in data and data["limit"] == 5
 
     @pytest.mark.asyncio
     async def test_analyze_column_not_available(self, mysql_client: ClientSession):
@@ -789,8 +975,8 @@ class TestMCPToolRegistration:
 
     @pytest.mark.asyncio
     @pytest.mark.postgresql
-    async def test_postgresql_registers_all_9_tools(self, pg_client: ClientSession):
-        """Verify PostgreSQL registers all 9 tools."""
+    async def test_postgresql_registers_all_10_tools(self, pg_client: ClientSession):
+        """Verify PostgreSQL registers all 10 tools."""
         tools = await get_available_tools(pg_client)
 
         expected = {
@@ -803,30 +989,33 @@ class TestMCPToolRegistration:
             "get_table_relationships",
             "analyze_column",
             "explain_query",
+            "search_objects",
         }
         assert tools == expected
 
     @pytest.mark.asyncio
     @pytest.mark.mysql
-    async def test_mysql_registers_8_tools(self, mysql_client: ClientSession):
-        """Verify MySQL registers 8 tools (no analyze_column)."""
+    async def test_mysql_registers_9_tools(self, mysql_client: ClientSession):
+        """Verify MySQL registers 9 tools (no analyze_column)."""
         tools = await get_available_tools(mysql_client)
 
         assert "get_table_relationships" in tools
         assert "analyze_column" not in tools
         assert "explain_query" in tools
-        assert len(tools) == 8
+        assert "search_objects" in tools
+        assert len(tools) == 9
 
     @pytest.mark.asyncio
     @pytest.mark.clickhouse
-    async def test_clickhouse_registers_8_tools(self, ch_client: ClientSession):
-        """Verify ClickHouse registers 8 tools (no get_table_relationships)."""
+    async def test_clickhouse_registers_9_tools(self, ch_client: ClientSession):
+        """Verify ClickHouse registers 9 tools (no get_table_relationships)."""
         tools = await get_available_tools(ch_client)
 
         assert "get_table_relationships" not in tools
         assert "analyze_column" in tools
         assert "explain_query" in tools
-        assert len(tools) == 8
+        assert "search_objects" in tools
+        assert len(tools) == 9
 
 
 # ============================================================================

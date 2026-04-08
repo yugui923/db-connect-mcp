@@ -659,3 +659,230 @@ class TestE2EServerLogs:
             # Note: Logs might be empty or minimal depending on buffering
             # The framework is in place for when buffering allows capture
             # In practice, you'd configure logging to a file for more reliable capture
+
+
+class TestE2ESearchObjects:
+    """End-to-end tests for the search_objects tool.
+
+    These tests spawn a real ``db_connect_mcp.server`` subprocess and talk
+    to it via the MCP stdio transport. They prove the new tool round-trips
+    correctly through the production code path: subprocess startup, tool
+    registration, JSON-RPC marshalling, handler dispatch, and JSON
+    serialization.
+    """
+
+    @pytest.mark.asyncio
+    async def test_search_objects_listed_in_tools(self, pg_database_url: str):
+        """The new tool appears in list_tools through the real stdio server."""
+        if not await E2ETestHelper.check_database_connectivity(pg_database_url):
+            pytest.skip("Database not accessible")
+
+        (
+            client,
+            log_capture,
+            stdio_context,
+        ) = await E2ETestHelper.create_server_and_client(pg_database_url)
+
+        try:
+            tools_response = await client.list_tools()
+            tool_names = {t.name for t in tools_response.tools}
+            assert "search_objects" in tool_names
+
+            search = next(t for t in tools_response.tools if t.name == "search_objects")
+            assert search.inputSchema is not None
+            assert "pattern" in search.inputSchema["properties"]
+            assert search.inputSchema["required"] == ["pattern"]
+
+        finally:
+            await E2ETestHelper.cleanup_server_and_client(
+                client, log_capture, stdio_context
+            )
+
+    @pytest.mark.asyncio
+    async def test_search_objects_table_e2e(self, pg_database_url: str):
+        """search_objects returns the seeded users table via real subprocess."""
+        if not await E2ETestHelper.check_database_connectivity(pg_database_url):
+            pytest.skip("Database not accessible")
+
+        (
+            client,
+            log_capture,
+            stdio_context,
+        ) = await E2ETestHelper.create_server_and_client(pg_database_url)
+
+        try:
+            response = await client.call_tool(
+                "search_objects",
+                arguments={
+                    "pattern": "users",
+                    "object_types": ["table"],
+                    "schema": "public",
+                },
+            )
+            assert not response.isError, f"Tool returned error: {response.content}"
+            data = E2ETestHelper.parse_text_content(response.content)
+
+            assert data["pattern"] == "users"
+            assert data["total_found"] >= 1
+            names = {r["name"] for r in data["results"]}
+            assert "users" in names
+
+        finally:
+            await E2ETestHelper.cleanup_server_and_client(
+                client, log_capture, stdio_context
+            )
+
+    @pytest.mark.asyncio
+    async def test_search_objects_column_e2e(self, pg_database_url: str):
+        """search_objects(column) round-trips with correct metadata."""
+        if not await E2ETestHelper.check_database_connectivity(pg_database_url):
+            pytest.skip("Database not accessible")
+
+        (
+            client,
+            log_capture,
+            stdio_context,
+        ) = await E2ETestHelper.create_server_and_client(pg_database_url)
+
+        try:
+            response = await client.call_tool(
+                "search_objects",
+                arguments={
+                    "pattern": "user_id",
+                    "object_types": ["column"],
+                    "schema": "public",
+                    "table": "users",
+                    "detail_level": "summary",
+                },
+            )
+            assert not response.isError, f"Tool returned error: {response.content}"
+            data = E2ETestHelper.parse_text_content(response.content)
+
+            assert data["total_found"] == 1
+            col = data["results"][0]
+            assert col["object_type"] == "column"
+            assert col["name"] == "user_id"
+            assert col["table"] == "users"
+            assert col["primary_key"] is True
+
+        finally:
+            await E2ETestHelper.cleanup_server_and_client(
+                client, log_capture, stdio_context
+            )
+
+    @pytest.mark.asyncio
+    async def test_search_objects_names_level_minimal_payload(
+        self, pg_database_url: str
+    ):
+        """detail_level=names produces a minimal JSON payload via stdio."""
+        if not await E2ETestHelper.check_database_connectivity(pg_database_url):
+            pytest.skip("Database not accessible")
+
+        (
+            client,
+            log_capture,
+            stdio_context,
+        ) = await E2ETestHelper.create_server_and_client(pg_database_url)
+
+        try:
+            # Compare token sizes between names and full to prove the
+            # progressive-disclosure feature actually saves bytes on the wire.
+            names_resp = await client.call_tool(
+                "search_objects",
+                arguments={
+                    "pattern": "users",
+                    "object_types": ["table"],
+                    "schema": "public",
+                    "detail_level": "names",
+                },
+            )
+            full_resp = await client.call_tool(
+                "search_objects",
+                arguments={
+                    "pattern": "users",
+                    "object_types": ["table"],
+                    "schema": "public",
+                    "detail_level": "full",
+                },
+            )
+            assert not names_resp.isError
+            assert not full_resp.isError
+
+            names_text = names_resp.content[0].text  # type: ignore[union-attr]
+            full_text = full_resp.content[0].text  # type: ignore[union-attr]
+
+            # The names payload should be strictly smaller than the full one
+            # for the same query (or at worst equal, if metadata is empty).
+            assert len(names_text) <= len(full_text)
+
+            names_data = json.loads(names_text)
+            users_item = next(r for r in names_data["results"] if r["name"] == "users")
+            # exclude_none drops fields not populated at the names level
+            assert "row_count" not in users_item
+            assert "table_type" not in users_item
+            assert "comment" not in users_item
+
+        finally:
+            await E2ETestHelper.cleanup_server_and_client(
+                client, log_capture, stdio_context
+            )
+
+    @pytest.mark.asyncio
+    async def test_search_objects_invalid_pattern_returns_error(
+        self, pg_database_url: str
+    ):
+        """Empty pattern is rejected at the subprocess MCP layer."""
+        if not await E2ETestHelper.check_database_connectivity(pg_database_url):
+            pytest.skip("Database not accessible")
+
+        (
+            client,
+            log_capture,
+            stdio_context,
+        ) = await E2ETestHelper.create_server_and_client(pg_database_url)
+
+        try:
+            response = await client.call_tool(
+                "search_objects", arguments={"pattern": ""}
+            )
+            assert response.isError
+
+        finally:
+            await E2ETestHelper.cleanup_server_and_client(
+                client, log_capture, stdio_context
+            )
+
+    @pytest.mark.asyncio
+    async def test_search_objects_truncation_e2e(self, pg_database_url: str):
+        """Limit truncation flag round-trips through the stdio protocol."""
+        if not await E2ETestHelper.check_database_connectivity(pg_database_url):
+            pytest.skip("Database not accessible")
+
+        (
+            client,
+            log_capture,
+            stdio_context,
+        ) = await E2ETestHelper.create_server_and_client(pg_database_url)
+
+        try:
+            response = await client.call_tool(
+                "search_objects",
+                arguments={
+                    "pattern": "%",
+                    "object_types": ["column"],
+                    "schema": "public",
+                    "limit": 2,
+                },
+            )
+            assert not response.isError, f"Tool returned error: {response.content}"
+            data = E2ETestHelper.parse_text_content(response.content)
+
+            assert data["returned"] == 2
+            assert data["total_found"] > 2
+            assert data["truncated"] is True
+            assert data.get("note")
+
+        finally:
+            await E2ETestHelper.cleanup_server_and_client(
+                client, log_capture, stdio_context
+            )

@@ -527,9 +527,7 @@ class TestObjectSearcher:
         )
         inspector = _make_inspector_stub(
             schemas=[_make_schema("user_data")],
-            tables_by_schema={
-                "user_data": [_make_table("users", schema="user_data")]
-            },
+            tables_by_schema={"user_data": [_make_table("users", schema="user_data")]},
             described={("user_data", "users"): described_table},
         )
         searcher = ObjectSearcher(inspector)

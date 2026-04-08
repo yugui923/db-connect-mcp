@@ -57,7 +57,10 @@ class MCPProtocolHelper:
         server = DatabaseMCPServer(config)
         await server.initialize()
 
-        # Register server handlers
+        # Register server handlers. Keep this list in sync with
+        # ``main()`` in src/db_connect_mcp/server.py — both files build the
+        # same tool surface so the in-memory helper exposes everything a real
+        # stdio client would see.
         @server.server.list_tools()
         async def list_tools():
             """List available tools."""
@@ -68,6 +71,7 @@ class MCPProtocolHelper:
                 server._create_describe_table_tool(),
                 server._create_execute_query_tool(),
                 server._create_sample_data_tool(),
+                server._create_search_objects_tool(),
             ]
 
             # Add conditional tools based on capabilities
@@ -95,6 +99,7 @@ class MCPProtocolHelper:
                 "get_table_relationships": server.handle_get_relationships,
                 "analyze_column": server.handle_analyze_column,
                 "explain_query": server.handle_explain_query,
+                "search_objects": server.handle_search_objects,
             }
 
             handler = handlers.get(name)
