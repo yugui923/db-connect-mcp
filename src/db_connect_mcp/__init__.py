@@ -5,7 +5,7 @@ A Model Context Protocol (MCP) server that provides database analysis and queryi
 capabilities for PostgreSQL, MySQL, and ClickHouse databases.
 """
 
-__version__ = "0.5.1"
+__version__ = "0.6.0"
 
 from .models.config import DatabaseConfig
 from .models.capabilities import DatabaseCapabilities
