@@ -1,0 +1,9 @@
+# Refuse to resolve Python packages published less than 7 days ago.
+# Mirrors the npm `min-release-age` policy in .npmrc. Per-index
+# overrides can disable this for indexes without upload timestamps:
+#
+#   [[index]]
+#   name = "internal"
+#   url = "https://internal.example.com/simple"
+#   exclude-newer = false
+exclude-newer = "7 days"

@@ -29,7 +29,6 @@
         "ms-python.debugpy",
         "ms-python.python",
         "ms-python.vscode-pylance",
-        "ms-python.vscode-python-envs",
         "ms-vscode-remote.remote-containers",
         "redhat.vscode-xml",
         "rust-lang.rust-analyzer",
@@ -77,34 +76,27 @@
           "typescript",
           "javascript",
           "typescriptreact",
-          "javascriptreact",
-          "vue"
+          "javascriptreact"
         ],
         "evenBetterToml.formatter.allowedBlankLines": 2,
         "evenBetterToml.formatter.columnWidth": 88,
-        "prettier.documentSelectors": [
-          "**/*.{ts,tsx,js,jsx,json,md,vue}"
-        ],
         "python.analysis.autoFormatStrings": true,
+        "python.analysis.autoImportCompletions": true,
         "python.analysis.diagnosticMode": "workspace",
+        "python.analysis.inlayHints.functionReturnTypes": true,
         "python.analysis.languageServerMode": "full",
-        "python.analysis.typeCheckingMode": "standard",
+        "python.analysis.typeCheckingMode": "strict",
         "python.languageServer": "Pylance",
-        "ruff.exclude": [
-          "\".bzr\",     \".direnv\",     \".eggs\",     \".git\",     \".git-rewrite\",     \".hg\",     \".ipynb_checkpoints\",     \".mypy_cache\",     \".nox\",     \".pants.d\",     \".pyenv\",     \".pytest_cache\",     \".pytype\",     \".ruff_cache\",     \".svn\",     \".tox\",     \".venv\",     \".vscode\",     \"__pypackages__\",     \"_build\",     \"buck-out\",     \"build\",     \"dist\",     \"node_modules\",     \"site-packages\",     \"venv\","
-        ],
         "ruff.lineLength": 88,
+        "typescript.enablePromptUseWorkspaceTsdk": true,
+        "typescript.tsdk": "node_modules/typescript/lib",
         "typescript.tsserver.experimental.enableProjectDiagnostics": true,
         "typescript.tsserver.watchOptions": "vscode",
         "typescript.updateImportsOnFileMove.enabled": "always"
       }
     }
   },
-  "postCreateCommand": "echo '\n========================================\n  Dev Container Ready!\n========================================\n  Base:      Ubuntu 24.04 (init: tini)\n  User:      vscode\n  Shell:     zsh (autosuggestions, syntax-highlighting)\n  Network:   host mode\n----------------------------------------\n  Runtime Manager: mise\n    - Python 3.13\n    - Node 22\n  Package Managers: uv, npm\n----------------------------------------\n  Python Tools:  ruff, black, mypy, pytest\n  Node Tools:    typescript, tsx, prettier, eslint\n  DB Clients:    sqlite3, mysql-client, postgresql-client\n  System:        htop, strace, lsof, tree, man\n  AI:            Claude Code\n========================================\n'",
+  "postCreateCommand": "bash .devcontainer/post-create.sh",
   "remoteUser": "vscode",
-  "forwardPorts": [
-    2222,
-    3306,
-    5432
-  ]
+  "updateRemoteUserUID": true
 }

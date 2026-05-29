@@ -54,7 +54,6 @@ node_modules/
 .eslintcache
 .stylelintcache
 .prettiercache
-dist/
 *.js.map
 *.d.ts.map
 .yarn/
@@ -81,6 +80,10 @@ credentials.json
 service-account*.json
 .netrc
 .npmrc
+# Allow root-level .npmrc (cooldown policy, no auth tokens).
+# Subdirectory .npmrc files stay ignored — they're often where
+# accidentally-committed `//registry.npmjs.org/:_authToken=...` lands.
+!/.npmrc
 .pypirc
 
 # === Data / Output / Logs / Cache ===
