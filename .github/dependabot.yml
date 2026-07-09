@@ -36,3 +36,7 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 10
+    groups:
+      codeql-actions:
+        patterns:
+          - "github/codeql-action/*"
