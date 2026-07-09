@@ -1,15 +1,17 @@
 # Yuri devcontainer Dockerfile
-# Last updated: 2026-05-23 (add: tmux terminal multiplexer)
+# Last updated: 2026-07-09 (add: Codex parity and pinned shell plugins)
 
 # This Dockerfile sets up a development environment with:
 # - Ubuntu 24.04 base image
 # - System dependencies for development
 # - mise (runtime version manager) for managing Python and Node versions
 # - uv (fast Python package manager) for installing Python tools
-# - Claude Code (native installation)
+# - Claude Code (native installation) and OpenAI Codex (npm package)
 
 
 FROM mcr.microsoft.com/devcontainers/base:ubuntu-24.04
+
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 # Install system dependencies in a single layer
 RUN DEBIAN_FRONTEND=noninteractive apt-get update \
@@ -65,7 +67,7 @@ RUN sudo chsh -s $(which zsh) vscode
 
 
 # Install mise (runtime version manager)
-RUN curl https://mise.run | sh
+RUN curl -fsSL https://mise.run | sh
 ENV PATH="/home/vscode/.local/bin:${PATH}"
 
 # Configure mise to auto-activate
@@ -113,6 +115,18 @@ RUN mise exec node -- npm install -g npm@11.13.0 \
 # The native install provides auto-updates and doesn't require Node.js
 RUN curl -fsSL https://claude.ai/install.sh | bash
 
+# Install OpenAI Codex from the official npm package without a version pin.
+# npm's global 7-day release-age cooldown still applies, avoiding freshly
+# published or partially published versions while letting Codex move quickly.
+# Codex user-local config/auth/session/plugin state is persisted by the
+# devcontainer volume and is intentionally not managed by generated projects.
+RUN mise exec node -- npm install -g @openai/codex
+
+# Pre-create persisted AI state mountpoints so fresh Docker named volumes inherit
+# writable vscode ownership instead of root ownership.
+RUN mkdir -p /home/vscode/.claude /home/vscode/.codex \
+    && chown -R vscode:vscode /home/vscode/.claude /home/vscode/.codex
+
 
 # Install global npm packages, pinned to versions >= 14 days old.
 RUN mise exec node -- npm install -g \
@@ -129,12 +143,16 @@ RUN uv tool install ruff==0.15.12 && \
     uv tool install pytest==9.0.3
 
 
-# Install ZSH plugins and enable them in .zshrc.
+# Install pinned ZSH plugins and enable them in .zshrc.
 # Cloning into ~/.oh-my-zsh/custom/plugins/ is necessary but not
 # sufficient — Oh My Zsh only loads plugins listed in the
 # plugins=(...) array, which the base image initialises to (git).
+ARG ZSH_AUTOSUGGESTIONS_REF=e52ee8ca55bcc56a17c828767a3f98f22a68d4eb
+ARG ZSH_SYNTAX_HIGHLIGHTING_REF=db085e4661f6aafd24e5acb5b2e17e4dd5dddf3e
 RUN git clone https://github.com/zsh-users/zsh-autosuggestions \
       ~/.oh-my-zsh/custom/plugins/zsh-autosuggestions \
+ && git -C ~/.oh-my-zsh/custom/plugins/zsh-autosuggestions checkout --detach "$ZSH_AUTOSUGGESTIONS_REF" \
  && git clone https://github.com/zsh-users/zsh-syntax-highlighting \
       ~/.oh-my-zsh/custom/plugins/zsh-syntax-highlighting \
+ && git -C ~/.oh-my-zsh/custom/plugins/zsh-syntax-highlighting checkout --detach "$ZSH_SYNTAX_HIGHLIGHTING_REF" \
  && sed -i 's/^plugins=(git)$/plugins=(git zsh-autosuggestions zsh-syntax-highlighting)/' ~/.zshrc

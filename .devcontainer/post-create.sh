@@ -25,7 +25,7 @@ cat <<'BANNER'
   Python Tools:  ruff, black, mypy, pytest
   Node Tools:    typescript, tsx, prettier, eslint
   DB Clients:    sqlite3, mysql-client, postgresql-client
-  AI:            Claude Code
+  AI:            Claude Code, OpenAI Codex
 ========================================
 
 Note: project dependencies are NOT installed automatically.
