@@ -34,6 +34,16 @@ def _generate_rsa_pem() -> str:
     return key_io.getvalue()
 
 
+def _generate_dsa_pem() -> str:
+    """Generate a traditional PEM DSA private key."""
+    key = dsa.generate_private_key(key_size=2048)
+    return key.private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.TraditionalOpenSSL,
+        serialization.NoEncryption(),
+    ).decode("utf-8")
+
+
 def _generate_rsa_pkcs8() -> bytes:
     """Generate a PKCS#8 PEM RSA private key."""
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
@@ -777,8 +787,53 @@ class TestPKCS8KeyParsing:
     def test_dsa_pkcs8_inline(self):
         """DSA key in PKCS#8 format should parse successfully."""
         pkcs8_pem = _generate_dsa_pkcs8()
+        dss_key_class = getattr(paramiko, "DSSKey", None)
+        if dss_key_class is None:
+            with pytest.raises(SSHTunnelError, match="DSA private keys"):
+                SSHTunnelManager._parse_private_key(pkcs8_pem.decode("utf-8"))
+            return
+
         result = SSHTunnelManager._parse_private_key(pkcs8_pem.decode("utf-8"))
-        assert isinstance(result, paramiko.DSSKey)  # type: ignore[attr-defined]
+        assert isinstance(result, dss_key_class)
+
+    def test_dsa_pkcs8_uses_legacy_dss_key_when_available(self, monkeypatch):
+        """DSA PKCS#8 parsing should still work when Paramiko exposes DSSKey."""
+
+        class FakeDSSKey(paramiko.PKey):
+            @classmethod
+            def from_private_key(cls, file_obj: StringIO, password: str | None = None):
+                assert "BEGIN DSA PRIVATE KEY" in file_obj.read()
+                assert password is None
+                return cls()
+
+            def get_name(self):
+                return "ssh-dss"
+
+        monkeypatch.setattr(paramiko, "DSSKey", FakeDSSKey, raising=False)
+
+        pkcs8_pem = _generate_dsa_pkcs8()
+        result = SSHTunnelManager._parse_private_key(pkcs8_pem.decode("utf-8"))
+
+        assert isinstance(result, FakeDSSKey)
+
+    def test_traditional_dsa_uses_legacy_dss_key_when_available(self, monkeypatch):
+        """Traditional DSA parsing should include DSSKey only when available."""
+
+        class FakeDSSKey(paramiko.PKey):
+            @classmethod
+            def from_private_key(cls, file_obj: StringIO, password: str | None = None):
+                assert "BEGIN DSA PRIVATE KEY" in file_obj.read()
+                assert password is None
+                return cls()
+
+            def get_name(self):
+                return "ssh-dss"
+
+        monkeypatch.setattr(paramiko, "DSSKey", FakeDSSKey, raising=False)
+
+        result = SSHTunnelManager._parse_private_key(_generate_dsa_pem())
+
+        assert isinstance(result, FakeDSSKey)
 
 
 class TestPasswordRequiredDetection:
