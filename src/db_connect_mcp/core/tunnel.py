@@ -378,14 +378,17 @@ class SSHTunnelManager:
             return paramiko.Ed25519Key.from_private_key(StringIO(pem.decode("utf-8")))
 
         if isinstance(private_key, dsa.DSAPrivateKey):
+            dss_key_class = getattr(paramiko, "DSSKey", None)
+            if dss_key_class is None:
+                raise SSHTunnelError(
+                    "DSA private keys are not supported by this Paramiko version."
+                )
             pem = private_key.private_bytes(
                 serialization.Encoding.PEM,
                 serialization.PrivateFormat.TraditionalOpenSSL,
                 serialization.NoEncryption(),
             )
-            return paramiko.DSSKey.from_private_key(  # type: ignore[attr-defined]
-                StringIO(pem.decode("utf-8"))
-            )
+            return dss_key_class.from_private_key(StringIO(pem.decode("utf-8")))
 
         raise SSHTunnelError(
             f"Unsupported key type for conversion: {type(private_key).__name__}"
@@ -474,17 +477,16 @@ class SSHTunnelManager:
 
         # --- Traditional PEM / OpenSSH path ---
         # Map detected format to the most likely paramiko class
+        dss_key_class = getattr(paramiko, "DSSKey", None)
         _format_to_classes: dict[KeyFormat, list[type[paramiko.PKey]]] = {
             KeyFormat.PEM_RSA: [paramiko.RSAKey],
-            KeyFormat.PEM_DSA: [
-                paramiko.DSSKey,  # type: ignore[attr-defined]
-            ],
+            KeyFormat.PEM_DSA: [dss_key_class] if dss_key_class is not None else [],
             KeyFormat.PEM_EC: [paramiko.ECDSAKey],
             KeyFormat.PEM_OPENSSH: [
                 paramiko.Ed25519Key,
                 paramiko.RSAKey,
                 paramiko.ECDSAKey,
-                paramiko.DSSKey,  # type: ignore[attr-defined]
+                *([dss_key_class] if dss_key_class is not None else []),
             ],
         }
 
@@ -492,8 +494,9 @@ class SSHTunnelManager:
             paramiko.RSAKey,
             paramiko.Ed25519Key,
             paramiko.ECDSAKey,
-            paramiko.DSSKey,  # type: ignore[attr-defined]
         ]
+        if dss_key_class is not None:
+            all_classes.append(dss_key_class)
 
         preferred = _format_to_classes.get(fmt, [])
         tried: set[type[paramiko.PKey]] = set()
