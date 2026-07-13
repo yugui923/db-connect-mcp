@@ -1,5 +1,5 @@
 # Yuri devcontainer Dockerfile
-# Last updated: 2026-07-09 (add: Codex parity and pinned shell plugins)
+# Last updated: 2026-07-13 (bump: Python 3.14, Node 24 LTS, npm 11)
 
 # This Dockerfile sets up a development environment with:
 # - Ubuntu 24.04 base image
@@ -94,9 +94,9 @@ RUN mkdir -p ~/.config/uv \
 # Pre-install Python and Node via mise and make them the global default.
 # `mise install` alone only downloads the runtime; `mise use --global`
 # also writes ~/.config/mise/config.toml so they resolve outside a project.
-# Node 24 ships with npm 11; we pin npm to 11.13.0 below for the
+# Node 24 ships with npm 11; we pin npm to 11.18.0 below for the
 # min-release-age cooldown (npm 11.10.0+).
-RUN mise use --global python@3.13.13 node@24.15.0
+RUN mise use --global python@3.14.6 node@24.18.0
 
 
 # Pin npm to a version that supports `min-release-age` (added in 11.10.0)
@@ -107,8 +107,9 @@ RUN mise use --global python@3.13.13 node@24.15.0
 # minutes, or Bun which uses seconds). All pins below are >= 14 days old
 # as of the template release date, which gives the npm/uv release-age
 # filters plenty of margin and keeps the build deterministic.
-RUN mise exec node -- npm install -g npm@11.13.0 \
-    && mise exec node -- npm config set min-release-age 7 --location=user
+RUN mise exec node -- npm install -g npm@11.18.0 \
+    && mise exec node -- npm config set min-release-age 7 --location=user \
+    && test "$(mise exec node -- npm config get min-release-age)" = "7"
 
 
 # Install Claude Code using native installation (recommended method)

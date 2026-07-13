@@ -20,8 +20,8 @@ cat <<'BANNER'
   User:    vscode
   Shell:   zsh (autosuggestions, syntax-highlighting)
 ----------------------------------------
-  Runtime Manager: mise (Python 3.13.13, Node 24.15.0)
-  Package Managers: uv (7-day cooldown), npm 11.13.0 (7-day cooldown)
+  Runtime Manager: mise (Python 3.14.6, Node 24.18.0 LTS)
+  Package Managers: uv (7-day cooldown), npm 11.18.0 (7-day cooldown)
   Python Tools:  ruff, black, mypy, pytest
   Node Tools:    typescript, tsx, prettier, eslint
   DB Clients:    sqlite3, mysql-client, postgresql-client
