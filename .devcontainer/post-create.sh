@@ -11,6 +11,9 @@ set -euo pipefail
 
 git config --global --add safe.directory /workspace
 
+mkdir -p "$HOME/.local/state/yg-devcontainer"
+sha256sum .devcontainer/post-create.sh | cut -d ' ' -f 1 > "$HOME/.local/state/yg-devcontainer/post-create.sha256"
+
 cat <<'BANNER'
 
 ========================================

@@ -1,5 +1,5 @@
 # Yuri devcontainer docker-compose.yml
-# Last updated: 2026-02-19
+# Last updated: 2026-07-15
 
 # Used by VS Code Dev Containers extension
 
@@ -9,6 +9,11 @@ services:
       context: ..
       dockerfile: .devcontainer/Dockerfile
     init: true
+    mem_limit: 12g
+    # Docker interprets this as RAM + swap, so 24 GiB allows 12 GiB of swap.
+    memswap_limit: 24g
+    cpus: 6.0
+    pids_limit: 4096
     shm_size: "4gb"
     hostname: "db-connect-mcp"
     volumes:
