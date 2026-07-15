@@ -6,7 +6,7 @@
 # - System dependencies for development
 # - mise (runtime version manager) for managing Python and Node versions
 # - uv (fast Python package manager) for installing Python tools
-# - Claude Code (native installation) and OpenAI Codex (npm package)
+# - Claude Code and OpenAI Codex (native installations)
 
 
 FROM mcr.microsoft.com/devcontainers/base:ubuntu-24.04
@@ -116,12 +116,8 @@ RUN mise exec node -- npm install -g npm@11.18.0 \
 # The native install provides auto-updates and doesn't require Node.js
 RUN curl -fsSL https://claude.ai/install.sh | bash
 
-# Install OpenAI Codex from the official npm package without a version pin.
-# npm's global 7-day release-age cooldown still applies, avoiding freshly
-# published or partially published versions while letting Codex move quickly.
-# Codex user-local config/auth/session/plugin state is persisted by the
-# devcontainer volume and is intentionally not managed by generated projects.
-RUN mise exec node -- npm install -g @openai/codex
+# Install OpenAI Codex using its official native installer.
+RUN curl -fsSL https://chatgpt.com/codex/install.sh | sh
 
 # Pre-create persisted AI state mountpoints so fresh Docker named volumes inherit
 # writable vscode ownership instead of root ownership.
