@@ -860,10 +860,11 @@ class TestClickHouseMCPClient:
             pytest.skip("No tables available")
 
         table = tables[0]
+        schema_args = {"schema": table["schema"]} if table.get("schema") else {}
         desc = await call_tool_checked(
             ch_client,
             "describe_table",
-            {"table": table["name"], "schema": table.get("schema")},
+            {"table": table["name"], **schema_args},
         )
         if not desc["columns"]:
             pytest.skip("No columns available")
@@ -874,7 +875,7 @@ class TestClickHouseMCPClient:
             {
                 "table": table["name"],
                 "column": desc["columns"][0]["name"],
-                "schema": table.get("schema"),
+                **schema_args,
             },
         )
         assert "total_rows" in data

@@ -59,16 +59,16 @@ if ! runuser -u postgres -- psql -tAc \
 fi
 
 mysql --user=root <<'SQL'
-CREATE DATABASE IF NOT EXISTS testdb CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE DATABASE IF NOT EXISTS devdb CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 CREATE USER IF NOT EXISTS 'testuser'@'%' IDENTIFIED BY 'testpass';
-GRANT ALL PRIVILEGES ON testdb.* TO 'testuser'@'%';
+GRANT ALL PRIVILEGES ON devdb.* TO 'testuser'@'%';
 FLUSH PRIVILEGES;
 SQL
 if ! mysql --user=root --batch --skip-column-names -e \
-    "SELECT 1 FROM information_schema.tables WHERE table_schema='testdb' AND table_name='products'" \
+    "SELECT 1 FROM information_schema.tables WHERE table_schema='devdb' AND table_name='products'" \
     | grep -q 1; then
     for script in /opt/db-connect-mcp/init/mysql/*.sql; do
-        mysql --user=root testdb < "$script"
+        mysql --user=root devdb < "$script"
     done
 fi
 

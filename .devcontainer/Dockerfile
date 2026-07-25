@@ -28,7 +28,7 @@ RUN DEBIAN_FRONTEND=noninteractive apt-get update \
     libbz2-dev libreadline-dev libsqlite3-dev \
     zlib1g-dev liblzma-dev \
     # Useful utilities
-    jq curl wget git unzip zip make \
+    jq curl wget git unzip zip make ripgrep \
     # Required for adding third-party apt repos and OAuth flows
     ca-certificates gnupg xdg-utils \
     # Large file storage for design assets (images, fonts, Figma exports)

@@ -4,8 +4,8 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import os
+import pwd
 import re
 import shutil
 import subprocess
@@ -66,7 +66,9 @@ def static_contains(ctx: dict[str, str], file: str, *markers: str) -> str:
 
 def static_dev_001(ctx: dict[str, str]) -> str:
     static_contains(ctx, "dockerfile", "base:ubuntu-24.04")
-    return static_contains(ctx, "devcontainer", '"workspaceFolder": "/workspace"', '"remoteUser": "vscode"')
+    return static_contains(
+        ctx, "devcontainer", '"workspaceFolder": "/workspace"', '"remoteUser": "vscode"'
+    )
 
 
 def static_dev_002(ctx: dict[str, str]) -> str:
@@ -75,55 +77,105 @@ def static_dev_002(ctx: dict[str, str]) -> str:
 
 def static_dev_003(ctx: dict[str, str]) -> str:
     return static_contains(
-        ctx, "compose", "mem_limit: 12g", "memswap_limit: 24g", "cpus: 6.0", "pids_limit: 4096", 'shm_size: "4gb"'
+        ctx,
+        "compose",
+        "mem_limit: 12g",
+        "memswap_limit: 24g",
+        "cpus: 6.0",
+        "pids_limit: 4096",
+        'shm_size: "4gb"',
     )
 
 
 def static_dev_004(ctx: dict[str, str]) -> str:
-    static_contains(ctx, "compose", "..:/workspace", "/home/vscode/.claude", "/home/vscode/.codex")
+    static_contains(
+        ctx, "compose", "..:/workspace", "/home/vscode/.claude", "/home/vscode/.codex"
+    )
     require("docker.sock" not in ctx["compose"], "Docker socket mount is forbidden")
     return "workspace and agent-state mounts declared without Docker socket"
 
 
 def static_dev_005(ctx: dict[str, str]) -> str:
     return static_contains(
-        ctx, "dockerfile", "mise use --global python@", "node@", "uv/0.", "min-release-age 7", 'exclude-newer = "7 days"'
+        ctx,
+        "dockerfile",
+        "mise use --global python@3.14.6 node@24.18.0",
+        "uv/0.",
+        "min-release-age 7",
+        'exclude-newer = "7 days"',
     )
 
 
 def static_dev_006(ctx: dict[str, str]) -> str:
     return static_contains(
-        ctx, "dockerfile", "build-essential", "gitleaks", "postgresql-client", "mysql-client", "ruff==", "mypy==", "pytest=="
+        ctx,
+        "dockerfile",
+        "build-essential",
+        "gitleaks",
+        "ripgrep",
+        "postgresql-client",
+        "mysql-client",
+        "ruff==",
+        "mypy==",
+        "pytest==",
     )
 
 
 def static_dev_007(ctx: dict[str, str]) -> str:
-    return static_contains(ctx, "dockerfile", "sfw npm install -g", "@anthropic-ai/claude-code@", "@openai/codex@")
+    return static_contains(
+        ctx,
+        "dockerfile",
+        "sfw npm install -g",
+        "@anthropic-ai/claude-code@",
+        "@openai/codex@",
+    )
 
 
 def static_dev_008(ctx: dict[str, str]) -> str:
     static_contains(ctx, "compose", "sudo /usr/local/bin/start-dev-services")
     forbidden = ("uv sync", "pip install", "npm install")
     commands = "\n".join(
-        line.strip() for line in ctx["post_create"].splitlines() if not line.strip().startswith("#")
+        line.strip()
+        for line in ctx["post_create"].splitlines()
+        if not line.strip().startswith("#")
     )
     for command in forbidden:
-        require(f"{command}\n" not in commands, f"post-create automatically executes {command}")
+        require(
+            f"{command}\n" not in commands,
+            f"post-create automatically executes {command}",
+        )
     return "audited service startup and non-installing post-create lifecycle declared"
 
 
 def static_dev_009(ctx: dict[str, str]) -> str:
     static_contains(
-        ctx, "dockerfile", "postgresql-16", "mysql-server-8.0", "clickhouse-server", "openssh-server", "start-services.sh"
+        ctx,
+        "dockerfile",
+        "postgresql-16",
+        "mysql-server-8.0",
+        "clickhouse-server",
+        "openssh-server",
+        "start-services.sh",
     )
+    static_contains(ctx, "compose", "postgres-tunneled", "mysql-tunneled")
     return static_contains(
-        ctx, "devcontainer", "PG_TEST_DATABASE_URL", "MYSQL_TEST_DATABASE_URL", "CH_TEST_DATABASE_URL", "SSH_PORT"
+        ctx,
+        "devcontainer",
+        "PG_TEST_DATABASE_URL",
+        "MYSQL_TEST_DATABASE_URL",
+        "CH_TEST_DATABASE_URL",
+        "SSH_PORT",
     )
 
 
 def static_dev_010(ctx: dict[str, str]) -> str:
     return static_contains(
-        ctx, "dockerfile", "sfw@2.0.6", "sfw npm install", "sfw uv tool install", "signed-by=/usr/share/keyrings/clickhouse-keyring.gpg"
+        ctx,
+        "dockerfile",
+        "sfw@2.0.6",
+        "sfw npm install",
+        "sfw uv tool install",
+        "signed-by=/usr/share/keyrings/clickhouse-keyring.gpg",
     )
 
 
@@ -135,8 +187,13 @@ STATIC_CHECKS: dict[str, Callable[[dict[str, str]], str]] = {
 def runtime_dev_001() -> str:
     release = Path("/etc/os-release").read_text()
     require('VERSION_ID="24.04"' in release, "runtime is not Ubuntu 24.04")
-    require(os.environ.get("USER") == "vscode", "runtime user is not vscode")
-    require(Path.cwd() == Path("/workspace"), "runtime working directory is not /workspace")
+    require(
+        pwd.getpwuid(os.geteuid()).pw_name == "vscode",
+        "effective runtime user is not vscode",
+    )
+    require(
+        Path.cwd() == Path("/workspace"), "runtime working directory is not /workspace"
+    )
     return "Ubuntu 24.04, vscode, /workspace"
 
 
@@ -147,8 +204,14 @@ def runtime_dev_002() -> str:
 
 def runtime_dev_003() -> str:
     if Path("/sys/fs/cgroup/memory.max").exists():
-        require(Path("/sys/fs/cgroup/memory.max").read_text().strip() == str(12 * 1024**3), "RAM cgroup is not 12 GiB")
-        require(Path("/sys/fs/cgroup/pids.max").read_text().strip() == "4096", "PID cgroup is not 4096")
+        require(
+            Path("/sys/fs/cgroup/memory.max").read_text().strip() == str(12 * 1024**3),
+            "RAM cgroup is not 12 GiB",
+        )
+        require(
+            Path("/sys/fs/cgroup/pids.max").read_text().strip() == "4096",
+            "PID cgroup is not 4096",
+        )
     return "runtime cgroup limits discovered"
 
 
@@ -161,14 +224,27 @@ def runtime_dev_004() -> str:
 
 
 def runtime_dev_005() -> str:
-    output = run("bash", "-lc", "eval \"$(mise activate bash)\"; python --version; node --version; npm --version; uv --version")
-    require(run("npm", "config", "get", "min-release-age") == "7", "npm cooldown is not seven days")
-    require('exclude-newer = "7 days"' in (Path.home() / ".config/uv/uv.toml").read_text(), "uv cooldown missing")
+    output = run(
+        "bash",
+        "-lc",
+        'eval "$(mise activate bash)"; python --version; node --version; npm --version; uv --version',
+    )
+    lines = output.splitlines()
+    require(lines[0] == "Python 3.14.6", "project Python is not 3.14.6")
+    require(lines[1] == "v24.18.0", "project Node is not 24.18.0")
+    require(
+        run("npm", "config", "get", "min-release-age") == "7",
+        "npm cooldown is not seven days",
+    )
+    require(
+        'exclude-newer = "7 days"' in (Path.home() / ".config/uv/uv.toml").read_text(),
+        "uv cooldown missing",
+    )
     return output.replace("\n", "; ")
 
 
 def runtime_dev_006() -> str:
-    commands = "git gh jq curl gcc g++ make sqlite3 mysql psql clickhouse-client zsh tmux htop lsof strace tree file gitleaks ruff mypy pytest tsc tsx prettier eslint sfw"
+    commands = "git gh jq curl rg gcc g++ make sqlite3 mysql psql clickhouse-client zsh tmux htop lsof strace tree file gitleaks ruff mypy pytest tsc tsx prettier eslint sfw"
     missing = [command for command in commands.split() if shutil.which(command) is None]
     require(not missing, f"tools missing from PATH: {missing}")
     return "all documented tools resolve on PATH"
@@ -181,18 +257,25 @@ def runtime_dev_007() -> str:
 def runtime_dev_008() -> str:
     require(POST_CREATE_MARKER.exists(), "post-create marker is missing")
     expected = hashlib.sha256(POST_CREATE_PATH.read_bytes()).hexdigest()
-    require(POST_CREATE_MARKER.read_text().strip() == expected, "post-create marker does not match")
+    require(
+        POST_CREATE_MARKER.read_text().strip() == expected,
+        "post-create marker does not match",
+    )
     return "audited lifecycle completed"
 
 
 def runtime_dev_009() -> str:
     run("sudo", "/usr/local/bin/check-dev-services")
-    return "PostgreSQL, MySQL, ClickHouse, and SSH are healthy"
+    run("getent", "hosts", "postgres-tunneled")
+    run("getent", "hosts", "mysql-tunneled")
+    return "PostgreSQL, MySQL, ClickHouse, SSH, and test host aliases are healthy"
 
 
 def runtime_dev_010() -> str:
     require(shutil.which("sfw") is not None, "SFW is unavailable")
-    require(run("npm", "config", "get", "min-release-age") == "7", "npm cooldown missing")
+    require(
+        run("npm", "config", "get", "min-release-age") == "7", "npm cooldown missing"
+    )
     return "SFW and release-age gates are active"
 
 
@@ -203,18 +286,27 @@ RUNTIME_CHECKS: dict[str, Callable[[], str]] = {
 
 def main() -> int:
     requirement_ids = re.findall(r"`(DEV-\d{3})`", REQUIREMENTS_PATH.read_text())
-    require(len(requirement_ids) == len(set(requirement_ids)), "duplicate requirement ID")
-    require(set(requirement_ids) == set(STATIC_CHECKS) == set(RUNTIME_CHECKS), "requirement/check mismatch")
+    require(
+        len(requirement_ids) == len(set(requirement_ids)), "duplicate requirement ID"
+    )
+    require(
+        set(requirement_ids) == set(STATIC_CHECKS) == set(RUNTIME_CHECKS),
+        "requirement/check mismatch",
+    )
     print(f"Discovered {len(requirement_ids)} requirements")
     ctx = files()
     for requirement_id in requirement_ids:
         print(f"[PASS] {requirement_id} static: {STATIC_CHECKS[requirement_id](ctx)}")
     if Path("/.dockerenv").exists() and Path.cwd() == Path("/workspace"):
         for requirement_id in requirement_ids:
-            print(f"[PASS] {requirement_id} runtime: {RUNTIME_CHECKS[requirement_id]()}")
+            print(
+                f"[PASS] {requirement_id} runtime: {RUNTIME_CHECKS[requirement_id]()}"
+            )
         print("All static and in-container runtime checks passed")
     else:
-        print("Static checks passed; runtime checks require /workspace inside the DevContainer")
+        print(
+            "Static checks passed; runtime checks require /workspace inside the DevContainer"
+        )
     return 0
 
 

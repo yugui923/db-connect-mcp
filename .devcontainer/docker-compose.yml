@@ -16,6 +16,9 @@ services:
     pids_limit: 4096
     shm_size: "4gb"
     hostname: "db-connect-mcp"
+    extra_hosts:
+      - "postgres-tunneled:127.0.0.1"
+      - "mysql-tunneled:127.0.0.1"
     volumes:
       - ..:/workspace
       - claude-code-data:/home/vscode/.claude
