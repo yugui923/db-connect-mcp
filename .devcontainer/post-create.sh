@@ -28,9 +28,12 @@ cat <<'BANNER'
   Python Tools:  ruff, black, mypy, pytest
   Node Tools:    typescript, tsx, prettier, eslint
   DB Clients:    sqlite3, mysql-client, postgresql-client
+  DB Servers:    PostgreSQL :5432, MySQL :3306, ClickHouse :8123
+  SSH Tunnel:    tunneluser@127.0.0.1:2222
+  Supply Chain:  sfw + 7-day npm/uv cooldowns
   AI:            Claude Code, OpenAI Codex
 ========================================
 
 Note: project dependencies are NOT installed automatically.
-Review the lockfile, then run `uv sync` / `npm install` yourself.
+Review the lockfile, then run `sfw uv sync` / `sfw npm install` yourself.
 BANNER

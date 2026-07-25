@@ -4,7 +4,16 @@
   "service": "devcontainer",
   "workspaceFolder": "/workspace",
   "containerEnv": {
-    "AGENT_ID": "${localWorkspaceFolderBasename}"
+    "AGENT_ID": "${localWorkspaceFolderBasename}",
+    "PG_TEST_DATABASE_URL": "postgresql+asyncpg://devuser:devpassword@127.0.0.1:5432/devdb",
+    "MYSQL_TEST_DATABASE_URL": "mysql+aiomysql://testuser:testpass@127.0.0.1:3306/testdb",
+    "CH_TEST_DATABASE_URL": "clickhousedb://default:@127.0.0.1:8123/testdb",
+    "PG_TUNNEL_DATABASE_URL": "postgresql+asyncpg://devuser:devpassword@127.0.0.1:5432/devdb",
+    "MYSQL_TUNNEL_DATABASE_URL": "mysql+aiomysql://testuser:testpass@127.0.0.1:3306/testdb",
+    "SSH_HOST": "127.0.0.1",
+    "SSH_PORT": "2222",
+    "SSH_USERNAME": "tunneluser",
+    "SSH_PASSWORD": "tunnelpass"
   },
   "customizations": {
     "vscode": {

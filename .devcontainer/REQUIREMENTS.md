@@ -8,5 +8,7 @@
 | `DEV-004` | Mounts      | The workspace and separate Claude/Codex state volumes are mounted; the Docker socket is not.                                                 |
 | `DEV-005` | Runtimes    | mise provides Python and Node; uv and npm provide package management with seven-day release cooldowns.                                       |
 | `DEV-006` | Tooling     | Common build, Git/GitHub, database-client, shell, inspection, formatting, linting, typing, testing, and secret-scanning tools are installed. |
-| `DEV-007` | Agents      | Claude Code and OpenAI Codex are installed.                                                                                                  |
-| `DEV-008` | Lifecycle   | Only the audited post-create setup runs automatically; project dependencies are not installed.                                               |
+| `DEV-007` | Agents      | Claude Code and OpenAI Codex are installed through SFW-gated npm packages.                                                                   |
+| `DEV-008` | Lifecycle   | Only audited service and post-create setup runs automatically; project dependencies are not installed.                                      |
+| `DEV-009` | Databases   | PostgreSQL, MySQL, ClickHouse, and localhost SSH forwarding start automatically and pass container health checks.                            |
+| `DEV-010` | Supply chain | SFW gates npm and Python package installations; APT and ClickHouse packages use signed repositories and the seven-day cooldown.             |

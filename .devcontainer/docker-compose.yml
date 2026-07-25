@@ -1,5 +1,5 @@
 # Yuri devcontainer docker-compose.yml
-# Last updated: 2026-07-15
+# Last updated: 2026-07-25
 
 # Used by VS Code Dev Containers extension
 
@@ -21,7 +21,13 @@ services:
       - claude-code-data:/home/vscode/.claude
       - codex-data:/home/vscode/.codex
     network_mode: host
-    command: sleep infinity
+    command: sudo /usr/local/bin/start-dev-services
+    healthcheck:
+      test: ["CMD", "sudo", "/usr/local/bin/check-dev-services"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 90s
 
 volumes:
   claude-code-data:

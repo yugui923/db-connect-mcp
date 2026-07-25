@@ -6,7 +6,8 @@
 # - System dependencies for development
 # - mise (runtime version manager) for managing Python and Node versions
 # - uv (fast Python package manager) for installing Python tools
-# - Claude Code and OpenAI Codex (native installations)
+# - PostgreSQL, MySQL, ClickHouse, and OpenSSH test services
+# - Claude Code and OpenAI Codex (SFW-gated npm installations)
 
 
 FROM mcr.microsoft.com/devcontainers/base:ubuntu-24.04
@@ -20,8 +21,9 @@ RUN DEBIAN_FRONTEND=noninteractive apt-get update \
     build-essential \
     # SSL/crypto libraries
     libssl-dev libffi-dev \
-    # Database clients
-    sqlite3 mysql-client postgresql-client \
+    # Database clients and in-container test servers (Ubuntu 24.04 majors)
+    sqlite3 mysql-client postgresql-client postgresql-16 postgresql-contrib-16 \
+    mysql-server-8.0 openssh-server netcat-openbsd \
     # Python build dependencies
     libbz2-dev libreadline-dev libsqlite3-dev \
     zlib1g-dev liblzma-dev \
@@ -55,6 +57,26 @@ RUN DEBIAN_FRONTEND=noninteractive apt-get update \
     libdrm2 libgbm1 libglib2.0-0t64 libpango-1.0-0 \
     libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 \
     libxrandr2 libasound2t64 libxshmfence1 \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install a ClickHouse release older than the mandatory seven-day cooldown.
+# The repository metadata and packages are verified by APT's signed-by keyring.
+ARG CLICKHOUSE_VERSION=26.6.1.1193
+RUN curl -fsSL https://packages.clickhouse.com/rpm/lts/repodata/repomd.xml.key \
+      -o /tmp/clickhouse-key.asc \
+    && test "$(gpg --show-keys --with-colons /tmp/clickhouse-key.asc | awk -F: '$1 == "fpr" { print $10; exit }')" \
+      = "3A9EA1193A97B548BE1457D48919F6BD2B48D754" \
+    && gpg --dearmor --yes --output /usr/share/keyrings/clickhouse-keyring.gpg \
+      /tmp/clickhouse-key.asc \
+    && echo "deb [signed-by=/usr/share/keyrings/clickhouse-keyring.gpg] https://packages.clickhouse.com/deb stable main" \
+      > /etc/apt/sources.list.d/clickhouse.list \
+    && DEBIAN_FRONTEND=noninteractive apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      "clickhouse-common-static=${CLICKHOUSE_VERSION}" \
+      "clickhouse-client=${CLICKHOUSE_VERSION}" \
+      "clickhouse-server=${CLICKHOUSE_VERSION}" \
+    && rm -f /tmp/clickhouse-key.asc \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -109,15 +131,19 @@ RUN mise use --global python@3.14.6 node@24.18.0
 # filters plenty of margin and keeps the build deterministic.
 RUN mise exec node -- npm install -g npm@11.18.0 \
     && mise exec node -- npm config set min-release-age 7 --location=user \
-    && test "$(mise exec node -- npm config get min-release-age)" = "7"
+    && test "$(mise exec node -- npm config get min-release-age)" = "7" \
+    # SFW must bootstrap once through npm; npm verifies registry integrity and
+    # the release-age gate applies before SFW becomes available.
+    && mise exec node -- npm install -g sfw@2.0.6 \
+    && mise reshim \
+    && mise exec node -- sfw --version
 
 
-# Install Claude Code using native installation (recommended method)
-# The native install provides auto-updates and doesn't require Node.js
-RUN curl -fsSL https://claude.ai/install.sh | bash
-
-# Install OpenAI Codex using its official native installer.
-RUN curl -fsSL https://chatgpt.com/codex/install.sh | sh
+# Install agent CLIs through SFW. Pins are older than seven days at build time;
+# the npm cooldown independently rejects a pin that does not meet that policy.
+RUN mise exec node -- sfw npm install -g \
+    @anthropic-ai/claude-code@2.1.210 \
+    @openai/codex@0.143.0
 
 # Pre-create persisted AI state mountpoints so fresh Docker named volumes inherit
 # writable vscode ownership instead of root ownership.
@@ -126,7 +152,7 @@ RUN mkdir -p /home/vscode/.claude /home/vscode/.codex \
 
 
 # Install global npm packages, pinned to versions >= 14 days old.
-RUN mise exec node -- npm install -g \
+RUN mise exec node -- sfw npm install -g \
     typescript@6.0.3 \
     tsx@4.21.0 \
     prettier@3.8.3 \
@@ -134,10 +160,10 @@ RUN mise exec node -- npm install -g \
 
 
 # Install global Python tools via uv, pinned to versions >= 14 days old.
-RUN uv tool install ruff==0.15.12 && \
-    uv tool install black==26.3.1 && \
-    uv tool install mypy==1.20.2 && \
-    uv tool install pytest==9.0.3
+RUN mise exec node -- sfw uv tool install ruff==0.15.12 && \
+    mise exec node -- sfw uv tool install black==26.3.1 && \
+    mise exec node -- sfw uv tool install mypy==1.20.2 && \
+    mise exec node -- sfw uv tool install pytest==9.0.3
 
 
 # Install pinned ZSH plugins and enable them in .zshrc.
@@ -153,3 +179,16 @@ RUN git clone https://github.com/zsh-users/zsh-autosuggestions \
       ~/.oh-my-zsh/custom/plugins/zsh-syntax-highlighting \
  && git -C ~/.oh-my-zsh/custom/plugins/zsh-syntax-highlighting checkout --detach "$ZSH_SYNTAX_HIGHLIGHTING_REF" \
  && sed -i 's/^plugins=(git)$/plugins=(git zsh-autosuggestions zsh-syntax-highlighting)/' ~/.zshrc
+
+# Install the audited service bootstrap after all server packages are present.
+USER root
+COPY .devcontainer/start-services.sh /usr/local/bin/start-dev-services
+COPY .devcontainer/check-services.sh /usr/local/bin/check-dev-services
+COPY tests/docker/postgres/init /opt/db-connect-mcp/init/postgres
+COPY tests/docker/mysql/init /opt/db-connect-mcp/init/mysql
+COPY tests/docker/clickhouse/init /opt/db-connect-mcp/init/clickhouse
+RUN chmod 0755 /usr/local/bin/start-dev-services /usr/local/bin/check-dev-services \
+    && mkdir -p /run/sshd /var/run/mysqld \
+    && chown mysql:mysql /var/run/mysqld
+
+USER vscode
