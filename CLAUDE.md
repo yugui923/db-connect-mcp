@@ -264,11 +264,11 @@ The `tunnel-internal` bridge network isolates tunneled databases — they are **
 ### Environment Variables (set automatically in devcontainer)
 
 ```text
-PG_TEST_DATABASE_URL=postgresql+asyncpg://devuser:devpassword@localhost:5432/devdb
-MYSQL_TEST_DATABASE_URL=mysql+aiomysql://testuser:testpass@localhost:3306/devdb
-PG_TUNNEL_DATABASE_URL=postgresql+asyncpg://devuser:devpassword@postgres-tunneled:5432/devdb
-MYSQL_TUNNEL_DATABASE_URL=mysql+aiomysql://testuser:testpass@mysql-tunneled:3306/devdb
-SSH_HOST=localhost
+PG_TEST_DATABASE_URL=postgresql+asyncpg://devuser:devpassword@127.0.0.1:5432/devdb
+MYSQL_TEST_DATABASE_URL=mysql+aiomysql://testuser:testpass@127.0.0.1:3306/devdb
+PG_TUNNEL_DATABASE_URL=postgresql+asyncpg://devuser:devpassword@127.0.0.1:5432/devdb
+MYSQL_TUNNEL_DATABASE_URL=mysql+aiomysql://testuser:testpass@127.0.0.1:3306/devdb
+SSH_HOST=127.0.0.1
 SSH_PORT=2222
 SSH_USERNAME=tunneluser
 SSH_PASSWORD=tunnelpass
