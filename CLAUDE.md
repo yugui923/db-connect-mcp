@@ -265,9 +265,9 @@ The `tunnel-internal` bridge network isolates tunneled databases — they are **
 
 ```text
 PG_TEST_DATABASE_URL=postgresql+asyncpg://devuser:devpassword@localhost:5432/devdb
-MYSQL_TEST_DATABASE_URL=mysql+aiomysql://testuser:testpass@localhost:3306/testdb
+MYSQL_TEST_DATABASE_URL=mysql+aiomysql://testuser:testpass@localhost:3306/devdb
 PG_TUNNEL_DATABASE_URL=postgresql+asyncpg://devuser:devpassword@postgres-tunneled:5432/devdb
-MYSQL_TUNNEL_DATABASE_URL=mysql+aiomysql://testuser:testpass@mysql-tunneled:3306/testdb
+MYSQL_TUNNEL_DATABASE_URL=mysql+aiomysql://testuser:testpass@mysql-tunneled:3306/devdb
 SSH_HOST=localhost
 SSH_PORT=2222
 SSH_USERNAME=tunneluser

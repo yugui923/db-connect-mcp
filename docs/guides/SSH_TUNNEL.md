@@ -154,11 +154,11 @@ These are set automatically in `.devcontainer/devcontainer.json`:
 ```bash
 # Direct access databases
 PG_TEST_DATABASE_URL=postgresql+asyncpg://devuser:devpassword@localhost:5432/devdb
-MYSQL_TEST_DATABASE_URL=mysql+aiomysql://testuser:testpass@localhost:3306/testdb
+MYSQL_TEST_DATABASE_URL=mysql+aiomysql://testuser:testpass@localhost:3306/devdb
 
 # Tunnel-only databases (hostnames resolve only from bastion's network)
 PG_TUNNEL_DATABASE_URL=postgresql+asyncpg://devuser:devpassword@postgres-tunneled:5432/devdb
-MYSQL_TUNNEL_DATABASE_URL=mysql+aiomysql://testuser:testpass@mysql-tunneled:3306/testdb
+MYSQL_TUNNEL_DATABASE_URL=mysql+aiomysql://testuser:testpass@mysql-tunneled:3306/devdb
 
 # SSH bastion credentials
 SSH_HOST=localhost
