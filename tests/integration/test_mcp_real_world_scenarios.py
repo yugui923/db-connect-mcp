@@ -344,7 +344,7 @@ class TestEdgeCasesAndErrorHandling:
             "execute_query",
             arguments={"query": "SELEKT * FORM users"},  # intentional typo
         )
-        assert response.isError
+        assert response.is_error
 
     @pytest.mark.asyncio
     async def test_nonexistent_table_error(self, pg_client: ClientSession):
@@ -353,7 +353,7 @@ class TestEdgeCasesAndErrorHandling:
             "execute_query",
             arguments={"query": "SELECT * FROM table_that_does_not_exist_xyz"},
         )
-        assert response.isError
+        assert response.is_error
 
     @pytest.mark.asyncio
     async def test_sample_nonexistent_table_error(self, pg_client: ClientSession):
@@ -362,7 +362,7 @@ class TestEdgeCasesAndErrorHandling:
             "sample_data",
             arguments={"table": "nonexistent_table_xyz", "schema": "public"},
         )
-        assert response.isError
+        assert response.is_error
 
 
 @pytest.mark.postgresql

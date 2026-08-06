@@ -4,6 +4,7 @@ import base64
 import binascii
 import enum
 import logging
+import os
 import re
 import time
 from io import StringIO
@@ -13,15 +14,69 @@ from urllib.parse import urlparse, urlunparse
 import paramiko
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import dsa, ec, ed25519, rsa
-from sshtunnel import SSHTunnelForwarder
 
 from db_connect_mcp.models.config import SSHTunnelConfig
+
+# sshtunnel 0.4.0 references DSSKey while importing, but Paramiko removed DSA
+# support in 4.0. Keep the alias only for the import itself, then use a narrow
+# subclass that loads the supported RSA, ECDSA, and Ed25519 key types.
+_PARAMIKO_DSS_KEY_CLASS = getattr(paramiko, "DSSKey", None)
+if _PARAMIKO_DSS_KEY_CLASS is None:
+    paramiko.DSSKey = paramiko.RSAKey  # type: ignore[attr-defined]
+
+from sshtunnel import SSHTunnelForwarder as _BaseSSHTunnelForwarder  # noqa: E402
+
+if _PARAMIKO_DSS_KEY_CLASS is None:
+    delattr(paramiko, "DSSKey")
 
 logger = logging.getLogger(__name__)
 
 # Maximum time allowed for the entire key parsing pipeline (seconds).
 # Leaves ~1s headroom within the user's expected 5s connection time.
 _KEY_PARSE_BUDGET_SECONDS = 4.0
+
+
+class SSHTunnelForwarder(_BaseSSHTunnelForwarder):
+    """Paramiko 5-compatible sshtunnel forwarder."""
+
+    @staticmethod
+    def get_keys(
+        logger: logging.Logger | None = None,
+        host_pkey_directories: list[str] | None = None,
+        allow_agent: bool = False,
+    ) -> list[paramiko.PKey]:
+        """Load supported keys without referencing Paramiko's removed DSSKey."""
+        keys: list[paramiko.PKey] = []
+        if allow_agent:
+            keys.extend(_BaseSSHTunnelForwarder.get_agent_keys(logger=logger))
+        directories = host_pkey_directories or [str(Path.home() / ".ssh")]
+        key_types = {
+            "rsa": paramiko.RSAKey,
+            "ecdsa": paramiko.ECDSAKey,
+            "ed25519": paramiko.Ed25519Key,
+        }
+
+        for directory in directories:
+            for key_type, key_class in key_types.items():
+                key_path = os.path.expanduser(os.path.join(directory, f"id_{key_type}"))
+                if not os.path.isfile(key_path):
+                    continue
+                try:
+                    keys.append(key_class.from_private_key_file(key_path))
+                except (
+                    paramiko.PasswordRequiredException,
+                    paramiko.SSHException,
+                ) as exc:
+                    if logger:
+                        logger.debug("Could not load private key %s: %s", key_path, exc)
+
+        return keys
+
+
+# sshtunnel's authentication path calls the base class by name instead of
+# dispatching through ``self`` or ``type(self)``. Patch that single hook so the
+# compatibility implementation above is also used from its constructor.
+_BaseSSHTunnelForwarder.get_keys = SSHTunnelForwarder.get_keys  # type: ignore[method-assign]
 
 
 class KeyFormat(enum.Enum):

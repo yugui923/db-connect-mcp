@@ -9,11 +9,19 @@ import asyncio
 import json
 import logging
 import os
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
 from dotenv import load_dotenv
-from mcp.server import Server
-from mcp.types import TextContent, Tool
+from mcp.server import Server, ServerRequestContext
+from mcp.types import (
+    CallToolRequestParams,
+    CallToolResult,
+    ContentBlock,
+    ListToolsResult,
+    PaginatedRequestParams,
+    TextContent,
+    Tool,
+)
 
 from db_connect_mcp.adapters import create_adapter
 from db_connect_mcp.core import (
@@ -434,7 +442,11 @@ class DatabaseMCPServer:
         self.executor: Optional[QueryExecutor] = None
         self.analyzer: Optional[StatisticsAnalyzer] = None
         self.searcher: Optional[ObjectSearcher] = None
-        self.server = Server("db-connect-mcp")
+        self.server = Server(
+            "db-connect-mcp",
+            on_list_tools=self._list_tools,
+            on_call_tool=self._call_tool,
+        )
 
     async def initialize(self) -> None:
         """Initialize all components."""
@@ -455,9 +467,73 @@ class DatabaseMCPServer:
 
     async def _register_tools(self) -> None:
         """Register MCP tools based on database capabilities."""
-        # Note: Tools are registered via the list_tools decorator, not add_tool
-        # This method is kept for initializing any tool-related state
+        # Low-level MCP v2 handlers are bound in the Server constructor.
+        # This hook remains for tool-related initialization work.
         pass
+
+    async def _list_tools(
+        self,
+        _ctx: ServerRequestContext[Any],
+        _params: PaginatedRequestParams | None,
+    ) -> ListToolsResult:
+        """List tools supported by the configured database."""
+        tools = [
+            self._create_get_database_info_tool(),
+            self._create_list_schemas_tool(),
+            self._create_list_tables_tool(),
+            self._create_describe_table_tool(),
+            self._create_execute_query_tool(),
+            self._create_sample_data_tool(),
+            self._create_search_objects_tool(),
+        ]
+
+        if self.adapter.capabilities.foreign_keys:
+            tools.append(self._create_get_relationships_tool())
+
+        if self.adapter.capabilities.advanced_stats:
+            tools.append(self._create_analyze_column_tool())
+
+        if self.adapter.capabilities.explain_plans:
+            tools.append(self._create_explain_query_tool())
+
+        return ListToolsResult(tools=tools)
+
+    async def _call_tool(
+        self,
+        _ctx: ServerRequestContext[Any],
+        params: CallToolRequestParams,
+    ) -> CallToolResult:
+        """Dispatch a tool call while preserving model-visible error results."""
+        handlers = {
+            "get_database_info": self.handle_get_database_info,
+            "list_schemas": self.handle_list_schemas,
+            "list_tables": self.handle_list_tables,
+            "describe_table": self.handle_describe_table,
+            "execute_query": self.handle_execute_query,
+            "sample_data": self.handle_sample_data,
+            "get_table_relationships": self.handle_get_relationships,
+            "analyze_column": self.handle_analyze_column,
+            "explain_query": self.handle_explain_query,
+            "search_objects": self.handle_search_objects,
+        }
+
+        handler = handlers.get(params.name)
+        if handler is None:
+            return CallToolResult(
+                content=[TextContent(type="text", text=f"Unknown tool: {params.name}")],
+                isError=True,
+            )
+
+        try:
+            content = await handler(params.arguments or {})
+        except Exception as exc:
+            logger.warning("Tool %s failed: %s", params.name, exc)
+            return CallToolResult(
+                content=[TextContent(type="text", text=str(exc))],
+                isError=True,
+            )
+
+        return CallToolResult(content=cast(list[ContentBlock], content))
 
     def _create_get_database_info_tool(self) -> Tool:
         """Create get_database_info tool."""
@@ -1315,55 +1391,6 @@ async def main(
 
     try:
         await mcp_server.initialize()
-
-        # Register list_tools handler
-        @mcp_server.server.list_tools()
-        async def list_tools() -> list[Tool]:
-            """List available tools based on database capabilities."""
-            tools = [
-                mcp_server._create_get_database_info_tool(),
-                mcp_server._create_list_schemas_tool(),
-                mcp_server._create_list_tables_tool(),
-                mcp_server._create_describe_table_tool(),
-                mcp_server._create_execute_query_tool(),
-                mcp_server._create_sample_data_tool(),
-                mcp_server._create_search_objects_tool(),
-            ]
-
-            # Add conditional tools
-            if mcp_server.adapter.capabilities.foreign_keys:
-                tools.append(mcp_server._create_get_relationships_tool())
-
-            if mcp_server.adapter.capabilities.advanced_stats:
-                tools.append(mcp_server._create_analyze_column_tool())
-
-            if mcp_server.adapter.capabilities.explain_plans:
-                tools.append(mcp_server._create_explain_query_tool())
-
-            return tools
-
-        # Register tool call handlers
-        @mcp_server.server.call_tool()
-        async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
-            """Handle tool calls."""
-            handlers = {
-                "get_database_info": mcp_server.handle_get_database_info,
-                "list_schemas": mcp_server.handle_list_schemas,
-                "list_tables": mcp_server.handle_list_tables,
-                "describe_table": mcp_server.handle_describe_table,
-                "execute_query": mcp_server.handle_execute_query,
-                "sample_data": mcp_server.handle_sample_data,
-                "get_table_relationships": mcp_server.handle_get_relationships,
-                "analyze_column": mcp_server.handle_analyze_column,
-                "explain_query": mcp_server.handle_explain_query,
-                "search_objects": mcp_server.handle_search_objects,
-            }
-
-            handler = handlers.get(name)
-            if handler is None:
-                raise ValueError(f"Unknown tool: {name}")
-
-            return await handler(arguments)
 
         # Run the server
         if transport == "streamable-http":

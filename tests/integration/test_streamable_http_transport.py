@@ -174,7 +174,7 @@ class TestHTTPEndpointBasics:
     def test_mcp_endpoint_responds(self, starlette_app_no_auth):
         """Test that /mcp endpoint exists and responds."""
         with TestClient(starlette_app_no_auth, raise_server_exceptions=False) as client:
-            response = client.get("/mcp")
+            response = client.get("/mcp", headers={"Accept": "application/json"})
             assert response.status_code != 404
 
     def test_root_endpoint_returns_404(self, starlette_app_no_auth):
@@ -285,7 +285,11 @@ class TestBearerTokenAuthentication:
         app, auth_token = starlette_app_with_auth
         with TestClient(app, raise_server_exceptions=False) as client:
             response = client.get(
-                "/mcp", headers={"Authorization": f"Bearer {auth_token}"}
+                "/mcp",
+                headers={
+                    "Accept": "application/json",
+                    "Authorization": f"Bearer {auth_token}",
+                },
             )
             assert response.status_code != 401
 
@@ -325,13 +329,19 @@ class TestNoAuthConfiguration:
     def test_requests_allowed_without_auth_header(self, starlette_app_no_auth):
         """Test that requests work without auth when not configured."""
         with TestClient(starlette_app_no_auth, raise_server_exceptions=False) as client:
-            response = client.get("/mcp")
+            response = client.get("/mcp", headers={"Accept": "application/json"})
             assert response.status_code != 401
 
     def test_bearer_header_ignored_when_no_auth(self, starlette_app_no_auth):
         """Test that Bearer header is ignored when auth not configured."""
         with TestClient(starlette_app_no_auth, raise_server_exceptions=False) as client:
-            response = client.get("/mcp", headers={"Authorization": "Bearer any-token"})
+            response = client.get(
+                "/mcp",
+                headers={
+                    "Accept": "application/json",
+                    "Authorization": "Bearer any-token",
+                },
+            )
             assert response.status_code != 401
 
 
@@ -492,7 +502,7 @@ class TestHTTPMethods:
     def test_get_method_accepted(self, starlette_app_no_auth):
         """Test GET method is accepted (for SSE streams)."""
         with TestClient(starlette_app_no_auth, raise_server_exceptions=False) as client:
-            response = client.get("/mcp")
+            response = client.get("/mcp", headers={"Accept": "application/json"})
             assert response.status_code != 405
 
     def test_post_method_accepted(self, starlette_app_no_auth):
@@ -803,7 +813,7 @@ class TestErrorHandling:
             assert response.status_code in (400, 415, 422, 500)
 
             # Subsequent request should still work
-            response = client.get("/mcp")
+            response = client.get("/mcp", headers={"Accept": "application/json"})
             assert response.status_code != 503  # Not service unavailable
 
     def test_deeply_nested_json(self, starlette_app_no_auth):

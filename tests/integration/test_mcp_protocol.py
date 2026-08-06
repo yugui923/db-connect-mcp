@@ -57,57 +57,6 @@ class MCPProtocolHelper:
         server = DatabaseMCPServer(config)
         await server.initialize()
 
-        # Register server handlers. Keep this list in sync with
-        # ``main()`` in src/db_connect_mcp/server.py — both files build the
-        # same tool surface so the in-memory helper exposes everything a real
-        # stdio client would see.
-        @server.server.list_tools()
-        async def list_tools():
-            """List available tools."""
-            tools = [
-                server._create_get_database_info_tool(),
-                server._create_list_schemas_tool(),
-                server._create_list_tables_tool(),
-                server._create_describe_table_tool(),
-                server._create_execute_query_tool(),
-                server._create_sample_data_tool(),
-                server._create_search_objects_tool(),
-            ]
-
-            # Add conditional tools based on capabilities
-            if server.adapter.capabilities.foreign_keys:
-                tools.append(server._create_get_relationships_tool())
-
-            if server.adapter.capabilities.advanced_stats:
-                tools.append(server._create_analyze_column_tool())
-
-            if server.adapter.capabilities.explain_plans:
-                tools.append(server._create_explain_query_tool())
-
-            return tools
-
-        @server.server.call_tool()
-        async def call_tool(name: str, arguments: dict[str, Any]):
-            """Handle tool calls."""
-            handlers = {
-                "get_database_info": server.handle_get_database_info,
-                "list_schemas": server.handle_list_schemas,
-                "list_tables": server.handle_list_tables,
-                "describe_table": server.handle_describe_table,
-                "execute_query": server.handle_execute_query,
-                "sample_data": server.handle_sample_data,
-                "get_table_relationships": server.handle_get_relationships,
-                "analyze_column": server.handle_analyze_column,
-                "explain_query": server.handle_explain_query,
-                "search_objects": server.handle_search_objects,
-            }
-
-            handler = handlers.get(name)
-            if handler is None:
-                raise ValueError(f"Unknown tool: {name}")
-
-            return await handler(arguments)
-
         # Create in-memory streams for testing
         server_to_client_send, server_to_client_recv = (
             anyio.create_memory_object_stream()
@@ -181,7 +130,7 @@ class MCPProtocolHelper:
             AssertionError: If response contains unexpected error
         """
         # Check for error responses
-        if response.isError:
+        if response.is_error:
             error_text = str(
                 response.content[0].text if response.content else "Unknown error"
             )
@@ -305,18 +254,18 @@ class TestMCPToolRegistration:
 
             for tool in tools:
                 # Every tool should have an input schema
-                assert tool.inputSchema is not None
-                assert "type" in tool.inputSchema
-                assert tool.inputSchema["type"] == "object"
-                assert "properties" in tool.inputSchema
-                assert "required" in tool.inputSchema
+                assert tool.input_schema is not None
+                assert "type" in tool.input_schema
+                assert tool.input_schema["type"] == "object"
+                assert "properties" in tool.input_schema
+                assert "required" in tool.input_schema
 
                 # Validate required fields
-                required = tool.inputSchema["required"]
+                required = tool.input_schema["required"]
                 assert isinstance(required, list)
 
                 # All required fields should be in properties
-                properties = tool.inputSchema["properties"]
+                properties = tool.input_schema["properties"]
                 for field in required:
                     assert field in properties
 
@@ -544,7 +493,7 @@ class TestMCPErrorHandling:
             response = await client.call_tool("non_existent_tool", arguments={})
 
             # MCP returns error response for invalid tool
-            assert response.isError
+            assert response.is_error
             error_text = str(response.content[0].text if response.content else "")
             assert "non_existent_tool" in error_text or "unknown" in error_text.lower()
 
@@ -565,7 +514,7 @@ class TestMCPErrorHandling:
             )
 
             # MCP returns error response for invalid queries
-            assert response.isError
+            assert response.is_error
             error_text = str(
                 response.content[0].text if response.content else ""
             ).lower()
@@ -590,7 +539,7 @@ class TestMCPErrorHandling:
             response = await client.call_tool("describe_table", arguments={})
 
             # MCP returns error responses
-            assert response.isError or "table" in str(response.content).lower()
+            assert response.is_error or "table" in str(response.content).lower()
 
         finally:
             await server.cleanup()

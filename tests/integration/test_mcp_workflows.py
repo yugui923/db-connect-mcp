@@ -226,7 +226,7 @@ class TestErrorRecoveryWorkflow:
                 "execute_query",
                 arguments={"query": "DROP TABLE nonexistent", "limit": 10},
             )
-            assert invalid_response.isError
+            assert invalid_response.is_error
 
             # 2. Verify server still works with valid query
             valid_response = await client.call_tool(
@@ -256,7 +256,7 @@ class TestErrorRecoveryWorkflow:
                 },
             )
             # Should return error
-            assert invalid_response.isError
+            assert invalid_response.is_error
 
             # 2. Verify server still works
             valid_response = await client.call_tool("list_schemas", arguments={})

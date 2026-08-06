@@ -35,22 +35,22 @@ classifiers = [
 ]
 
 dependencies = [
-    "mcp>=1.26.0",  # CVE-2025-66416: DNS rebinding protection
-    "pydantic>=2.11.0,<3.0.0",  # Aligned with mcp 1.26 requirement
-    "orjson>=3.11.6",  # Fix for deeply nested structures
-    "sqlalchemy[asyncio]>=2.0.0",
-    "python-dotenv>=1.0.0",
-    "asyncpg>=0.29.0",
-    "aiomysql>=0.3.0",  # CVE-2025-62611: arbitrary file access fix
-    "clickhouse-connect>=0.7.0",
+    "mcp>=2.0.0,<3.0.0",  # CVE-2025-66416: DNS rebinding protection
+    "pydantic>=2.13.4,<3.0.0",
+    "orjson>=3.11.9",  # Fix for deeply nested structures
+    "sqlalchemy[asyncio]>=2.0.51",
+    "python-dotenv>=1.2.2",
+    "asyncpg>=0.31.0",
+    "aiomysql>=0.3.2",  # CVE-2025-62611: arbitrary file access fix
+    "clickhouse-connect>=1.6.0",
     "sshtunnel>=0.4.0",
-    "paramiko>=3.0.0,<4.0.0",  # sshtunnel 0.4.0 uses paramiko.DSSKey removed in 4.x
-    "pyjwt[crypto]>=2.12.0",  # CVE-2026-32597: crit header bypass fix
-    "httpx>=0.27.0",  # For JWKS fetching and token introspection
-    "starlette>=0.52.1",  # CVE-2025-62727: Range header DoS fix
-    "urllib3>=2.6.3",  # CVE-2025-66418, CVE-2025-66471, CVE-2026-21441: decompression bomb fixes
-    "python-multipart>=0.0.22",  # CVE-2026-24486: path traversal fix
-    "cryptography>=46.0.6",  # CVE-2026-26007, CVE-2026-34073: ECC + DNS constraint fixes
+    "paramiko>=5.0.0,<6.0.0",  # Compatibility shim covers sshtunnel's removed DSSKey reference
+    "pyjwt[crypto]>=2.13.0",  # CVE-2026-32597: crit header bypass fix
+    "httpx>=0.28.1",  # For JWKS fetching and token introspection
+    "starlette>=1.3.1",  # CVE-2025-62727: Range header DoS fix
+    "urllib3>=2.7.0",  # CVE-2025-66418, CVE-2025-66471, CVE-2026-21441: decompression bomb fixes
+    "python-multipart>=0.0.32",  # CVE-2026-24486: path traversal fix
+    "cryptography>=49.0.0",  # CVE-2026-26007, CVE-2026-34073: ECC + DNS constraint fixes
 ]
 
 [project.urls]
@@ -63,16 +63,16 @@ db-connect-mcp = "db_connect_mcp.server:cli_entry"
 
 [dependency-groups]
 dev = [
-    "pytest>=8.0.0",
-    "pytest-asyncio>=1.0.0",
-    "pytest-cov>=7.0.0",
-    "pytest-timeout>=2.1.0",
-    "black>=26.3.1",  # CVE-2026-32274: cache path traversal fix
-    "ruff>=0.15.0",
-    "pyright>=1.1.0",
-    "hatchling>=1.0.0",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "pytest-cov>=7.1.0",
+    "pytest-timeout>=2.4.0",
+    "black>=26.5.1",  # CVE-2026-32274: cache path traversal fix
+    "ruff>=0.16.0",
+    "pyright>=1.1.411",
+    "hatchling>=1.31.0",
     "pytest-xdist>=3.8.0",
-    "httpx>=0.27.0",
+    "httpx>=0.28.1",
 ]
 
 [tool.hatch.build.targets.sdist]
