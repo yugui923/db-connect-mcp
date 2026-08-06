@@ -15,6 +15,7 @@ from pydantic import ValidationError
 from db_connect_mcp.core.tunnel import (
     KeyFormat,
     SSHTunnelError,
+    SSHTunnelForwarder,
     SSHTunnelManager,
     rewrite_database_url,
 )
@@ -516,6 +517,59 @@ class TestSSHTunnelManagerMocked:
             manager.start()
 
         assert "not a valid PEM" in str(exc_info.value)
+
+
+class TestSSHTunnelForwarderCompatibility:
+    """Test Paramiko 5 compatibility for sshtunnel's key-loading hooks."""
+
+    def test_explicit_private_key_path(self, tmp_path: Path):
+        """A string ssh_pkey path should load without referencing DSSKey."""
+        key_path = tmp_path / "explicit-rsa-key"
+        paramiko.RSAKey.generate(2048).write_private_key_file(str(key_path))
+
+        password, keys = SSHTunnelForwarder._consolidate_auth(
+            ssh_pkey=str(key_path),
+            allow_agent=False,
+            host_pkey_directories=[],
+        )
+
+        assert password is None
+        assert len(keys) == 1
+        assert isinstance(keys[0], paramiko.RSAKey)
+
+    def test_empty_directories_disable_default_discovery(self, tmp_path: Path):
+        """An explicit empty directory list should not scan ~/.ssh."""
+        ssh_directory = tmp_path / ".ssh"
+        ssh_directory.mkdir()
+        paramiko.RSAKey.generate(2048).write_private_key_file(
+            str(ssh_directory / "id_rsa")
+        )
+
+        with patch("db_connect_mcp.core.tunnel.Path.home", return_value=tmp_path):
+            assert SSHTunnelForwarder.get_keys(host_pkey_directories=[]) == []
+            discovered = SSHTunnelForwarder.get_keys(host_pkey_directories=None)
+
+        assert len(discovered) == 1
+        assert isinstance(discovered[0], paramiko.RSAKey)
+
+    def test_unreadable_discovered_key_preserves_password_auth(self, tmp_path: Path):
+        """A filesystem error while loading a key should not block password auth."""
+        key_path = tmp_path / "id_rsa"
+        key_path.touch()
+
+        with patch.object(
+            paramiko.RSAKey,
+            "from_private_key_file",
+            side_effect=PermissionError("permission denied"),
+        ):
+            password, keys = SSHTunnelForwarder._consolidate_auth(
+                ssh_password="secret",
+                allow_agent=False,
+                host_pkey_directories=[str(tmp_path)],
+            )
+
+        assert password == "secret"
+        assert keys == []
 
 
 class TestDatabaseConfigWithSSHTunnel:

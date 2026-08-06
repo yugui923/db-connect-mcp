@@ -19,6 +19,7 @@ import time
 from contextlib import contextmanager
 from typing import Any, Generator
 
+import anyio
 import httpx
 import pytest
 import uvicorn
@@ -499,11 +500,60 @@ class TestMCPMethods:
 class TestHTTPMethods:
     """Tests for HTTP method handling."""
 
-    def test_get_method_accepted(self, starlette_app_no_auth):
-        """Test GET method is accepted (for SSE streams)."""
+    def test_get_requires_sse_accept_header(self, starlette_app_no_auth):
+        """Test GET rejects clients that do not accept SSE."""
         with TestClient(starlette_app_no_auth, raise_server_exceptions=False) as client:
             response = client.get("/mcp", headers={"Accept": "application/json"})
-            assert response.status_code != 405
+            assert response.status_code == 406
+
+    @pytest.mark.asyncio
+    async def test_get_opens_sse_stream(self, starlette_app_no_auth):
+        """Test GET starts an SSE response without consuming the endless stream."""
+        messages: list[dict[str, Any]] = []
+        response_started = anyio.Event()
+        request_received = False
+
+        async def receive() -> dict[str, Any]:
+            nonlocal request_received
+            if not request_received:
+                request_received = True
+                return {"type": "http.request", "body": b"", "more_body": False}
+            await anyio.sleep_forever()
+
+        async def send(message: dict[str, Any]) -> None:
+            messages.append(message)
+            if message["type"] == "http.response.start":
+                response_started.set()
+
+        scope = {
+            "type": "http",
+            "asgi": {"version": "3.0"},
+            "http_version": "1.1",
+            "method": "GET",
+            "scheme": "http",
+            "path": "/mcp",
+            "raw_path": b"/mcp",
+            "query_string": b"",
+            "root_path": "",
+            "headers": [(b"accept", b"text/event-stream")],
+            "client": ("testclient", 50000),
+            "server": ("testserver", 80),
+            "state": {},
+        }
+
+        async with starlette_app_no_auth.router.lifespan_context(starlette_app_no_auth):
+            async with anyio.create_task_group() as task_group:
+                task_group.start_soon(starlette_app_no_auth, scope, receive, send)
+                with anyio.fail_after(2):
+                    await response_started.wait()
+                task_group.cancel_scope.cancel()
+
+        response = next(
+            message for message in messages if message["type"] == "http.response.start"
+        )
+        headers = dict(response["headers"])
+        assert response["status"] == 200
+        assert headers[b"content-type"].startswith(b"text/event-stream")
 
     def test_post_method_accepted(self, starlette_app_no_auth):
         """Test POST method is accepted."""

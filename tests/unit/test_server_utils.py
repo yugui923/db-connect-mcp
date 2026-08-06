@@ -4,8 +4,15 @@ import os
 from unittest.mock import MagicMock, patch
 
 import pytest
+from mcp.types import CallToolRequestParams
 
-from db_connect_mcp.server import _load_ssh_tunnel_config, _parse_int_env
+from db_connect_mcp.models.capabilities import DatabaseCapabilities
+from db_connect_mcp.models.config import DatabaseConfig
+from db_connect_mcp.server import (
+    DatabaseMCPServer,
+    _load_ssh_tunnel_config,
+    _parse_int_env,
+)
 
 
 class TestParseIntEnv:
@@ -58,6 +65,66 @@ class TestParseIntEnv:
         """Test that whitespace-only string raises ValueError."""
         with pytest.raises(ValueError):
             _parse_int_env("SPACE_VAR", "   ")
+
+
+class TestMCPToolDispatch:
+    """Tests for MCP v2 tool availability and argument validation."""
+
+    @pytest.fixture
+    def server_without_optional_capabilities(self) -> DatabaseMCPServer:
+        """Create an uninitialized server with every optional tool disabled."""
+        server = DatabaseMCPServer(
+            DatabaseConfig(url="clickhousedb://default@localhost/default")
+        )
+        server.adapter = MagicMock()
+        server.adapter.capabilities = DatabaseCapabilities(
+            foreign_keys=False,
+            advanced_stats=False,
+            explain_plans=False,
+        )
+        return server
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "tool_name",
+        ["get_table_relationships", "analyze_column", "explain_query"],
+    )
+    async def test_unavailable_tools_cannot_be_called_directly(
+        self,
+        server_without_optional_capabilities: DatabaseMCPServer,
+        tool_name: str,
+    ):
+        """Capability-gated tools should reject direct calls when unavailable."""
+        result = await server_without_optional_capabilities._call_tool(
+            MagicMock(),
+            CallToolRequestParams(name=tool_name, arguments={}),
+        )
+
+        assert result.is_error
+        assert "unavailable" in str(result.content)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("arguments", "expected_error"),
+        [
+            ({}, "required property"),
+            ({"table": 123}, "not of type"),
+        ],
+    )
+    async def test_arguments_are_validated_before_dispatch(
+        self,
+        server_without_optional_capabilities: DatabaseMCPServer,
+        arguments: dict[str, object],
+        expected_error: str,
+    ):
+        """Invalid tool arguments should return model-visible errors."""
+        result = await server_without_optional_capabilities._call_tool(
+            MagicMock(),
+            CallToolRequestParams(name="describe_table", arguments=arguments),
+        )
+
+        assert result.is_error
+        assert expected_error in str(result.content)
 
 
 class TestLoadSSHTunnelConfig:

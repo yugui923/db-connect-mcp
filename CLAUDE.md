@@ -218,7 +218,7 @@ The server supports connecting to databases through SSH tunnels, enabling secure
 
 ### Core Components
 
-- **SSHTunnelManager** (`src/core/tunnel.py`): Manages the SSH tunnel lifecycle (start, stop, health checks, context manager support). Uses the `sshtunnel` library with `paramiko` (pinned `<4.0.0` for compatibility).
+- **SSHTunnelManager** (`src/core/tunnel.py`): Manages the SSH tunnel lifecycle (start, stop, health checks, context manager support). Uses the `sshtunnel` library with a local compatibility layer for Paramiko 5's removal of DSA support.
 - **SSHTunnelConfig** (`src/models/config.py`): Pydantic model for SSH tunnel configuration — SSH host/port, authentication (password or private key), remote/local bind addresses.
 - **DatabaseConnection integration** (`src/core/connection.py`): When `ssh_tunnel` is set on `DatabaseConfig`, the connection automatically establishes the tunnel during `initialize()`, rewrites the database URL to point at the local tunnel endpoint, and tears down the tunnel on `dispose()`.
 - **`rewrite_database_url()`** (`src/core/tunnel.py`): Rewrites any database URL (PostgreSQL, MySQL, ClickHouse) to route through the tunnel's local bind port.
@@ -227,37 +227,37 @@ The server supports connecting to databases through SSH tunnels, enabling secure
 
 SSH tunnel is configured via `SSHTunnelConfig` on `DatabaseConfig.ssh_tunnel`:
 
-| Field | Default | Description |
-| ----- | ------- | ----------- |
-| `ssh_host` | (required) | SSH server hostname |
-| `ssh_port` | `22` | SSH server port |
-| `ssh_username` | (required) | SSH username |
-| `ssh_password` | (optional) | Password authentication |
-| `ssh_private_key` | (optional) | SSH private key content (raw PEM or base64-encoded PEM) |
-| `ssh_private_key_path` | (optional) | Path to private key file |
-| `ssh_private_key_passphrase` | (optional) | Passphrase for encrypted key |
-| `remote_host` | (auto from URL) | Database host as seen from SSH server |
-| `remote_port` | (auto from URL) | Database port as seen from SSH server |
-| `local_host` | `127.0.0.1` | Local bind host |
-| `local_port` | `None` (auto) | Local bind port |
-| `tunnel_timeout` | `10` | SSH connection timeout (seconds) |
+| Field                        | Default         | Description                                             |
+| ---------------------------- | --------------- | ------------------------------------------------------- |
+| `ssh_host`                   | (required)      | SSH server hostname                                     |
+| `ssh_port`                   | `22`            | SSH server port                                         |
+| `ssh_username`               | (required)      | SSH username                                            |
+| `ssh_password`               | (optional)      | Password authentication                                 |
+| `ssh_private_key`            | (optional)      | SSH private key content (raw PEM or base64-encoded PEM) |
+| `ssh_private_key_path`       | (optional)      | Path to private key file                                |
+| `ssh_private_key_passphrase` | (optional)      | Passphrase for encrypted key                            |
+| `remote_host`                | (auto from URL) | Database host as seen from SSH server                   |
+| `remote_port`                | (auto from URL) | Database port as seen from SSH server                   |
+| `local_host`                 | `127.0.0.1`     | Local bind host                                         |
+| `local_port`                 | `None` (auto)   | Local bind port                                         |
+| `tunnel_timeout`             | `10`            | SSH connection timeout (seconds)                        |
 
 ### Dependencies
 
 - `sshtunnel>=0.4.0`
-- `paramiko>=3.0.0,<4.0.0` (pinned to avoid compatibility issues with sshtunnel)
+- `paramiko>=5.0.0,<6.0.0` (supported through the local `sshtunnel` key-loading compatibility layer)
 
 ## Devcontainer Setup
 
 The project includes a full devcontainer configuration (`.devcontainer/`) with **5 Docker containers** covering all 4 database access patterns:
 
-| Container | Port | Network | Access Pattern |
-| --------- | ---- | ------- | -------------- |
-| `postgres-direct` | 5432 (published) | host | Direct access via localhost |
-| `mysql-direct` | 3306 (published) | host | Direct access via localhost |
-| `postgres-tunneled` | None (no published ports) | `tunnel-internal` | SSH tunnel only |
-| `mysql-tunneled` | None (no published ports) | `tunnel-internal` | SSH tunnel only |
-| `bastion` | 2222 → 22 | `tunnel-internal` | SSH gateway (Alpine + OpenSSH) |
+| Container           | Port                      | Network           | Access Pattern                 |
+| ------------------- | ------------------------- | ----------------- | ------------------------------ |
+| `postgres-direct`   | 5432 (published)          | host              | Direct access via localhost    |
+| `mysql-direct`      | 3306 (published)          | host              | Direct access via localhost    |
+| `postgres-tunneled` | None (no published ports) | `tunnel-internal` | SSH tunnel only                |
+| `mysql-tunneled`    | None (no published ports) | `tunnel-internal` | SSH tunnel only                |
+| `bastion`           | 2222 → 22                 | `tunnel-internal` | SSH gateway (Alpine + OpenSSH) |
 
 The `tunnel-internal` bridge network isolates tunneled databases — they are **not** accessible from the devcontainer directly and must be reached through the bastion SSH tunnel.
 
@@ -280,15 +280,16 @@ SSH_PASSWORD=tunnelpass
 
 ### Files Containing Version Information
 
-| File | Location |
-| ---- | -------- |
-| `pyproject.toml` | `version = "X.Y.Z"` (line ~7) |
-| `src/db_connect_mcp/__init__.py` | `__version__ = "X.Y.Z"` |
-| `uv.lock` | Auto-generated (run `uv sync` after updating pyproject.toml) |
+| File                             | Location                                                     |
+| -------------------------------- | ------------------------------------------------------------ |
+| `pyproject.toml`                 | `version = "X.Y.Z"` (line ~7)                                |
+| `src/db_connect_mcp/__init__.py` | `__version__ = "X.Y.Z"`                                      |
+| `uv.lock`                        | Auto-generated (run `uv sync` after updating pyproject.toml) |
 
 ### Version Bump Process
 
 1. **Verify current versions are aligned** before making changes:
+
    ```bash
    grep -E "^version|__version__" pyproject.toml src/db_connect_mcp/__init__.py
    ```
@@ -298,11 +299,13 @@ SSH_PASSWORD=tunnelpass
    - Edit `src/db_connect_mcp/__init__.py` with the matching version
 
 3. **Regenerate uv.lock:**
+
    ```bash
    uv sync
    ```
 
 4. **Verify all versions match** before committing:
+
    ```bash
    grep -E "^version|__version__" pyproject.toml src/db_connect_mcp/__init__.py
    ```

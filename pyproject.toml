@@ -36,6 +36,7 @@ classifiers = [
 
 dependencies = [
     "mcp>=2.0.0,<3.0.0",  # CVE-2025-66416: DNS rebinding protection
+    "jsonschema>=4.26.0",  # MCP v2 low-level handlers require explicit input validation
     "pydantic>=2.13.4,<3.0.0",
     "orjson>=3.11.9",  # Fix for deeply nested structures
     "sqlalchemy[asyncio]>=2.0.51",

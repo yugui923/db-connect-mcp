@@ -12,6 +12,8 @@ import os
 from typing import Any, Optional, cast
 
 from dotenv import load_dotenv
+from jsonschema import Draft202012Validator
+from jsonschema.exceptions import ValidationError
 from mcp.server import Server, ServerRequestContext
 from mcp.types import (
     CallToolRequestParams,
@@ -477,6 +479,10 @@ class DatabaseMCPServer:
         _params: PaginatedRequestParams | None,
     ) -> ListToolsResult:
         """List tools supported by the configured database."""
+        return ListToolsResult(tools=self._available_tools())
+
+    def _available_tools(self) -> list[Tool]:
+        """Build the tool surface supported by the configured database."""
         tools = [
             self._create_get_database_info_tool(),
             self._create_list_schemas_tool(),
@@ -496,7 +502,7 @@ class DatabaseMCPServer:
         if self.adapter.capabilities.explain_plans:
             tools.append(self._create_explain_query_tool())
 
-        return ListToolsResult(tools=tools)
+        return tools
 
     async def _call_tool(
         self,
@@ -511,21 +517,47 @@ class DatabaseMCPServer:
             "describe_table": self.handle_describe_table,
             "execute_query": self.handle_execute_query,
             "sample_data": self.handle_sample_data,
-            "get_table_relationships": self.handle_get_relationships,
-            "analyze_column": self.handle_analyze_column,
-            "explain_query": self.handle_explain_query,
             "search_objects": self.handle_search_objects,
         }
+        if self.adapter.capabilities.foreign_keys:
+            handlers["get_table_relationships"] = self.handle_get_relationships
+        if self.adapter.capabilities.advanced_stats:
+            handlers["analyze_column"] = self.handle_analyze_column
+        if self.adapter.capabilities.explain_plans:
+            handlers["explain_query"] = self.handle_explain_query
 
         handler = handlers.get(params.name)
-        if handler is None:
+        available_tool = next(
+            (tool for tool in self._available_tools() if tool.name == params.name),
+            None,
+        )
+        if handler is None or available_tool is None:
             return CallToolResult(
-                content=[TextContent(type="text", text=f"Unknown tool: {params.name}")],
+                content=[
+                    TextContent(
+                        type="text",
+                        text=f"Unknown or unavailable tool: {params.name}",
+                    )
+                ],
+                isError=True,
+            )
+
+        arguments = params.arguments or {}
+        try:
+            Draft202012Validator(available_tool.input_schema).validate(arguments)
+        except ValidationError as exc:
+            return CallToolResult(
+                content=[
+                    TextContent(
+                        type="text",
+                        text=f"Invalid arguments for {params.name}: {exc.message}",
+                    )
+                ],
                 isError=True,
             )
 
         try:
-            content = await handler(params.arguments or {})
+            content = await handler(arguments)
         except Exception as exc:
             logger.warning("Tool %s failed: %s", params.name, exc)
             return CallToolResult(
