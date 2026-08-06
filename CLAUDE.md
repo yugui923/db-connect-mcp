@@ -118,13 +118,13 @@ The adapter is selected automatically based on the DATABASE_URL dialect via `cre
 
 ### Core Components
 
-1. **DatabaseConnection** (`src/core/connection.py`): Manages SQLAlchemy async engine and connection pooling. Enforces read-only at connection level.
+1. **DatabaseConnection** (`src/db_connect_mcp/core/connection.py`): Manages SQLAlchemy async engine and connection pooling. Enforces read-only at connection level.
 
-2. **MetadataInspector** (`src/core/inspector.py`): Retrieves database metadata (schemas, tables, columns, relationships). Uses database-specific adapter methods for enrichment.
+2. **MetadataInspector** (`src/db_connect_mcp/core/inspector.py`): Retrieves database metadata (schemas, tables, columns, relationships). Uses database-specific adapter methods for enrichment.
 
-3. **QueryExecutor** (`src/core/executor.py`): Executes read-only SQL queries with validation. Automatically adds limits and validates query safety.
+3. **QueryExecutor** (`src/db_connect_mcp/core/executor.py`): Executes read-only SQL queries with validation. Automatically adds limits and validates query safety.
 
-4. **StatisticsAnalyzer** (`src/core/analyzer.py`): Performs column profiling and statistical analysis. Delegates to adapter for database-specific statistics queries.
+4. **StatisticsAnalyzer** (`src/db_connect_mcp/core/analyzer.py`): Performs column profiling and statistical analysis. Delegates to adapter for database-specific statistics queries.
 
 ### MCP Server Integration
 
@@ -218,10 +218,10 @@ The server supports connecting to databases through SSH tunnels, enabling secure
 
 ### Core Components
 
-- **SSHTunnelManager** (`src/core/tunnel.py`): Manages the SSH tunnel lifecycle (start, stop, health checks, context manager support). Uses the `sshtunnel` library with a local compatibility layer for Paramiko 5's removal of DSA support.
-- **SSHTunnelConfig** (`src/models/config.py`): Pydantic model for SSH tunnel configuration — SSH host/port, authentication (password or private key), remote/local bind addresses.
-- **DatabaseConnection integration** (`src/core/connection.py`): When `ssh_tunnel` is set on `DatabaseConfig`, the connection automatically establishes the tunnel during `initialize()`, rewrites the database URL to point at the local tunnel endpoint, and tears down the tunnel on `dispose()`.
-- **`rewrite_database_url()`** (`src/core/tunnel.py`): Rewrites any database URL (PostgreSQL, MySQL, ClickHouse) to route through the tunnel's local bind port.
+- **SSHTunnelManager** (`src/db_connect_mcp/core/tunnel.py`): Manages the SSH tunnel lifecycle (start, stop, health checks, context manager support). Uses the `sshtunnel` library with a local compatibility layer for Paramiko 5's removal of DSA support.
+- **SSHTunnelConfig** (`src/db_connect_mcp/models/config.py`): Pydantic model for SSH tunnel configuration — SSH host/port, authentication (password or private key), remote/local bind addresses.
+- **DatabaseConnection integration** (`src/db_connect_mcp/core/connection.py`): When `ssh_tunnel` is set on `DatabaseConfig`, the connection automatically establishes the tunnel during `initialize()`, rewrites the database URL to point at the local tunnel endpoint, and tears down the tunnel on `dispose()`.
+- **`rewrite_database_url()`** (`src/db_connect_mcp/core/tunnel.py`): Rewrites any database URL (PostgreSQL, MySQL, ClickHouse) to route through the tunnel's local bind port.
 
 ### Configuration
 
