@@ -30,7 +30,7 @@ jobs:
         image: mysql:8.0@sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b
         env:
           MYSQL_ROOT_PASSWORD: rootpass
-          MYSQL_DATABASE: testdb
+          MYSQL_DATABASE: devdb
           MYSQL_USER: testuser
           MYSQL_PASSWORD: testpass
         options: >-
@@ -86,8 +86,8 @@ jobs:
         env:
           MYSQL_CONTAINER: ${{ job.services.mysql.id }}
         run: |
-          docker exec -i "$MYSQL_CONTAINER" mysql --user=testuser --password=testpass testdb < tests/docker/mysql/init/01-create-schema.sql
-          docker exec -i "$MYSQL_CONTAINER" mysql --user=testuser --password=testpass testdb < tests/docker/mysql/init/02-seed-data.sql
+          docker exec -i "$MYSQL_CONTAINER" mysql --user=testuser --password=testpass devdb < tests/docker/mysql/init/01-create-schema.sql
+          docker exec -i "$MYSQL_CONTAINER" mysql --user=testuser --password=testpass devdb < tests/docker/mysql/init/02-seed-data.sql
 
       - name: Initialize ClickHouse test database
         env:
@@ -108,7 +108,7 @@ jobs:
       - name: Run tests with coverage
         env:
           PG_TEST_DATABASE_URL: postgresql+asyncpg://testuser:testpass@localhost:5432/testdb
-          MYSQL_TEST_DATABASE_URL: mysql+aiomysql://testuser:testpass@localhost:3306/testdb
+          MYSQL_TEST_DATABASE_URL: mysql+aiomysql://testuser:testpass@localhost:3306/devdb
           CH_TEST_DATABASE_URL: clickhousedb://testuser:testpass@localhost:8123/testdb
         run: .venv/bin/pytest -n 6 --cov=src/db_connect_mcp --cov-report=xml --cov-report=term
 
