@@ -69,7 +69,10 @@ jobs:
           python-version: "3.13"
 
       - name: Install dependencies
-        run: uv sync --dev
+        run: uv sync --python 3.13 --dev
+
+      - name: Verify Python version
+        run: uv run python -c 'import sys; assert sys.version_info[:2] == (3, 13), sys.version'
 
       - name: Initialize PostgreSQL test database
         env:
@@ -136,7 +139,12 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install dependencies
-        run: uv sync --dev
+        run: uv sync --python "${{ matrix.python-version }}" --dev
+
+      - name: Verify Python version
+        env:
+          EXPECTED_PYTHON: ${{ matrix.python-version }}
+        run: uv run python -c 'import os, sys; expected = tuple(map(int, os.environ["EXPECTED_PYTHON"].split("."))); assert sys.version_info[:2] == expected, sys.version'
 
       - name: Run unit tests
         run: uv run pytest -n 6 tests/unit
@@ -157,7 +165,7 @@ jobs:
           python-version: "3.13"
 
       - name: Build package
-        run: uv build
+        run: uv build --python 3.13
 
       - name: Verify build artifacts
         run: |
