@@ -72,7 +72,7 @@ jobs:
         run: uv sync --python 3.13 --dev
 
       - name: Verify Python version
-        run: uv run python -c 'import sys; assert sys.version_info[:2] == (3, 13), sys.version'
+        run: .venv/bin/python -c 'import sys; assert sys.version_info[:2] == (3, 13), sys.version'
 
       - name: Initialize PostgreSQL test database
         env:
@@ -97,20 +97,20 @@ jobs:
           docker exec -i "$CLICKHOUSE_CONTAINER" clickhouse-client --user testuser --password testpass --multiquery < tests/docker/clickhouse/init/02-seed-data.sql
 
       - name: Run linting
-        run: uv run ruff check .
+        run: .venv/bin/ruff check .
 
       - name: Run formatting check
-        run: uv run ruff format --check .
+        run: .venv/bin/ruff format --check .
 
       - name: Run type checking
-        run: uv run pyright
+        run: .venv/bin/pyright
 
       - name: Run tests with coverage
         env:
           PG_TEST_DATABASE_URL: postgresql+asyncpg://testuser:testpass@localhost:5432/testdb
           MYSQL_TEST_DATABASE_URL: mysql+aiomysql://testuser:testpass@localhost:3306/testdb
           CH_TEST_DATABASE_URL: clickhousedb://testuser:testpass@localhost:8123/testdb
-        run: uv run pytest -n 6 --cov=src/db_connect_mcp --cov-report=xml --cov-report=term
+        run: .venv/bin/pytest -n 6 --cov=src/db_connect_mcp --cov-report=xml --cov-report=term
 
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6.0.1
@@ -144,10 +144,10 @@ jobs:
       - name: Verify Python version
         env:
           EXPECTED_PYTHON: ${{ matrix.python-version }}
-        run: uv run python -c 'import os, sys; expected = tuple(map(int, os.environ["EXPECTED_PYTHON"].split("."))); assert sys.version_info[:2] == expected, sys.version'
+        run: .venv/bin/python -c 'import os, sys; expected = tuple(map(int, os.environ["EXPECTED_PYTHON"].split("."))); assert sys.version_info[:2] == expected, sys.version'
 
       - name: Run unit tests
-        run: uv run pytest -n 6 tests/unit
+        run: .venv/bin/pytest -n 6 tests/unit
 
   build:
     runs-on: ubuntu-latest
