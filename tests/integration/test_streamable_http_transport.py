@@ -19,6 +19,7 @@ import time
 from contextlib import contextmanager
 from typing import Any, Generator
 
+import anyio
 import httpx
 import pytest
 import uvicorn
@@ -174,7 +175,7 @@ class TestHTTPEndpointBasics:
     def test_mcp_endpoint_responds(self, starlette_app_no_auth):
         """Test that /mcp endpoint exists and responds."""
         with TestClient(starlette_app_no_auth, raise_server_exceptions=False) as client:
-            response = client.get("/mcp")
+            response = client.get("/mcp", headers={"Accept": "application/json"})
             assert response.status_code != 404
 
     def test_root_endpoint_returns_404(self, starlette_app_no_auth):
@@ -285,7 +286,11 @@ class TestBearerTokenAuthentication:
         app, auth_token = starlette_app_with_auth
         with TestClient(app, raise_server_exceptions=False) as client:
             response = client.get(
-                "/mcp", headers={"Authorization": f"Bearer {auth_token}"}
+                "/mcp",
+                headers={
+                    "Accept": "application/json",
+                    "Authorization": f"Bearer {auth_token}",
+                },
             )
             assert response.status_code != 401
 
@@ -325,13 +330,19 @@ class TestNoAuthConfiguration:
     def test_requests_allowed_without_auth_header(self, starlette_app_no_auth):
         """Test that requests work without auth when not configured."""
         with TestClient(starlette_app_no_auth, raise_server_exceptions=False) as client:
-            response = client.get("/mcp")
+            response = client.get("/mcp", headers={"Accept": "application/json"})
             assert response.status_code != 401
 
     def test_bearer_header_ignored_when_no_auth(self, starlette_app_no_auth):
         """Test that Bearer header is ignored when auth not configured."""
         with TestClient(starlette_app_no_auth, raise_server_exceptions=False) as client:
-            response = client.get("/mcp", headers={"Authorization": "Bearer any-token"})
+            response = client.get(
+                "/mcp",
+                headers={
+                    "Accept": "application/json",
+                    "Authorization": "Bearer any-token",
+                },
+            )
             assert response.status_code != 401
 
 
@@ -489,11 +500,60 @@ class TestMCPMethods:
 class TestHTTPMethods:
     """Tests for HTTP method handling."""
 
-    def test_get_method_accepted(self, starlette_app_no_auth):
-        """Test GET method is accepted (for SSE streams)."""
+    def test_get_requires_sse_accept_header(self, starlette_app_no_auth):
+        """Test GET rejects clients that do not accept SSE."""
         with TestClient(starlette_app_no_auth, raise_server_exceptions=False) as client:
-            response = client.get("/mcp")
-            assert response.status_code != 405
+            response = client.get("/mcp", headers={"Accept": "application/json"})
+            assert response.status_code == 406
+
+    @pytest.mark.asyncio
+    async def test_get_opens_sse_stream(self, starlette_app_no_auth):
+        """Test GET starts an SSE response without consuming the endless stream."""
+        messages: list[dict[str, Any]] = []
+        response_started = anyio.Event()
+        request_received = False
+
+        async def receive() -> dict[str, Any]:
+            nonlocal request_received
+            if not request_received:
+                request_received = True
+                return {"type": "http.request", "body": b"", "more_body": False}
+            await anyio.sleep_forever()
+
+        async def send(message: dict[str, Any]) -> None:
+            messages.append(message)
+            if message["type"] == "http.response.start":
+                response_started.set()
+
+        scope = {
+            "type": "http",
+            "asgi": {"version": "3.0"},
+            "http_version": "1.1",
+            "method": "GET",
+            "scheme": "http",
+            "path": "/mcp",
+            "raw_path": b"/mcp",
+            "query_string": b"",
+            "root_path": "",
+            "headers": [(b"accept", b"text/event-stream")],
+            "client": ("testclient", 50000),
+            "server": ("testserver", 80),
+            "state": {},
+        }
+
+        async with starlette_app_no_auth.router.lifespan_context(starlette_app_no_auth):
+            async with anyio.create_task_group() as task_group:
+                task_group.start_soon(starlette_app_no_auth, scope, receive, send)
+                with anyio.fail_after(2):
+                    await response_started.wait()
+                task_group.cancel_scope.cancel()
+
+        response = next(
+            message for message in messages if message["type"] == "http.response.start"
+        )
+        headers = dict(response["headers"])
+        assert response["status"] == 200
+        assert headers[b"content-type"].startswith(b"text/event-stream")
 
     def test_post_method_accepted(self, starlette_app_no_auth):
         """Test POST method is accepted."""
@@ -803,7 +863,7 @@ class TestErrorHandling:
             assert response.status_code in (400, 415, 422, 500)
 
             # Subsequent request should still work
-            response = client.get("/mcp")
+            response = client.get("/mcp", headers={"Accept": "application/json"})
             assert response.status_code != 503  # Not service unavailable
 
     def test_deeply_nested_json(self, starlette_app_no_auth):

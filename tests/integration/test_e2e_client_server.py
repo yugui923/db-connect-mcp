@@ -389,7 +389,7 @@ class TestE2EServerLifecycle:
         try:
             # Verify server initialized by making a successful call
             response = await client.call_tool("get_database_info", arguments={})
-            assert not response.isError, "Server failed to initialize properly"
+            assert not response.is_error, "Server failed to initialize properly"
 
             # Note: Log capture through stdio_client is limited
             # The server IS logging to stderr, but we can't access it directly
@@ -421,7 +421,7 @@ class TestE2EToolExecution:
             response = await client.call_tool("get_database_info", arguments={})
 
             # Verify response
-            assert not response.isError, f"Tool returned error: {response.content}"
+            assert not response.is_error, f"Tool returned error: {response.content}"
             data = E2ETestHelper.parse_text_content(response.content)
 
             assert "name" in data
@@ -454,7 +454,7 @@ class TestE2EToolExecution:
             )
 
             # Verify response
-            assert not response.isError, f"Tool returned error: {response.content}"
+            assert not response.is_error, f"Tool returned error: {response.content}"
             data = E2ETestHelper.parse_text_content(response.content)
 
             assert data["row_count"] == 1
@@ -484,7 +484,7 @@ class TestE2EToolExecution:
             response = await client.call_tool("list_schemas", arguments={})
 
             # Verify response
-            assert not response.isError, f"Tool returned error: {response.content}"
+            assert not response.is_error, f"Tool returned error: {response.content}"
             data = E2ETestHelper.parse_text_content(response.content)
 
             assert isinstance(data, list)
@@ -523,7 +523,7 @@ class TestE2EErrorHandling:
             )
 
             # Should return error
-            assert response.isError
+            assert response.is_error
             error_text = str(response.content[0].text if response.content else "")
             # Check that error mentions read-only enforcement
             assert (
@@ -555,7 +555,7 @@ class TestE2EErrorHandling:
             response = await client.call_tool("non_existent_tool", arguments={})
 
             # Should return error
-            assert response.isError
+            assert response.is_error
 
         finally:
             await E2ETestHelper.cleanup_server_and_client(
@@ -586,14 +586,14 @@ class TestE2EServerLogs:
         try:
             # Verify server is running by executing operations
             response = await client.call_tool("get_database_info", arguments={})
-            assert not response.isError, "Server subprocess failed to execute"
+            assert not response.is_error, "Server subprocess failed to execute"
 
             # Execute a query to verify full functionality
             response = await client.call_tool(
                 "execute_query",
                 arguments={"query": "SELECT 1 as test"},
             )
-            assert not response.isError, "Query execution failed"
+            assert not response.is_error, "Query execution failed"
 
             # The server IS logging to stderr, but stdio_client doesn't expose it
             # The log capture framework is tested separately with ServerContext
@@ -626,11 +626,11 @@ class TestE2EServerLogs:
 
             for tool_name, args in operations:
                 response = await client.call_tool(tool_name, arguments=args)
-                assert not response.isError, f"{tool_name} failed in subprocess"
+                assert not response.is_error, f"{tool_name} failed in subprocess"
 
             # Verify server is still responsive after multiple operations
             response = await client.call_tool("get_database_info", arguments={})
-            assert not response.isError, "Server became unresponsive"
+            assert not response.is_error, "Server became unresponsive"
 
         finally:
             await E2ETestHelper.cleanup_server_and_client(
@@ -689,9 +689,9 @@ class TestE2ESearchObjects:
             assert "search_objects" in tool_names
 
             search = next(t for t in tools_response.tools if t.name == "search_objects")
-            assert search.inputSchema is not None
-            assert "pattern" in search.inputSchema["properties"]
-            assert search.inputSchema["required"] == ["pattern"]
+            assert search.input_schema is not None
+            assert "pattern" in search.input_schema["properties"]
+            assert search.input_schema["required"] == ["pattern"]
 
         finally:
             await E2ETestHelper.cleanup_server_and_client(
@@ -719,7 +719,7 @@ class TestE2ESearchObjects:
                     "schema": "public",
                 },
             )
-            assert not response.isError, f"Tool returned error: {response.content}"
+            assert not response.is_error, f"Tool returned error: {response.content}"
             data = E2ETestHelper.parse_text_content(response.content)
 
             assert data["pattern"] == "users"
@@ -755,7 +755,7 @@ class TestE2ESearchObjects:
                     "detail_level": "summary",
                 },
             )
-            assert not response.isError, f"Tool returned error: {response.content}"
+            assert not response.is_error, f"Tool returned error: {response.content}"
             data = E2ETestHelper.parse_text_content(response.content)
 
             assert data["total_found"] == 1
@@ -805,8 +805,8 @@ class TestE2ESearchObjects:
                     "detail_level": "full",
                 },
             )
-            assert not names_resp.isError
-            assert not full_resp.isError
+            assert not names_resp.is_error
+            assert not full_resp.is_error
 
             names_text = names_resp.content[0].text  # type: ignore[union-attr]
             full_text = full_resp.content[0].text  # type: ignore[union-attr]
@@ -845,7 +845,7 @@ class TestE2ESearchObjects:
             response = await client.call_tool(
                 "search_objects", arguments={"pattern": ""}
             )
-            assert response.isError
+            assert response.is_error
 
         finally:
             await E2ETestHelper.cleanup_server_and_client(
@@ -874,7 +874,7 @@ class TestE2ESearchObjects:
                     "limit": 2,
                 },
             )
-            assert not response.isError, f"Tool returned error: {response.content}"
+            assert not response.is_error, f"Tool returned error: {response.content}"
             data = E2ETestHelper.parse_text_content(response.content)
 
             assert data["returned"] == 2

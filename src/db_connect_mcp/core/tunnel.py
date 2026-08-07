@@ -13,7 +13,7 @@ from urllib.parse import urlparse, urlunparse
 import paramiko
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import dsa, ec, ed25519, rsa
-from sshtunnel import SSHTunnelForwarder
+from sshtunnel import SSHTunnelForwarder as _BaseSSHTunnelForwarder
 
 from db_connect_mcp.models.config import SSHTunnelConfig
 
@@ -22,6 +22,102 @@ logger = logging.getLogger(__name__)
 # Maximum time allowed for the entire key parsing pipeline (seconds).
 # Leaves ~1s headroom within the user's expected 5s connection time.
 _KEY_PARSE_BUDGET_SECONDS = 4.0
+
+
+class SSHTunnelForwarder(_BaseSSHTunnelForwarder):
+    """Paramiko 5-compatible sshtunnel forwarder."""
+
+    @staticmethod
+    def _key_types() -> dict[str, type[paramiko.PKey]]:
+        """Return key types supported by the installed Paramiko version."""
+        key_types: dict[str, type[paramiko.PKey]] = {
+            "rsa": paramiko.RSAKey,
+            "ecdsa": paramiko.ECDSAKey,
+            "ed25519": paramiko.Ed25519Key,
+        }
+        dss_key_class = getattr(paramiko, "DSSKey", None)
+        if dss_key_class is not None:
+            key_types["dsa"] = dss_key_class
+        return key_types
+
+    @staticmethod
+    def read_private_key_file(
+        pkey_file: str,
+        pkey_password: str | None = None,
+        key_type: type[paramiko.PKey] | None = None,
+        logger: logging.Logger | None = None,
+    ) -> paramiko.PKey | None:
+        """Load a private-key file without requiring Paramiko's removed DSSKey."""
+        key_types = (
+            (key_type,)
+            if key_type is not None
+            else tuple(SSHTunnelForwarder._key_types().values())
+        )
+
+        for pkey_class in key_types:
+            try:
+                return pkey_class.from_private_key_file(
+                    pkey_file,
+                    password=pkey_password,
+                )
+            except paramiko.PasswordRequiredException:
+                if logger:
+                    logger.error("Password is required for key %s", pkey_file)
+                return None
+            except (OSError, paramiko.SSHException) as exc:
+                if logger:
+                    logger.debug(
+                        "Private key file %s could not be loaded as %s: %s",
+                        pkey_file,
+                        pkey_class.__name__,
+                        exc,
+                    )
+
+        return None
+
+    @staticmethod
+    def get_keys(
+        logger: logging.Logger | None = None,
+        host_pkey_directories: list[str] | None = None,
+        allow_agent: bool = False,
+    ) -> list[paramiko.PKey]:
+        """Load supported keys without referencing Paramiko's removed DSSKey."""
+        keys: list[paramiko.PKey] = []
+        if allow_agent:
+            keys.extend(_BaseSSHTunnelForwarder.get_agent_keys(logger=logger))
+        directories = (
+            [Path.home() / ".ssh"]
+            if host_pkey_directories is None
+            else [Path(directory).expanduser() for directory in host_pkey_directories]
+        )
+
+        for directory in directories:
+            for key_type, key_class in SSHTunnelForwarder._key_types().items():
+                key_path = directory / f"id_{key_type}"
+                try:
+                    if not key_path.is_file():
+                        continue
+                    key = SSHTunnelForwarder.read_private_key_file(
+                        str(key_path),
+                        key_type=key_class,
+                        logger=logger,
+                    )
+                    if key is not None:
+                        keys.append(key)
+                except OSError as exc:
+                    if logger:
+                        logger.warning(
+                            "Could not inspect private key %s: %s", key_path, exc
+                        )
+
+        return keys
+
+
+# sshtunnel's authentication path calls the base class by name instead of using
+# dynamic dispatch. Patch its two key-loading hooks so explicit and discovered
+# keys both avoid Paramiko's removed DSSKey API.
+_BaseSSHTunnelForwarder.get_keys = SSHTunnelForwarder.get_keys  # type: ignore[method-assign]
+_BaseSSHTunnelForwarder.read_private_key_file = SSHTunnelForwarder.read_private_key_file  # type: ignore[method-assign]
 
 
 class KeyFormat(enum.Enum):
@@ -545,9 +641,12 @@ class SSHTunnelManager:
                 errors.append(("PKCS#8 (last resort)", e))
 
         details = "; ".join(f"{name}: {err}" for name, err in errors[-3:])
+        supported_key_types = "RSA, ECDSA, Ed25519"
+        if getattr(paramiko, "DSSKey", None) is not None:
+            supported_key_types += ", DSA"
         raise SSHTunnelError(
             f"Failed to parse SSH private key. Last errors: {details}. "
-            "Supported formats: RSA, DSA, ECDSA, Ed25519 in PEM, "
+            f"Supported key types: {supported_key_types} in PEM, "
             "OpenSSH, or PKCS#8 encoding. PuTTY PPK keys must be converted "
             "first (puttygen key.ppk -O private-openssh -o key.pem)."
         )

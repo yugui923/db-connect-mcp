@@ -320,10 +320,6 @@ async def mysql_connection(
         await connection.initialize()
         async with connection.get_connection() as conn:
             await conn.execute(text("SELECT 1"))
-    except Exception as e:
-        await connection.dispose()
-        pytest.skip(f"MySQL direct connection failed: {e}")
-    try:
         yield connection
     finally:
         await connection.dispose()
@@ -363,10 +359,6 @@ async def mysql_mcp_server(
     server = DatabaseMCPServer(mysql_config)
     try:
         await server.initialize()
-    except Exception as e:
-        pytest.skip(f"MySQL direct MCP server initialization failed: {e}")
-
-    try:
         yield server
     finally:
         await server.cleanup()
@@ -573,10 +565,6 @@ async def ch_connection(
         else:
             async with connection.get_connection() as conn:
                 await conn.execute(text("SELECT 1"))
-    except Exception as e:
-        await connection.dispose()
-        pytest.skip(f"ClickHouse database connection failed: {e}")
-    try:
         yield connection
     finally:
         await connection.dispose()

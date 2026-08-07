@@ -26,6 +26,34 @@ jobs:
           --health-retries 5
         ports:
           - 5432:5432
+      mysql:
+        image: mysql:8.0@sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b
+        env:
+          MYSQL_ROOT_PASSWORD: rootpass
+          MYSQL_DATABASE: devdb
+          MYSQL_USER: testuser
+          MYSQL_PASSWORD: testpass
+        options: >-
+          --health-cmd "mysqladmin ping --host=127.0.0.1 --user=root --password=rootpass --silent"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+        ports:
+          - 3306:3306
+      clickhouse:
+        image: clickhouse/clickhouse-server:26.6@sha256:a63a90ffdcb574683ebfe96e4c53e2dbe401864add7bb06dc244eb935d828e7f
+        env:
+          CLICKHOUSE_DB: testdb
+          CLICKHOUSE_USER: testuser
+          CLICKHOUSE_PASSWORD: testpass
+          CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+        options: >-
+          --health-cmd "clickhouse-client --user testuser --password testpass --query 'SELECT 1'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+        ports:
+          - 8123:8123
 
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -41,9 +69,12 @@ jobs:
           python-version: "3.13"
 
       - name: Install dependencies
-        run: uv sync --dev
+        run: uv sync --python 3.13 --dev
 
-      - name: Initialize test database
+      - name: Verify Python version
+        run: .venv/bin/python -c 'import sys; assert sys.version_info[:2] == (3, 13), sys.version'
+
+      - name: Initialize PostgreSQL test database
         env:
           PGPASSWORD: testpass
         run: |
@@ -51,25 +82,72 @@ jobs:
           psql -h localhost -U testuser -d testdb -f tests/docker/postgres/init/02-seed-data.sql
           psql -h localhost -U testuser -d testdb -f tests/docker/postgres/init/03-create-views.sql
 
+      - name: Initialize MySQL test database
+        env:
+          MYSQL_CONTAINER: ${{ job.services.mysql.id }}
+        run: |
+          docker exec -i "$MYSQL_CONTAINER" mysql --user=testuser --password=testpass devdb < tests/docker/mysql/init/01-create-schema.sql
+          docker exec -i "$MYSQL_CONTAINER" mysql --user=testuser --password=testpass devdb < tests/docker/mysql/init/02-seed-data.sql
+
+      - name: Initialize ClickHouse test database
+        env:
+          CLICKHOUSE_CONTAINER: ${{ job.services.clickhouse.id }}
+        run: |
+          docker exec -i "$CLICKHOUSE_CONTAINER" clickhouse-client --user testuser --password testpass --multiquery < tests/docker/clickhouse/init/01-create-schema.sql
+          docker exec -i "$CLICKHOUSE_CONTAINER" clickhouse-client --user testuser --password testpass --multiquery < tests/docker/clickhouse/init/02-seed-data.sql
+
       - name: Run linting
-        run: uv run ruff check .
+        run: .venv/bin/ruff check .
 
       - name: Run formatting check
-        run: uv run ruff format --check .
+        run: .venv/bin/ruff format --check .
 
       - name: Run type checking
-        run: npx pyright
+        run: .venv/bin/pyright
 
       - name: Run tests with coverage
         env:
           PG_TEST_DATABASE_URL: postgresql+asyncpg://testuser:testpass@localhost:5432/testdb
-        run: uv run pytest -n 6 --cov=src/db_connect_mcp --cov-report=xml --cov-report=term
+          MYSQL_TEST_DATABASE_URL: mysql+aiomysql://testuser:testpass@localhost:3306/devdb
+          CH_TEST_DATABASE_URL: clickhousedb://testuser:testpass@localhost:8123/testdb
+        run: .venv/bin/pytest -n 6 --cov=src/db_connect_mcp --cov-report=xml --cov-report=term
 
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6.0.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./coverage.xml
+
+  python-compatibility:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: uv sync --python "${{ matrix.python-version }}" --dev
+
+      - name: Verify Python version
+        env:
+          EXPECTED_PYTHON: ${{ matrix.python-version }}
+        run: .venv/bin/python -c 'import os, sys; expected = tuple(map(int, os.environ["EXPECTED_PYTHON"].split("."))); assert sys.version_info[:2] == expected, sys.version'
+
+      - name: Run unit tests
+        run: .venv/bin/pytest -n 6 tests/unit
 
   build:
     runs-on: ubuntu-latest
@@ -87,7 +165,7 @@ jobs:
           python-version: "3.13"
 
       - name: Build package
-        run: uv build
+        run: uv build --python 3.13
 
       - name: Verify build artifacts
         run: |

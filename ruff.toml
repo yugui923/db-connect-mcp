@@ -31,6 +31,12 @@ exclude = [
     "venv",
 ]
 
+[lint]
+# Preserve Ruff's pre-0.16 default rule set. Ruff 0.16 expanded its defaults
+# from 59 to 413 rules; adopting those additional rules belongs in a dedicated
+# lint-policy change rather than a dependency refresh.
+select = ["E4", "E7", "E9", "F"]
+
 
 [lint.per-file-ignores]
 "__init__.py" = ["F401"]

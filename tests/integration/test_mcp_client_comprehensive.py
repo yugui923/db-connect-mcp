@@ -233,7 +233,7 @@ class TestPostgreSQLDirectMCPClient:
             "describe_table",
             arguments={"table": "nonexistent_table_xyz123", "schema": "public"},
         )
-        assert response.isError
+        assert response.is_error
 
     # --- Tool: execute_query ---
 
@@ -318,7 +318,7 @@ class TestPostgreSQLDirectMCPClient:
             response = await pg_client.call_tool(
                 "execute_query", arguments={"query": query}
             )
-            assert response.isError, f"Expected error for: {query}"
+            assert response.is_error, f"Expected error for: {query}"
 
     # --- Tool: sample_data ---
 
@@ -509,9 +509,9 @@ class TestPostgreSQLDirectMCPClient:
         search = next((t for t in tools.tools if t.name == "search_objects"), None)
         assert search is not None, "search_objects should always be registered"
         # Verify the inputSchema is well-formed for an MCP client
-        assert search.inputSchema["type"] == "object"
-        assert "pattern" in search.inputSchema["properties"]
-        assert search.inputSchema["required"] == ["pattern"]
+        assert search.input_schema["type"] == "object"
+        assert "pattern" in search.input_schema["properties"]
+        assert search.input_schema["required"] == ["pattern"]
 
     @pytest.mark.asyncio
     async def test_search_objects_finds_seeded_table(self, pg_client: ClientSession):
@@ -640,7 +640,7 @@ class TestPostgreSQLDirectMCPClient:
         response = await pg_client.call_tool(
             "search_objects", arguments={"pattern": ""}
         )
-        assert response.isError
+        assert response.is_error
 
     @pytest.mark.asyncio
     async def test_search_objects_index_results(self, pg_client: ClientSession):
@@ -732,7 +732,7 @@ class TestMySQLDirectMCPClient:
         response = await mysql_client.call_tool(
             "execute_query", arguments={"query": "DROP TABLE IF EXISTS test_table"}
         )
-        assert response.isError
+        assert response.is_error
 
     @pytest.mark.asyncio
     async def test_sample_data(self, mysql_client: ClientSession):
@@ -1033,13 +1033,13 @@ class TestMCPErrorHandling:
     async def test_invalid_tool_name(self, pg_client: ClientSession):
         """Test calling a non-existent tool."""
         response = await pg_client.call_tool("non_existent_tool", arguments={})
-        assert response.isError
+        assert response.is_error
 
     @pytest.mark.asyncio
     async def test_missing_required_argument(self, pg_client: ClientSession):
         """Test calling tool with missing required argument."""
         response = await pg_client.call_tool("describe_table", arguments={})
-        assert response.isError
+        assert response.is_error
 
     @pytest.mark.asyncio
     async def test_invalid_query_syntax(self, pg_client: ClientSession):
@@ -1047,7 +1047,7 @@ class TestMCPErrorHandling:
         response = await pg_client.call_tool(
             "execute_query", arguments={"query": "SELEKT * FORM products"}
         )
-        assert response.isError
+        assert response.is_error
 
     @pytest.mark.asyncio
     async def test_recovery_after_error(self, pg_client: ClientSession):
@@ -1056,7 +1056,7 @@ class TestMCPErrorHandling:
         error_response = await pg_client.call_tool(
             "describe_table", arguments={"table": "nonexistent_xyz123"}
         )
-        assert error_response.isError
+        assert error_response.is_error
 
         # Server should still work
         data = await call_tool_checked(pg_client, "get_database_info", {})
