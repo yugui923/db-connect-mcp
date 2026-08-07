@@ -34,9 +34,11 @@ def _fetch_release(
         with urllib.request.urlopen(url, timeout=30) as response:  # noqa: S310
             return json.load(response)
     except urllib.error.HTTPError as exc:
-        if exc.code == 404:
+        if exc.code in {404, 429} or 500 <= exc.code < 600:
             return None
         raise
+    except urllib.error.URLError:
+        return None
 
 
 def verify_artifacts(
