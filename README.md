@@ -1,3 +1,5 @@
+
+
 # db-connect-mcp - Multi-Database MCP Server
 
 <!-- mcp-name: io.github.yugui923/db-connect-mcp -->
@@ -428,6 +430,10 @@ The same database URL formats and SSH tunnel environment variables shown in the 
 | Sampling     | ✅ Full    | ✅ Full  | ✅ Full    |
 
 ## Available Tools
+
+### get_database_info
+
+Get database version and capabilities.
 
 ### list_schemas
 
