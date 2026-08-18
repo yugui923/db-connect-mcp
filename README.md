@@ -429,6 +429,11 @@ The same database URL formats and SSH tunnel environment variables shown in the 
 
 ## Available Tools
 
+### get_database_info
+
+Get database metadata, including the dialect, version, connection details,
+read-only status, and capabilities.
+
 ### list_schemas
 
 List all schemas in the database.
