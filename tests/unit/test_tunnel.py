@@ -15,7 +15,7 @@ from pydantic import ValidationError
 from db_connect_mcp.core.tunnel import (
     KeyFormat,
     SSHTunnelError,
-    SSHTunnelForwarder,
+    SSHTunnelErrorCode,
     SSHTunnelManager,
     rewrite_database_url,
 )
@@ -187,6 +187,64 @@ class TestSSHTunnelConfig:
         assert config.local_host == "127.0.0.1"
         assert config.local_port is None
         assert config.tunnel_timeout == 10
+        assert config.connect_timeout == 10
+        assert config.banner_timeout == 10
+        assert config.auth_timeout == 10
+        assert config.channel_timeout == 10
+        assert config.keepalive_interval == 30
+        assert config.target_preflight is True
+        assert config.strict_host_key is False
+
+    def test_legacy_timeout_populates_specific_timeouts(self) -> None:
+        """Programmatic legacy timeout configuration should remain compatible."""
+        config = SSHTunnelConfig(
+            ssh_host="bastion.example.com",
+            ssh_username="user",
+            ssh_password="secret",
+            tunnel_timeout=45,
+        )
+
+        assert config.connect_timeout == 45
+        assert config.banner_timeout == 45
+        assert config.auth_timeout == 45
+        assert config.channel_timeout == 45
+
+    def test_specific_timeout_overrides_legacy_timeout(self) -> None:
+        """A stage-specific timeout should override the compatibility fallback."""
+        config = SSHTunnelConfig(
+            ssh_host="bastion.example.com",
+            ssh_username="user",
+            ssh_password="secret",
+            tunnel_timeout=45,
+            channel_timeout=12,
+        )
+
+        assert config.connect_timeout == 45
+        assert config.channel_timeout == 12
+
+    def test_known_hosts_path_requires_strict_mode(self) -> None:
+        """A known-hosts file must not have ambiguous non-strict semantics."""
+        with pytest.raises(ValidationError, match="strict_host_key"):
+            SSHTunnelConfig(
+                ssh_host="bastion.example.com",
+                ssh_username="user",
+                ssh_password="secret",
+                known_hosts_path="/path/to/known_hosts",
+            )
+
+    def test_authentication_secrets_are_redacted_from_repr(self) -> None:
+        config = SSHTunnelConfig(
+            ssh_host="bastion.example.com",
+            ssh_username="user",
+            ssh_password="password-value",
+            ssh_private_key="private-key-value",
+            ssh_private_key_passphrase="passphrase-value",
+        )
+
+        representation = repr(config)
+        assert "password-value" not in representation
+        assert "private-key-value" not in representation
+        assert "passphrase-value" not in representation
 
     def test_custom_remote_port(self):
         """Custom remote port should be accepted."""
@@ -258,15 +316,17 @@ class TestURLRewriting:
 
 
 class TestSSHTunnelManagerMocked:
-    """Tests with mocked sshtunnel library."""
+    """Tests for the manager's native-forwarder lifecycle seam."""
 
     @pytest.fixture
     def mock_tunnel_forwarder(self):
-        """Mock SSHTunnelForwarder."""
-        with patch("db_connect_mcp.core.tunnel.SSHTunnelForwarder") as mock:
+        """Mock the native Paramiko forwarder."""
+        with patch("db_connect_mcp.core.tunnel.ParamikoTunnelForwarder") as mock:
             instance = MagicMock()
             instance.local_bind_port = 54321
             instance.is_active = True
+            instance.start.return_value = 54321
+            instance.ensure_active.return_value = True
             mock.return_value = instance
             yield mock, instance
 
@@ -281,7 +341,7 @@ class TestSSHTunnelManagerMocked:
         )
 
     def test_tunnel_start_calls_forwarder(self, mock_tunnel_forwarder, valid_config):
-        """Starting tunnel should create and start SSHTunnelForwarder."""
+        """Starting tunnel should create and start the native forwarder."""
         mock_class, mock_instance = mock_tunnel_forwarder
 
         manager = SSHTunnelManager(valid_config)
@@ -290,6 +350,59 @@ class TestSSHTunnelManagerMocked:
         assert port == 54321
         mock_class.assert_called_once()
         mock_instance.start.assert_called_once()
+
+    def test_tunnel_start_reuses_active_forwarder(
+        self,
+        mock_tunnel_forwarder: tuple[MagicMock, MagicMock],
+        valid_config: SSHTunnelConfig,
+    ) -> None:
+        """Repeated start should preserve the published local endpoint."""
+        mock_class, mock_instance = mock_tunnel_forwarder
+        manager = SSHTunnelManager(valid_config)
+
+        assert manager.start() == 54321
+        assert manager.start() == 54321
+
+        mock_class.assert_called_once_with(
+            valid_config,
+            password="secret",
+            pkey=None,
+        )
+        mock_instance.start.assert_called_once_with()
+
+    def test_active_forwarder_without_port_raises_listener_error(
+        self,
+        mock_tunnel_forwarder: tuple[MagicMock, MagicMock],
+        valid_config: SSHTunnelConfig,
+    ) -> None:
+        """An inconsistent active state should fail with a classified error."""
+        _, mock_instance = mock_tunnel_forwarder
+        manager = SSHTunnelManager(valid_config)
+        manager.start()
+        manager._local_bind_port = None
+
+        with pytest.raises(SSHTunnelError) as exc_info:
+            manager.start()
+
+        assert exc_info.value.code == SSHTunnelErrorCode.LISTENER
+        mock_instance.start.assert_called_once_with()
+
+    def test_inactive_forwarder_is_stopped_before_replacement(
+        self,
+        mock_tunnel_forwarder: tuple[MagicMock, MagicMock],
+        valid_config: SSHTunnelConfig,
+    ) -> None:
+        """Restarting should stop an inactive native forwarder first."""
+        mock_class, mock_instance = mock_tunnel_forwarder
+        manager = SSHTunnelManager(valid_config)
+        manager.start()
+        mock_instance.is_active = False
+
+        assert manager.start() == 54321
+
+        mock_instance.stop.assert_called_once_with()
+        assert mock_instance.start.call_count == 2
+        assert mock_class.call_count == 2
 
     def test_tunnel_stop_calls_stop(self, mock_tunnel_forwarder, valid_config):
         """Stopping tunnel should call stop on forwarder."""
@@ -342,7 +455,7 @@ class TestSSHTunnelManagerMocked:
         manager.start()
 
         call_kwargs = mock_class.call_args[1]
-        assert call_kwargs["ssh_password"] == "secret"
+        assert call_kwargs["password"] == "secret"
 
     def test_tunnel_passes_key_auth(self, mock_tunnel_forwarder):
         """Key file should be read and parsed into a PKey object."""
@@ -367,7 +480,7 @@ class TestSSHTunnelManagerMocked:
 
             call_kwargs = mock_class.call_args[1]
             # File-based keys are now parsed through our pipeline
-            assert isinstance(call_kwargs["ssh_pkey"], paramiko.PKey)
+            assert isinstance(call_kwargs["pkey"], paramiko.PKey)
         finally:
             Path(key_path).unlink(missing_ok=True)
 
@@ -383,7 +496,32 @@ class TestSSHTunnelManagerMocked:
         with pytest.raises(SSHTunnelError) as exc_info:
             manager.start()
 
-        assert "Failed to establish SSH tunnel" in str(exc_info.value)
+        assert exc_info.value.code == SSHTunnelErrorCode.UNKNOWN
+        mock_instance.stop.assert_called_once_with()
+        assert manager.local_bind_port is None
+
+    def test_tunnel_start_cleanup_error_preserves_original_failure(
+        self,
+        mock_tunnel_forwarder: tuple[MagicMock, MagicMock],
+        valid_config: SSHTunnelConfig,
+    ) -> None:
+        """Cleanup failures must not replace the classified startup failure."""
+        _, mock_instance = mock_tunnel_forwarder
+        mock_instance.start.side_effect = RuntimeError("connect failed")
+        mock_instance.stop.side_effect = RuntimeError("cleanup failed")
+        manager = SSHTunnelManager(valid_config)
+
+        with (
+            patch("db_connect_mcp.core.tunnel.logger.warning") as warning,
+            pytest.raises(SSHTunnelError) as exc_info,
+        ):
+            manager.start()
+
+        assert exc_info.value.code == SSHTunnelErrorCode.UNKNOWN
+        warning.assert_called_once_with(
+            "Error cleaning up failed SSH tunnel startup: %s",
+            "RuntimeError",
+        )
 
     def test_tunnel_key_not_found_raises_error(self):
         """Non-existent key file should raise SSHTunnelError."""
@@ -412,12 +550,11 @@ class TestSSHTunnelManagerMocked:
         # Simulate tunnel becoming inactive
         mock_instance.is_active = False
 
-        # Should restart
         result = manager.ensure_active()
 
         assert result is True
-        # Should have been started twice (initial + restart)
-        assert mock_instance.start.call_count == 2
+        mock_instance.ensure_active.assert_called_once_with()
+        assert mock_instance.start.call_count == 1
 
     def test_tunnel_passes_inline_key_auth(self, mock_tunnel_forwarder):
         """Inline key auth should parse key and pass PKey object to forwarder."""
@@ -439,7 +576,7 @@ class TestSSHTunnelManagerMocked:
         manager.start()
 
         call_kwargs = mock_class.call_args[1]
-        assert isinstance(call_kwargs["ssh_pkey"], paramiko.PKey)
+        assert isinstance(call_kwargs["pkey"], paramiko.PKey)
 
     def test_inline_key_takes_precedence_over_file_path(self, mock_tunnel_forwarder):
         """Inline key should take precedence over file path when both are set."""
@@ -462,7 +599,7 @@ class TestSSHTunnelManagerMocked:
 
         call_kwargs = mock_class.call_args[1]
         # Should be a PKey object (from inline), not a string path
-        assert isinstance(call_kwargs["ssh_pkey"], paramiko.PKey)
+        assert isinstance(call_kwargs["pkey"], paramiko.PKey)
 
     def test_invalid_inline_key_raises_error(self, mock_tunnel_forwarder):
         """Invalid inline key content should raise SSHTunnelError."""
@@ -499,7 +636,7 @@ class TestSSHTunnelManagerMocked:
         manager.start()
 
         call_kwargs = mock_class.call_args[1]
-        assert isinstance(call_kwargs["ssh_pkey"], paramiko.PKey)
+        assert isinstance(call_kwargs["pkey"], paramiko.PKey)
 
     def test_invalid_base64_not_pem_raises_error(self, mock_tunnel_forwarder):
         """Base64 content that doesn't decode to PEM should raise SSHTunnelError."""
@@ -517,59 +654,6 @@ class TestSSHTunnelManagerMocked:
             manager.start()
 
         assert "not a valid PEM" in str(exc_info.value)
-
-
-class TestSSHTunnelForwarderCompatibility:
-    """Test Paramiko 5 compatibility for sshtunnel's key-loading hooks."""
-
-    def test_explicit_private_key_path(self, tmp_path: Path):
-        """A string ssh_pkey path should load without referencing DSSKey."""
-        key_path = tmp_path / "explicit-rsa-key"
-        paramiko.RSAKey.generate(2048).write_private_key_file(str(key_path))
-
-        password, keys = SSHTunnelForwarder._consolidate_auth(
-            ssh_pkey=str(key_path),
-            allow_agent=False,
-            host_pkey_directories=[],
-        )
-
-        assert password is None
-        assert len(keys) == 1
-        assert isinstance(keys[0], paramiko.RSAKey)
-
-    def test_empty_directories_disable_default_discovery(self, tmp_path: Path):
-        """An explicit empty directory list should not scan ~/.ssh."""
-        ssh_directory = tmp_path / ".ssh"
-        ssh_directory.mkdir()
-        paramiko.RSAKey.generate(2048).write_private_key_file(
-            str(ssh_directory / "id_rsa")
-        )
-
-        with patch("db_connect_mcp.core.tunnel.Path.home", return_value=tmp_path):
-            assert SSHTunnelForwarder.get_keys(host_pkey_directories=[]) == []
-            discovered = SSHTunnelForwarder.get_keys(host_pkey_directories=None)
-
-        assert len(discovered) == 1
-        assert isinstance(discovered[0], paramiko.RSAKey)
-
-    def test_unreadable_discovered_key_preserves_password_auth(self, tmp_path: Path):
-        """A filesystem error while loading a key should not block password auth."""
-        key_path = tmp_path / "id_rsa"
-        key_path.touch()
-
-        with patch.object(
-            paramiko.RSAKey,
-            "from_private_key_file",
-            side_effect=PermissionError("permission denied"),
-        ):
-            password, keys = SSHTunnelForwarder._consolidate_auth(
-                ssh_password="secret",
-                allow_agent=False,
-                host_pkey_directories=[str(tmp_path)],
-            )
-
-        assert password == "secret"
-        assert keys == []
 
 
 class TestDatabaseConfigWithSSHTunnel:
@@ -968,11 +1052,12 @@ class TestFileBasedKeyParsing:
 
     @pytest.fixture
     def mock_tunnel_forwarder(self):
-        """Mock SSHTunnelForwarder."""
-        with patch("db_connect_mcp.core.tunnel.SSHTunnelForwarder") as mock:
+        """Mock the native Paramiko forwarder."""
+        with patch("db_connect_mcp.core.tunnel.ParamikoTunnelForwarder") as mock:
             instance = MagicMock()
             instance.local_bind_port = 54321
             instance.is_active = True
+            instance.start.return_value = 54321
             mock.return_value = instance
             yield mock, instance
 
@@ -997,7 +1082,7 @@ class TestFileBasedKeyParsing:
             manager.start()
 
             call_kwargs = mock_class.call_args[1]
-            assert isinstance(call_kwargs["ssh_pkey"], paramiko.RSAKey)
+            assert isinstance(call_kwargs["pkey"], paramiko.RSAKey)
         finally:
             Path(key_path).unlink(missing_ok=True)
 
@@ -1023,7 +1108,7 @@ class TestFileBasedKeyParsing:
             manager.start()
 
             call_kwargs = mock_class.call_args[1]
-            assert isinstance(call_kwargs["ssh_pkey"], paramiko.RSAKey)
+            assert isinstance(call_kwargs["pkey"], paramiko.RSAKey)
         finally:
             Path(key_path).unlink(missing_ok=True)
 

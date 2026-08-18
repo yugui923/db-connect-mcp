@@ -19,19 +19,21 @@ Application                 Bastion Host              Database Server
 
 ### Source Files
 
-| File                                    | Purpose                                                                                                              |
-| --------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `src/db_connect_mcp/core/tunnel.py`     | `SSHTunnelManager` class -- lifecycle management (start, stop, health checks, context manager)                       |
-| `src/db_connect_mcp/models/config.py`   | `SSHTunnelConfig` Pydantic model -- all SSH tunnel configuration fields                                              |
-| `src/db_connect_mcp/core/connection.py` | `DatabaseConnection` integration -- auto-starts tunnel during `initialize()`, rewrites URL, cleans up on `dispose()` |
+| File                                       | Purpose                                                                                                              |
+| ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------- |
+| `src/db_connect_mcp/core/tunnel.py`        | `SSHTunnelManager` class -- lifecycle management (start, stop, health checks, context manager)                       |
+| `src/db_connect_mcp/core/ssh_forwarder.py` | Stable listener, SSH transport replacement, channel leasing, and buffered relay                                      |
+| `src/db_connect_mcp/models/config.py`      | `SSHTunnelConfig` Pydantic model -- all SSH tunnel configuration fields                                              |
+| `src/db_connect_mcp/core/connection.py`    | `DatabaseConnection` integration -- auto-starts tunnel during `initialize()`, rewrites URL, cleans up on `dispose()` |
 
 ### How It Works
 
 1. **Configuration**: `SSHTunnelConfig` is set on `DatabaseConfig.ssh_tunnel`
 2. **Tunnel startup**: During `DatabaseConnection.initialize()`, if `ssh_tunnel` is configured:
    - `SSHTunnelManager` is created and `start()` is called
-   - An SSH connection is established to the bastion host
-   - A local port is bound (auto-assigned or specified)
+   - Paramiko's high-level `SSHClient` establishes and authenticates the bastion connection
+   - A `direct-tcpip` preflight proves the bastion can reach the database target
+   - A stable local port is bound (auto-assigned or specified)
    - Traffic to the local port is forwarded to the remote database
 3. **URL rewriting**: `rewrite_database_url()` replaces the database host/port in the connection string with `localhost:<local_port>`
 4. **Normal operation**: SQLAlchemy connects to the rewritten URL, unaware of the tunnel
@@ -48,6 +50,13 @@ Application                 Bastion Host              Database Server
 - `local_bind_port` (property): Get the local port
 - Context manager support (`with SSHTunnelManager(config) as mgr:`)
 
+The local listener and SSH transport have independent lifecycles. If a
+transport fails, `ensure_active()` replaces only that transport, so the local
+port embedded in the SQLAlchemy engine URL does not change. New local
+connections also perform one transport-level recovery attempt if channel
+creation times out before database bytes are forwarded. In-flight SQL is never
+replayed automatically.
+
 **`rewrite_database_url(original_url, local_host, local_port) -> str`**
 
 - Rewrites any database URL (PostgreSQL, MySQL, ClickHouse) to route through the tunnel
@@ -56,25 +65,38 @@ Application                 Bastion Host              Database Server
 **`SSHTunnelError`**
 
 - Custom exception for tunnel-related failures
+- Exposes a stable error code: `SSH_CONNECT_FAILED`, `SSH_HOST_KEY_FAILED`,
+  `SSH_AUTH_FAILED`, `SSH_CHANNEL_FAILED`, `SSH_LISTENER_FAILED`,
+  `SSH_RELAY_FAILED`, or `SSH_UNKNOWN_FAILED`
+- Messages exclude passwords, private keys, connection URLs, and raw exception
+  text
 
 ## Configuration Reference
 
 `SSHTunnelConfig` fields:
 
-| Field                        | Type  | Default         | Description                                                                             |
-| ---------------------------- | ----- | --------------- | --------------------------------------------------------------------------------------- |
-| `ssh_host`                   | `str` | (required)      | SSH server hostname or IP                                                               |
-| `ssh_port`                   | `int` | `22`            | SSH server port                                                                         |
-| `ssh_username`               | `str` | (required)      | SSH login username                                                                      |
-| `ssh_password`               | `str` | (optional)      | Password-based authentication                                                           |
-| `ssh_private_key`            | `str` | (optional)      | SSH private key content (raw PEM or base64-encoded PEM)                                 |
-| `ssh_private_key_path`       | `str` | (optional)      | Path to private key file                                                                |
-| `ssh_private_key_passphrase` | `str` | (optional)      | Passphrase for encrypted private key                                                    |
-| `remote_host`                | `str` | (auto from URL) | Database host as seen from the SSH server. Auto-derived from `DATABASE_URL` if not set. |
-| `remote_port`                | `int` | (auto from URL) | Database port as seen from the SSH server. Auto-derived from `DATABASE_URL` if not set. |
-| `local_host`                 | `str` | `127.0.0.1`     | Local address to bind the tunnel                                                        |
-| `local_port`                 | `int` | `None` (auto)   | Local port to bind (auto-assigned if not set)                                           |
-| `tunnel_timeout`             | `int` | `10`            | SSH connection timeout in seconds                                                       |
+| Field                        | Type   | Default          | Description                                                                             |
+| ---------------------------- | ------ | ---------------- | --------------------------------------------------------------------------------------- |
+| `ssh_host`                   | `str`  | (required)       | SSH server hostname or IP                                                               |
+| `ssh_port`                   | `int`  | `22`             | SSH server port                                                                         |
+| `ssh_username`               | `str`  | (required)       | SSH login username                                                                      |
+| `ssh_password`               | `str`  | (optional)       | Password-based authentication                                                           |
+| `ssh_private_key`            | `str`  | (optional)       | SSH private key content (raw PEM or base64-encoded PEM)                                 |
+| `ssh_private_key_path`       | `str`  | (optional)       | Path to private key file                                                                |
+| `ssh_private_key_passphrase` | `str`  | (optional)       | Passphrase for encrypted private key                                                    |
+| `remote_host`                | `str`  | (auto from URL)  | Database host as seen from the SSH server. Auto-derived from `DATABASE_URL` if not set. |
+| `remote_port`                | `int`  | (auto from URL)  | Database port as seen from the SSH server. Auto-derived from `DATABASE_URL` if not set. |
+| `local_host`                 | `str`  | `127.0.0.1`      | Local address to bind the tunnel                                                        |
+| `local_port`                 | `int`  | `None` (auto)    | Local port to bind (auto-assigned if not set)                                           |
+| `tunnel_timeout`             | `int`  | `10`             | Legacy fallback for all SSH stage timeouts                                              |
+| `connect_timeout`            | `int`  | `tunnel_timeout` | Bastion TCP connection timeout                                                          |
+| `banner_timeout`             | `int`  | `tunnel_timeout` | SSH negotiation/banner timeout                                                          |
+| `auth_timeout`               | `int`  | `tunnel_timeout` | SSH authentication timeout                                                              |
+| `channel_timeout`            | `int`  | `tunnel_timeout` | `direct-tcpip` channel-open timeout                                                     |
+| `keepalive_interval`         | `int`  | `30`             | Idle seconds between keepalive packets (`0` disables)                                   |
+| `target_preflight`           | `bool` | `true`           | Prove target-channel reachability before publishing the listener                        |
+| `strict_host_key`            | `bool` | `false`          | Reject unknown or changed bastion host keys                                             |
+| `known_hosts_path`           | `str`  | (optional)       | Additional read-only known-hosts file; requires strict mode                             |
 
 At least one of `ssh_password`, `ssh_private_key`, or `ssh_private_key_path` must be provided. If both `ssh_private_key` (inline) and `ssh_private_key_path` (file) are set, the inline key takes precedence.
 
@@ -112,16 +134,39 @@ config = DatabaseConfig(
 
 SSH tunnel configuration is passed through environment variables in your MCP config. The application code reads these and builds the `SSHTunnelConfig` internally. See [Development Guide](DEVELOPMENT.md) for the devcontainer setup that demonstrates this pattern.
 
+| Environment variable     | Configuration field  |
+| ------------------------ | -------------------- |
+| `SSH_TUNNEL_TIMEOUT`     | `tunnel_timeout`     |
+| `SSH_CONNECT_TIMEOUT`    | `connect_timeout`    |
+| `SSH_BANNER_TIMEOUT`     | `banner_timeout`     |
+| `SSH_AUTH_TIMEOUT`       | `auth_timeout`       |
+| `SSH_CHANNEL_TIMEOUT`    | `channel_timeout`    |
+| `SSH_KEEPALIVE_INTERVAL` | `keepalive_interval` |
+| `SSH_TARGET_PREFLIGHT`   | `target_preflight`   |
+| `SSH_STRICT_HOST_KEY`    | `strict_host_key`    |
+| `SSH_KNOWN_HOSTS_PATH`   | `known_hosts_path`   |
+
+Boolean environment variables accept `true`, `false`, `1`, `0`, `yes`, `no`,
+`on`, or `off` (case-insensitive). Invalid values fail configuration instead of
+silently changing policy.
+
+### Host-Key Policy
+
+The default compatibility mode accepts a bastion host key for the current
+process and emits a warning. It does not read or modify a user's `known_hosts`
+file. Set `SSH_STRICT_HOST_KEY=true` to load system host keys and reject unknown
+or changed bastion keys. `SSH_KNOWN_HOSTS_PATH` can add a read-only OpenSSH
+known-hosts file and is only valid when strict mode is enabled.
+
 ## Dependencies
 
-| Package     | Version          | Purpose                                |
-| ----------- | ---------------- | -------------------------------------- |
-| `sshtunnel` | `>=0.4.0`        | SSH tunnel management (wraps paramiko) |
-| `paramiko`  | `>=5.0.0,<6.0.0` | SSH protocol implementation            |
+| Package    | Version          | Purpose                     |
+| ---------- | ---------------- | --------------------------- |
+| `paramiko` | `>=5.0.0,<6.0.0` | SSH client and channel APIs |
 
-The project patches `sshtunnel` 0.4.0's key-loading hooks locally so they use
-the RSA, ECDSA, and Ed25519 key types supported by Paramiko 5. DSA keys are not
-supported because Paramiko removed that obsolete algorithm.
+The forwarding listener and relay are first-party code built exclusively on
+Paramiko's public APIs and Python's standard library. DSA keys are not supported
+because Paramiko removed that obsolete algorithm.
 
 ## Devcontainer Test Infrastructure
 
@@ -194,4 +239,5 @@ The bastion is an Alpine Linux container with OpenSSH:
 
 - Ensure Paramiko satisfies `>=5.0.0,<6.0.0`
 - Convert obsolete DSA keys to RSA, ECDSA, or Ed25519
-- Check SSH host key acceptance (the test fixtures use `set_missing_host_key_policy`)
+- In strict mode, ensure the bastion key exists in the system or configured
+  known-hosts file and has not changed

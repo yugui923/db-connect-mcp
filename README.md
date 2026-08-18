@@ -101,6 +101,7 @@ The server automatically retrieves and displays these comments when describing t
 
 - **Secure remote access** - Connect to databases behind firewalls via SSH tunnels
 - **Automatic tunnel management** - Tunnel lifecycle handled transparently (start, health check, restart, cleanup)
+- **Reliable native forwarding** - Paramiko `SSHClient` transport with target preflight and stable-port recovery
 - **Flexible authentication** - Password or private key based SSH authentication
 - **Any database type** - Works with PostgreSQL, MySQL, and ClickHouse through the same tunnel
 

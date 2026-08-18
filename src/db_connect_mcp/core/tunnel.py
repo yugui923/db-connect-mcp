@@ -5,6 +5,7 @@ import binascii
 import enum
 import logging
 import re
+import threading
 import time
 from io import StringIO
 from pathlib import Path
@@ -13,8 +14,12 @@ from urllib.parse import urlparse, urlunparse
 import paramiko
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import dsa, ec, ed25519, rsa
-from sshtunnel import SSHTunnelForwarder as _BaseSSHTunnelForwarder
 
+from db_connect_mcp.core.ssh_forwarder import (
+    ParamikoTunnelForwarder,
+    SSHTunnelError,
+    SSHTunnelErrorCode,
+)
 from db_connect_mcp.models.config import SSHTunnelConfig
 
 logger = logging.getLogger(__name__)
@@ -22,102 +27,6 @@ logger = logging.getLogger(__name__)
 # Maximum time allowed for the entire key parsing pipeline (seconds).
 # Leaves ~1s headroom within the user's expected 5s connection time.
 _KEY_PARSE_BUDGET_SECONDS = 4.0
-
-
-class SSHTunnelForwarder(_BaseSSHTunnelForwarder):
-    """Paramiko 5-compatible sshtunnel forwarder."""
-
-    @staticmethod
-    def _key_types() -> dict[str, type[paramiko.PKey]]:
-        """Return key types supported by the installed Paramiko version."""
-        key_types: dict[str, type[paramiko.PKey]] = {
-            "rsa": paramiko.RSAKey,
-            "ecdsa": paramiko.ECDSAKey,
-            "ed25519": paramiko.Ed25519Key,
-        }
-        dss_key_class = getattr(paramiko, "DSSKey", None)
-        if dss_key_class is not None:
-            key_types["dsa"] = dss_key_class
-        return key_types
-
-    @staticmethod
-    def read_private_key_file(
-        pkey_file: str,
-        pkey_password: str | None = None,
-        key_type: type[paramiko.PKey] | None = None,
-        logger: logging.Logger | None = None,
-    ) -> paramiko.PKey | None:
-        """Load a private-key file without requiring Paramiko's removed DSSKey."""
-        key_types = (
-            (key_type,)
-            if key_type is not None
-            else tuple(SSHTunnelForwarder._key_types().values())
-        )
-
-        for pkey_class in key_types:
-            try:
-                return pkey_class.from_private_key_file(
-                    pkey_file,
-                    password=pkey_password,
-                )
-            except paramiko.PasswordRequiredException:
-                if logger:
-                    logger.error("Password is required for key %s", pkey_file)
-                return None
-            except (OSError, paramiko.SSHException) as exc:
-                if logger:
-                    logger.debug(
-                        "Private key file %s could not be loaded as %s: %s",
-                        pkey_file,
-                        pkey_class.__name__,
-                        exc,
-                    )
-
-        return None
-
-    @staticmethod
-    def get_keys(
-        logger: logging.Logger | None = None,
-        host_pkey_directories: list[str] | None = None,
-        allow_agent: bool = False,
-    ) -> list[paramiko.PKey]:
-        """Load supported keys without referencing Paramiko's removed DSSKey."""
-        keys: list[paramiko.PKey] = []
-        if allow_agent:
-            keys.extend(_BaseSSHTunnelForwarder.get_agent_keys(logger=logger))
-        directories = (
-            [Path.home() / ".ssh"]
-            if host_pkey_directories is None
-            else [Path(directory).expanduser() for directory in host_pkey_directories]
-        )
-
-        for directory in directories:
-            for key_type, key_class in SSHTunnelForwarder._key_types().items():
-                key_path = directory / f"id_{key_type}"
-                try:
-                    if not key_path.is_file():
-                        continue
-                    key = SSHTunnelForwarder.read_private_key_file(
-                        str(key_path),
-                        key_type=key_class,
-                        logger=logger,
-                    )
-                    if key is not None:
-                        keys.append(key)
-                except OSError as exc:
-                    if logger:
-                        logger.warning(
-                            "Could not inspect private key %s: %s", key_path, exc
-                        )
-
-        return keys
-
-
-# sshtunnel's authentication path calls the base class by name instead of using
-# dynamic dispatch. Patch its two key-loading hooks so explicit and discovered
-# keys both avoid Paramiko's removed DSSKey API.
-_BaseSSHTunnelForwarder.get_keys = SSHTunnelForwarder.get_keys  # type: ignore[method-assign]
-_BaseSSHTunnelForwarder.read_private_key_file = SSHTunnelForwarder.read_private_key_file  # type: ignore[method-assign]
 
 
 class KeyFormat(enum.Enum):
@@ -134,12 +43,6 @@ class KeyFormat(enum.Enum):
     UNKNOWN = "unknown"
 
 
-class SSHTunnelError(Exception):
-    """SSH tunnel-related errors."""
-
-    pass
-
-
 class SSHTunnelManager:
     """Manages SSH tunnel lifecycle for database connections."""
 
@@ -151,8 +54,9 @@ class SSHTunnelManager:
             config: SSH tunnel configuration
         """
         self.config = config
-        self._tunnel: SSHTunnelForwarder | None = None
+        self._tunnel: ParamikoTunnelForwarder | None = None
         self._local_bind_port: int | None = None
+        self._lifecycle_lock = threading.RLock()
 
     def start(self) -> int:
         """
@@ -164,92 +68,86 @@ class SSHTunnelManager:
         Raises:
             SSHTunnelError: If tunnel fails to start
         """
-        if self._tunnel is not None and self._tunnel.is_active:
-            if self._local_bind_port is None:
-                raise SSHTunnelError("Tunnel is active but local bind port is unknown")
-            return self._local_bind_port
+        with self._lifecycle_lock:
+            if self._tunnel is not None:
+                if self._tunnel.is_active:
+                    if self._local_bind_port is None:
+                        raise SSHTunnelError(
+                            "Tunnel is active but its listener port is unavailable",
+                            code=SSHTunnelErrorCode.LISTENER,
+                        )
+                    return self._local_bind_port
+                self._tunnel.stop()
+                self._tunnel = None
 
-        try:
-            # Build authentication parameters
-            auth_params = self._build_auth_params()
-
-            remote_host = self.config.remote_host or "127.0.0.1"
-            remote_port = self.config.remote_port or 5432
-
-            # Create tunnel
-            tunnel = SSHTunnelForwarder(
-                ssh_address_or_host=(self.config.ssh_host, self.config.ssh_port),
-                ssh_username=self.config.ssh_username,
-                remote_bind_address=(remote_host, remote_port),
-                local_bind_address=(
-                    self.config.local_host,
-                    self.config.local_port or 0,  # 0 = auto-assign
-                ),
-                set_keepalive=self.config.tunnel_timeout,
-                **auth_params,
-            )
-
-            # Start tunnel
-            tunnel.start()
-            self._tunnel = tunnel
-
-            # Get actual local port (may be auto-assigned)
-            self._local_bind_port = tunnel.local_bind_port
-
-            logger.info(
-                f"SSH tunnel established: {self.config.local_host}:{self._local_bind_port} -> "
-                f"{self.config.ssh_host}:{self.config.ssh_port} -> "
-                f"{self.config.remote_host}:{self.config.remote_port}"
-            )
-
-            if self._local_bind_port is None:
-                raise SSHTunnelError("Tunnel started but local bind port is not set")
-
-            return self._local_bind_port
-
-        except SSHTunnelError:
-            self._cleanup()
-            raise
-        except Exception as e:
-            self._cleanup()
-            raise SSHTunnelError(f"Failed to establish SSH tunnel: {e}") from e
+            try:
+                password, pkey = self._build_auth_params()
+                tunnel = ParamikoTunnelForwarder(
+                    self.config,
+                    password=password,
+                    pkey=pkey,
+                )
+                try:
+                    local_port = tunnel.start()
+                except Exception:
+                    # The manager does not publish the forwarder until startup is
+                    # complete, so clean up a partially started instance directly.
+                    try:
+                        tunnel.stop()
+                    except Exception as cleanup_exc:
+                        logger.warning(
+                            "Error cleaning up failed SSH tunnel startup: %s",
+                            type(cleanup_exc).__name__,
+                        )
+                    raise
+                self._tunnel = tunnel
+                self._local_bind_port = local_port
+                logger.info("SSH tunnel established on local port %d", local_port)
+                return local_port
+            except SSHTunnelError:
+                self._cleanup()
+                raise
+            except Exception as exc:
+                self._cleanup()
+                raise SSHTunnelError(
+                    "Failed to establish the SSH tunnel",
+                    code=SSHTunnelErrorCode.UNKNOWN,
+                ) from exc
 
     def stop(self) -> None:
         """Stop the SSH tunnel."""
-        self._cleanup()
+        with self._lifecycle_lock:
+            self._cleanup()
 
     def _cleanup(self) -> None:
         """Clean up tunnel resources."""
-        if self._tunnel is not None:
+        tunnel = self._tunnel
+        self._tunnel = None
+        self._local_bind_port = None
+        if tunnel is not None:
             try:
-                self._tunnel.stop()
+                tunnel.stop()
                 logger.info("SSH tunnel stopped")
-            except Exception as e:
-                logger.warning(f"Error stopping SSH tunnel: {e}")
-            finally:
-                self._tunnel = None
-                self._local_bind_port = None
+            except Exception as exc:
+                logger.warning("Error stopping SSH tunnel: %s", type(exc).__name__)
 
-    def _build_auth_params(self) -> dict:
+    def _build_auth_params(self) -> tuple[str | None, paramiko.PKey | None]:
         """
-        Build authentication parameters for SSHTunnelForwarder.
+        Build explicit authentication parameters for the native forwarder.
 
         Returns:
-            Dictionary of authentication parameters
+            Password and parsed private key
 
         Raises:
             SSHTunnelError: If private key file not found or cannot be parsed
         """
-        params: dict[str, object] = {}
-
-        if self.config.ssh_password:
-            params["ssh_password"] = self.config.ssh_password
+        password = self.config.ssh_password
+        pkey: paramiko.PKey | None = None
 
         if self.config.ssh_private_key:
             # Inline key takes precedence over file path
             passphrase = self.config.ssh_private_key_passphrase
             pkey = self._parse_private_key(self.config.ssh_private_key, passphrase)
-            params["ssh_pkey"] = pkey
         elif self.config.ssh_private_key_path:
             key_path = Path(self.config.ssh_private_key_path)
             if not key_path.exists():
@@ -276,9 +174,8 @@ class SSHTunnelManager:
                 ) from e
             passphrase = self.config.ssh_private_key_passphrase
             pkey = self._parse_private_key(key_content, passphrase)
-            params["ssh_pkey"] = pkey
 
-        return params
+        return password, pkey
 
     # ------------------------------------------------------------------
     # Key format detection and parsing
@@ -661,20 +558,19 @@ class SSHTunnelManager:
         Raises:
             SSHTunnelError: If tunnel cannot be restarted
         """
-        if self.is_active:
-            return True
-
-        logger.warning("SSH tunnel inactive, attempting restart...")
-
-        # Clean up old tunnel
-        self._cleanup()
-
-        # Attempt restart
-        try:
-            self.start()
-            return True
-        except SSHTunnelError as e:
-            raise SSHTunnelError("SSH tunnel lost and could not be restarted") from e
+        with self._lifecycle_lock:
+            if self._tunnel is None:
+                self.start()
+                return True
+            try:
+                return self._tunnel.ensure_active()
+            except SSHTunnelError:
+                raise
+            except Exception as exc:
+                raise SSHTunnelError(
+                    "SSH tunnel health recovery failed",
+                    code=SSHTunnelErrorCode.CONNECT,
+                ) from exc
 
     @property
     def is_active(self) -> bool:

@@ -1162,6 +1162,21 @@ def _parse_int_env(
         )
 
 
+def _parse_bool_env(name: str, value: Optional[str], default: bool) -> bool:
+    """Parse a strict boolean environment variable with a clear error."""
+    if value is None:
+        return default
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(
+        f"Environment variable {name} must be a boolean "
+        f"(true/false, yes/no, on/off, or 1/0), got: {value!r}"
+    )
+
+
 def _load_ssh_tunnel_config() -> Optional[SSHTunnelConfig]:
     """
     Load SSH tunnel configuration from environment variables.
@@ -1195,6 +1210,45 @@ def _load_ssh_tunnel_config() -> Optional[SSHTunnelConfig]:
         )
         or 10
     )
+    connect_timeout = _parse_int_env(
+        "SSH_CONNECT_TIMEOUT",
+        os.getenv("SSH_CONNECT_TIMEOUT"),
+        default=tunnel_timeout,
+    )
+    banner_timeout = _parse_int_env(
+        "SSH_BANNER_TIMEOUT",
+        os.getenv("SSH_BANNER_TIMEOUT"),
+        default=tunnel_timeout,
+    )
+    auth_timeout = _parse_int_env(
+        "SSH_AUTH_TIMEOUT",
+        os.getenv("SSH_AUTH_TIMEOUT"),
+        default=tunnel_timeout,
+    )
+    channel_timeout = _parse_int_env(
+        "SSH_CHANNEL_TIMEOUT",
+        os.getenv("SSH_CHANNEL_TIMEOUT"),
+        default=tunnel_timeout,
+    )
+    keepalive_interval = (
+        _parse_int_env(
+            "SSH_KEEPALIVE_INTERVAL",
+            os.getenv("SSH_KEEPALIVE_INTERVAL"),
+            default=30,
+        )
+        or 0
+    )
+    target_preflight = _parse_bool_env(
+        "SSH_TARGET_PREFLIGHT",
+        os.getenv("SSH_TARGET_PREFLIGHT"),
+        default=True,
+    )
+    strict_host_key = _parse_bool_env(
+        "SSH_STRICT_HOST_KEY",
+        os.getenv("SSH_STRICT_HOST_KEY"),
+        default=False,
+    )
+    known_hosts_path = os.getenv("SSH_KNOWN_HOSTS_PATH")
 
     return SSHTunnelConfig(
         ssh_host=ssh_host,
@@ -1209,6 +1263,14 @@ def _load_ssh_tunnel_config() -> Optional[SSHTunnelConfig]:
         local_host=local_host,
         local_port=local_port,
         tunnel_timeout=tunnel_timeout,
+        connect_timeout=connect_timeout,
+        banner_timeout=banner_timeout,
+        auth_timeout=auth_timeout,
+        channel_timeout=channel_timeout,
+        keepalive_interval=keepalive_interval,
+        target_preflight=target_preflight,
+        known_hosts_path=known_hosts_path,
+        strict_host_key=strict_host_key,
     )
 
 
