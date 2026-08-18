@@ -11,6 +11,7 @@ from db_connect_mcp.models.config import DatabaseConfig
 from db_connect_mcp.server import (
     DatabaseMCPServer,
     _load_ssh_tunnel_config,
+    _parse_bool_env,
     _parse_int_env,
 )
 
@@ -65,6 +66,25 @@ class TestParseIntEnv:
         """Test that whitespace-only string raises ValueError."""
         with pytest.raises(ValueError):
             _parse_int_env("SPACE_VAR", "   ")
+
+
+class TestParseBoolEnv:
+    """Tests for strict boolean environment parsing."""
+
+    @pytest.mark.parametrize("value", ["1", "true", "TRUE", "yes", "on"])
+    def test_parse_true_values(self, value: str) -> None:
+        assert _parse_bool_env("TEST_BOOL", value, default=False) is True
+
+    @pytest.mark.parametrize("value", ["0", "false", "FALSE", "no", "off"])
+    def test_parse_false_values(self, value: str) -> None:
+        assert _parse_bool_env("TEST_BOOL", value, default=True) is False
+
+    def test_parse_default(self) -> None:
+        assert _parse_bool_env("TEST_BOOL", None, default=True) is True
+
+    def test_invalid_value_names_variable(self) -> None:
+        with pytest.raises(ValueError, match="TEST_BOOL"):
+            _parse_bool_env("TEST_BOOL", "sometimes", default=False)
 
 
 class TestMCPToolDispatch:
@@ -253,6 +273,50 @@ class TestLoadSSHTunnelConfig:
 
             assert result is not None
             assert result.tunnel_timeout == 30
+            assert result.connect_timeout == 30
+            assert result.banner_timeout == 30
+            assert result.auth_timeout == 30
+            assert result.channel_timeout == 30
+
+    def test_specific_tunnel_settings_override_defaults(self) -> None:
+        """Stage timeouts and policies should map from their environment names."""
+        env = {
+            "SSH_HOST": "bastion.example.com",
+            "SSH_USERNAME": "user",
+            "SSH_PASSWORD": "secret",
+            "SSH_TUNNEL_TIMEOUT": "30",
+            "SSH_CONNECT_TIMEOUT": "11",
+            "SSH_BANNER_TIMEOUT": "12",
+            "SSH_AUTH_TIMEOUT": "13",
+            "SSH_CHANNEL_TIMEOUT": "14",
+            "SSH_KEEPALIVE_INTERVAL": "0",
+            "SSH_TARGET_PREFLIGHT": "false",
+            "SSH_STRICT_HOST_KEY": "true",
+            "SSH_KNOWN_HOSTS_PATH": "/run/secrets/known_hosts",
+        }
+        with patch.dict(os.environ, env, clear=True):
+            result = _load_ssh_tunnel_config()
+
+        assert result is not None
+        assert result.connect_timeout == 11
+        assert result.banner_timeout == 12
+        assert result.auth_timeout == 13
+        assert result.channel_timeout == 14
+        assert result.keepalive_interval == 0
+        assert result.target_preflight is False
+        assert result.strict_host_key is True
+        assert result.known_hosts_path == "/run/secrets/known_hosts"
+
+    def test_invalid_boolean_names_environment_variable(self) -> None:
+        env = {
+            "SSH_HOST": "bastion.example.com",
+            "SSH_USERNAME": "user",
+            "SSH_PASSWORD": "secret",
+            "SSH_TARGET_PREFLIGHT": "maybe",
+        }
+        with patch.dict(os.environ, env, clear=True):
+            with pytest.raises(ValueError, match="SSH_TARGET_PREFLIGHT"):
+                _load_ssh_tunnel_config()
 
     def test_passphrase_config(self):
         """Test private key passphrase configuration."""

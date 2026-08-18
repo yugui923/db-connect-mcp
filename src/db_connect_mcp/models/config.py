@@ -95,7 +95,52 @@ class SSHTunnelConfig(BaseModel):
         default=10,
         ge=1,
         le=300,
-        description="SSH connection timeout in seconds",
+        description=(
+            "Legacy SSH timeout fallback in seconds. Used for connect, banner, "
+            "authentication, and channel timeouts when their specific values are unset."
+        ),
+    )
+    connect_timeout: Optional[int] = Field(
+        default=None,
+        ge=1,
+        le=300,
+        description="TCP connection timeout in seconds (inherits tunnel_timeout)",
+    )
+    banner_timeout: Optional[int] = Field(
+        default=None,
+        ge=1,
+        le=300,
+        description="SSH banner timeout in seconds (inherits tunnel_timeout)",
+    )
+    auth_timeout: Optional[int] = Field(
+        default=None,
+        ge=1,
+        le=300,
+        description="SSH authentication timeout in seconds (inherits tunnel_timeout)",
+    )
+    channel_timeout: Optional[int] = Field(
+        default=None,
+        ge=1,
+        le=300,
+        description="SSH channel-open timeout in seconds (inherits tunnel_timeout)",
+    )
+    keepalive_interval: int = Field(
+        default=30,
+        ge=0,
+        le=300,
+        description="Idle seconds between SSH keepalive packets (0 disables them)",
+    )
+    target_preflight: bool = Field(
+        default=True,
+        description="Open a database-target channel before publishing the listener",
+    )
+    known_hosts_path: Optional[str] = Field(
+        default=None,
+        description="Additional read-only OpenSSH known-hosts file used in strict mode",
+    )
+    strict_host_key: bool = Field(
+        default=False,
+        description="Reject unknown or changed bastion host keys",
     )
 
     @model_validator(mode="after")
@@ -109,6 +154,23 @@ class SSHTunnelConfig(BaseModel):
             raise ValueError(
                 "SSH authentication requires either ssh_password, ssh_private_key_path, or ssh_private_key"
             )
+        if self.known_hosts_path and not self.strict_host_key:
+            raise ValueError(
+                "known_hosts_path requires strict_host_key=True so its verification "
+                "semantics are unambiguous"
+            )
+
+        # Preserve the documented SSH_TUNNEL_TIMEOUT behavior for both environment
+        # and programmatic configuration. Keeping the compatibility fields concrete
+        # also makes model dumps and reconstructed configs deterministic.
+        if self.connect_timeout is None:
+            self.connect_timeout = self.tunnel_timeout
+        if self.banner_timeout is None:
+            self.banner_timeout = self.tunnel_timeout
+        if self.auth_timeout is None:
+            self.auth_timeout = self.tunnel_timeout
+        if self.channel_timeout is None:
+            self.channel_timeout = self.tunnel_timeout
         return self
 
     model_config = {

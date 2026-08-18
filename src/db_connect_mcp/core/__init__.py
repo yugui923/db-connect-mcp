@@ -5,7 +5,13 @@ from .connection import DatabaseConnection
 from .executor import QueryExecutor
 from .inspector import MetadataInspector
 from .search import ObjectSearcher, like_to_regex
-from .tunnel import KeyFormat, SSHTunnelError, SSHTunnelManager, rewrite_database_url
+from .tunnel import (
+    KeyFormat,
+    SSHTunnelError,
+    SSHTunnelErrorCode,
+    SSHTunnelManager,
+    rewrite_database_url,
+)
 
 __all__ = [
     "DatabaseConnection",
@@ -16,6 +22,7 @@ __all__ = [
     "StatisticsAnalyzer",
     "SSHTunnelManager",
     "SSHTunnelError",
+    "SSHTunnelErrorCode",
     "like_to_regex",
     "rewrite_database_url",
 ]

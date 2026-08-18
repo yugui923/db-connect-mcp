@@ -218,7 +218,8 @@ The server supports connecting to databases through SSH tunnels, enabling secure
 
 ### Core Components
 
-- **SSHTunnelManager** (`src/db_connect_mcp/core/tunnel.py`): Manages the SSH tunnel lifecycle (start, stop, health checks, context manager support). Uses the `sshtunnel` library with a local compatibility layer for Paramiko 5's removal of DSA support.
+- **SSHTunnelManager** (`src/db_connect_mcp/core/tunnel.py`): Preserves the public tunnel lifecycle and private-key parsing seam.
+- **ParamikoTunnelForwarder** (`src/db_connect_mcp/core/ssh_forwarder.py`): Owns the stable local listener, high-level Paramiko SSH clients, target-channel preflight, transport recovery, relay backpressure, and bounded cleanup.
 - **SSHTunnelConfig** (`src/db_connect_mcp/models/config.py`): Pydantic model for SSH tunnel configuration — SSH host/port, authentication (password or private key), remote/local bind addresses.
 - **DatabaseConnection integration** (`src/db_connect_mcp/core/connection.py`): When `ssh_tunnel` is set on `DatabaseConfig`, the connection automatically establishes the tunnel during `initialize()`, rewrites the database URL to point at the local tunnel endpoint, and tears down the tunnel on `dispose()`.
 - **`rewrite_database_url()`** (`src/db_connect_mcp/core/tunnel.py`): Rewrites any database URL (PostgreSQL, MySQL, ClickHouse) to route through the tunnel's local bind port.
@@ -241,11 +242,18 @@ SSH tunnel is configured via `SSHTunnelConfig` on `DatabaseConfig.ssh_tunnel`:
 | `local_host`                 | `127.0.0.1`     | Local bind host                                         |
 | `local_port`                 | `None` (auto)   | Local bind port                                         |
 | `tunnel_timeout`             | `10`            | SSH connection timeout (seconds)                        |
+| `connect_timeout`            | legacy timeout  | Bastion TCP connection timeout                          |
+| `banner_timeout`             | legacy timeout  | SSH negotiation timeout                                 |
+| `auth_timeout`               | legacy timeout  | SSH authentication timeout                              |
+| `channel_timeout`            | legacy timeout  | Forwarding channel-open timeout                         |
+| `keepalive_interval`         | `30`            | Keepalive interval (`0` disables)                       |
+| `target_preflight`           | `true`          | Preflight database target channel                       |
+| `strict_host_key`            | `false`         | Reject unknown or changed bastion keys                  |
+| `known_hosts_path`           | (optional)      | Additional read-only known-hosts file                   |
 
 ### Dependencies
 
-- `sshtunnel>=0.4.0`
-- `paramiko>=5.0.0,<6.0.0` (supported through the local `sshtunnel` key-loading compatibility layer)
+- `paramiko>=5.0.0,<6.0.0`
 
 ## Devcontainer Setup
 
