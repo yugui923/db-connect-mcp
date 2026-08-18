@@ -97,6 +97,19 @@ class _ChannelLease:
         self._owner._release_generation(self._generation)
 
 
+class _ChannelOpenFailure(Exception):
+    """Retain the exact transport generation whose channel open failed."""
+
+    def __init__(
+        self,
+        generation: _TransportGeneration,
+        cause: Exception,
+    ) -> None:
+        self.generation = generation
+        self.cause = cause
+        super().__init__()
+
+
 @dataclass
 class _ActiveSession:
     """Resources owned by one local forwarding handler."""
@@ -274,19 +287,18 @@ class ParamikoTunnelForwarder:
                     with contextlib.suppress(Exception):
                         session.channel.close()
 
-            # Serialize the generation snapshot with reconnect. A reconnect that
-            # was already dialing when shutdown began must be included here and
-            # closed instead of publishing a client after stop() returns.
-            with self._reconnect_lock:
-                with self._state_lock:
-                    generations = list(self._retired_generations)
-                    if self._current_generation is not None:
-                        generations.append(self._current_generation)
-                    self._current_generation = None
-                    self._retired_generations.clear()
-                for generation in generations:
-                    with contextlib.suppress(Exception):
-                        generation.client.close()
+            # Do not wait for a potentially blocked SSH dial. Reconnect checks
+            # the closing flag again before publishing, so an in-flight client
+            # is closed by that thread when its connect attempt returns.
+            with self._state_lock:
+                generations = list(self._retired_generations)
+                if self._current_generation is not None:
+                    generations.append(self._current_generation)
+                self._current_generation = None
+                self._retired_generations.clear()
+            for generation in generations:
+                with contextlib.suppress(Exception):
+                    generation.client.close()
 
             deadline = time.monotonic() + _SHUTDOWN_TIMEOUT_SECONDS
             for session in sessions:
@@ -506,16 +518,28 @@ class ParamikoTunnelForwarder:
 
             replacement = self._connect_generation()
             close_previous = False
+            reject_replacement = False
             previous: _TransportGeneration | None
             with self._state_lock:
-                previous = self._current_generation
-                self._current_generation = replacement
-                if previous is not None:
-                    previous.retired = True
-                    if previous.leases == 0:
-                        close_previous = True
-                    else:
-                        self._retired_generations.add(previous)
+                if self._closing.is_set():
+                    reject_replacement = True
+                    previous = None
+                else:
+                    previous = self._current_generation
+                    self._current_generation = replacement
+                    if previous is not None:
+                        previous.retired = True
+                        if previous.leases == 0:
+                            close_previous = True
+                        else:
+                            self._retired_generations.add(previous)
+            if reject_replacement:
+                with contextlib.suppress(Exception):
+                    replacement.client.close()
+                raise SSHTunnelError(
+                    "SSH tunnel shutdown is in progress",
+                    code=SSHTunnelErrorCode.CONNECT,
+                )
             if close_previous and previous is not None:
                 with contextlib.suppress(Exception):
                     previous.client.close()
@@ -541,30 +565,36 @@ class ParamikoTunnelForwarder:
             if channel is None:
                 raise paramiko.SSHException("SSH server returned no channel")
             return generation, channel
-        except Exception:
+        except Exception as exc:
             self._release_generation(generation)
-            raise
+            raise _ChannelOpenFailure(generation, exc) from exc
 
     def _acquire_channel(self, source_address: tuple[str, int]) -> _ChannelLease:
-        first_generation: _TransportGeneration | None = None
         try:
-            first_generation, channel = self._open_channel_once(source_address)
-            return _ChannelLease(self, first_generation, channel)
-        except paramiko.ChannelException as exc:
-            raise self._channel_error() from exc
+            generation, channel = self._open_channel_once(source_address)
+            return _ChannelLease(self, generation, channel)
+        except _ChannelOpenFailure as failure:
+            if isinstance(failure.cause, paramiko.ChannelException):
+                raise self._channel_error() from failure.cause
+            if not isinstance(
+                failure.cause,
+                (OSError, EOFError, paramiko.SSHException),
+            ):
+                raise failure.cause
+            expected = failure.generation
         except SSHTunnelError:
             raise
-        except (OSError, EOFError, paramiko.SSHException):
-            with self._state_lock:
-                expected = first_generation or self._current_generation
-            try:
-                self._replace_generation(expected)
-                generation, channel = self._open_channel_once(source_address)
-                return _ChannelLease(self, generation, channel)
-            except SSHTunnelError:
-                raise
-            except Exception as retry_error:
-                raise self._channel_error() from retry_error
+
+        try:
+            self._replace_generation(expected)
+            generation, channel = self._open_channel_once(source_address)
+            return _ChannelLease(self, generation, channel)
+        except SSHTunnelError:
+            raise
+        except _ChannelOpenFailure as retry_failure:
+            raise self._channel_error() from retry_failure.cause
+        except Exception as retry_error:
+            raise self._channel_error() from retry_error
 
     @staticmethod
     def _channel_error() -> SSHTunnelError:

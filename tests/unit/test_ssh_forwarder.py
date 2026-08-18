@@ -582,6 +582,64 @@ class TestTransportRecovery:
         finally:
             forwarder.stop()
 
+    def test_concurrent_channel_failures_create_only_one_replacement(self) -> None:
+        client_one, transport_one = _client_and_transport()
+        client_two, transport_two = _client_and_transport()
+        failure_barrier = threading.Barrier(2)
+        open_calls = 0
+        open_calls_lock = threading.Lock()
+
+        def open_channel(*_args: object, **_kwargs: object) -> MagicMock:
+            nonlocal open_calls
+            with open_calls_lock:
+                open_calls += 1
+                call_number = open_calls
+            if call_number == 1:
+                return MagicMock(spec=paramiko.Channel)
+            failure_barrier.wait(5)
+            raise paramiko.SSHException("Timeout opening channel")
+
+        transport_one.open_channel.side_effect = open_channel
+        clients = iter([client_one, client_two])
+        factory_calls = 0
+        factory_lock = threading.Lock()
+
+        def client_factory() -> MagicMock:
+            nonlocal factory_calls
+            with factory_lock:
+                factory_calls += 1
+                return next(clients)
+
+        forwarder = ParamikoTunnelForwarder(
+            _config(),
+            password="secret",
+            client_factory=client_factory,
+        )
+        errors: list[BaseException] = []
+
+        try:
+            forwarder.start()
+
+            def acquire() -> None:
+                try:
+                    lease = forwarder._acquire_channel(("127.0.0.1", 12345))
+                    lease.close()
+                except BaseException as exc:  # pragma: no cover - assertion path
+                    errors.append(exc)
+
+            threads = [threading.Thread(target=acquire) for _ in range(2)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(5)
+
+            assert not errors
+            assert all(not thread.is_alive() for thread in threads)
+            assert factory_calls == 2
+            assert transport_two.open_channel.call_count == 3
+        finally:
+            forwarder.stop()
+
     def test_stop_closes_a_replacement_that_was_already_connecting(self) -> None:
         client_one, transport_one = _client_and_transport()
         client_two, _ = _client_and_transport()
@@ -615,7 +673,12 @@ class TestTransportRecovery:
         recovery_thread.start()
         assert connect_started.wait(5)
         stop_thread.start()
-        allow_connect.set()
+        try:
+            stop_thread.join(1)
+            assert not stop_thread.is_alive()
+            assert recovery_thread.is_alive()
+        finally:
+            allow_connect.set()
         recovery_thread.join(5)
         stop_thread.join(5)
 
