@@ -7,7 +7,7 @@ import threading
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import paramiko
 import pytest
@@ -270,6 +270,189 @@ class TestSSHClientConnection:
         finally:
             forwarder.stop()
 
+    def test_start_reuses_an_active_listener(self) -> None:
+        client, _ = _client_and_transport()
+        forwarder = ParamikoTunnelForwarder(
+            _config(),
+            password="secret",
+            client_factory=lambda: client,
+        )
+
+        try:
+            first_port = forwarder.start()
+            assert forwarder.start() == first_port
+            client.connect.assert_called_once_with(
+                hostname="bastion.example.com",
+                port=22,
+                username="user",
+                password="secret",
+                pkey=None,
+                timeout=10,
+                banner_timeout=10,
+                auth_timeout=10,
+                channel_timeout=10,
+                look_for_keys=False,
+                allow_agent=False,
+            )
+        finally:
+            forwarder.stop()
+
+    def test_listener_bind_failure_is_classified_and_closes_client(self) -> None:
+        client, _ = _client_and_transport()
+        forwarder = ParamikoTunnelForwarder(
+            _config(),
+            password="secret",
+            client_factory=lambda: client,
+        )
+
+        with (
+            patch.object(
+                forwarder,
+                "_create_server",
+                side_effect=OSError("address unavailable"),
+            ),
+            pytest.raises(SSHTunnelError) as exc_info,
+        ):
+            forwarder.start()
+
+        assert exc_info.value.code == SSHTunnelErrorCode.LISTENER
+        client.close.assert_called_once_with()
+        assert forwarder.local_bind_port is None
+
+    def test_listener_readiness_timeout_cleans_up_all_resources(self) -> None:
+        client, _ = _client_and_transport()
+        forwarder = ParamikoTunnelForwarder(
+            _config(),
+            password="secret",
+            client_factory=lambda: client,
+        )
+
+        with (
+            patch.object(forwarder._listener_ready, "wait", return_value=False),
+            pytest.raises(SSHTunnelError) as exc_info,
+        ):
+            forwarder.start()
+
+        assert exc_info.value.code == SSHTunnelErrorCode.LISTENER
+        assert forwarder.local_bind_port is None
+        assert forwarder._current_generation is None
+        client.close.assert_called()
+
+    def test_ensure_active_starts_a_fresh_forwarder(self) -> None:
+        client, _ = _client_and_transport()
+        forwarder = ParamikoTunnelForwarder(
+            _config(),
+            password="secret",
+            client_factory=lambda: client,
+        )
+
+        try:
+            assert forwarder.ensure_active()
+            assert forwarder.is_active
+        finally:
+            forwarder.stop()
+
+    def test_ensure_active_rejects_a_dead_listener(self) -> None:
+        client, _ = _client_and_transport()
+        forwarder = ParamikoTunnelForwarder(
+            _config(),
+            password="secret",
+            client_factory=lambda: client,
+        )
+
+        try:
+            forwarder.start()
+            with (
+                patch.object(forwarder, "_listener_is_active", return_value=False),
+                pytest.raises(SSHTunnelError) as exc_info,
+            ):
+                forwarder.ensure_active()
+            assert exc_info.value.code == SSHTunnelErrorCode.LISTENER
+        finally:
+            forwarder.stop()
+
+    def test_missing_authenticated_transport_is_classified(self) -> None:
+        client, _ = _client_and_transport()
+        client.get_transport.return_value = None
+        forwarder = ParamikoTunnelForwarder(
+            _config(),
+            password="secret",
+            client_factory=lambda: client,
+        )
+
+        with pytest.raises(SSHTunnelError) as exc_info:
+            forwarder.start()
+
+        assert exc_info.value.code == SSHTunnelErrorCode.AUTH
+        client.close.assert_called_once_with()
+
+    def test_known_hosts_load_failure_is_classified(self) -> None:
+        client, _ = _client_and_transport()
+        client.load_system_host_keys.side_effect = OSError("unreadable")
+        forwarder = ParamikoTunnelForwarder(
+            _config(strict_host_key=True),
+            password="secret",
+            client_factory=lambda: client,
+        )
+
+        with pytest.raises(SSHTunnelError) as exc_info:
+            forwarder.start()
+
+        assert exc_info.value.code == SSHTunnelErrorCode.HOST_KEY
+        client.connect.assert_not_called()
+        client.close.assert_called_once_with()
+
+    def test_preflight_rejects_an_empty_channel_result(self) -> None:
+        client, transport = _client_and_transport()
+        transport.open_channel.return_value = None
+        forwarder = ParamikoTunnelForwarder(
+            _config(),
+            password="secret",
+            client_factory=lambda: client,
+        )
+
+        with pytest.raises(SSHTunnelError) as exc_info:
+            forwarder.start()
+
+        assert exc_info.value.code == SSHTunnelErrorCode.CHANNEL
+        client.close.assert_called_once_with()
+
+    def test_invalid_handler_address_isolated_and_cleaned_up(self) -> None:
+        forwarder = ParamikoTunnelForwarder(_config(), password="secret")
+        local_peer, local_forward = socket.socketpair()
+        try:
+            forwarder._handle_connection(local_forward, (123, "invalid"))
+            assert local_peer.recv(1) == b""
+            assert not forwarder._sessions
+        finally:
+            local_peer.close()
+
+    def test_unexpected_handler_failure_closes_channel_and_socket(self) -> None:
+        forwarder = ParamikoTunnelForwarder(_config(), password="secret")
+        local_peer, local_forward = socket.socketpair()
+        lease = MagicMock()
+        lease.channel = MagicMock(spec=paramiko.Channel)
+        try:
+            with (
+                patch.object(forwarder, "_acquire_channel", return_value=lease),
+                patch.object(
+                    forwarder,
+                    "_relay",
+                    side_effect=RuntimeError("relay failed"),
+                ),
+                patch(
+                    "db_connect_mcp.core.ssh_forwarder.logger.exception"
+                ) as log_exception,
+            ):
+                forwarder._handle_connection(local_forward, ("127.0.0.1", 12345))
+
+            log_exception.assert_called_once()
+            lease.close.assert_called_once_with()
+            assert local_peer.recv(1) == b""
+            assert not forwarder._sessions
+        finally:
+            local_peer.close()
+
 
 class TestTransportRecovery:
     """Verify recovery keeps the local endpoint and isolates active channels."""
@@ -443,6 +626,15 @@ class TestTransportRecovery:
         assert forwarder._current_generation is None
         assert forwarder.local_bind_port is None
         assert not forwarder.is_active
+
+    def test_replacement_is_rejected_after_shutdown_begins(self) -> None:
+        forwarder = ParamikoTunnelForwarder(_config(), password="secret")
+        forwarder._closing.set()
+
+        with pytest.raises(SSHTunnelError) as exc_info:
+            forwarder._replace_generation(None)
+
+        assert exc_info.value.code == SSHTunnelErrorCode.CONNECT
 
 
 class TestRelay:

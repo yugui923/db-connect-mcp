@@ -351,6 +351,59 @@ class TestSSHTunnelManagerMocked:
         mock_class.assert_called_once()
         mock_instance.start.assert_called_once()
 
+    def test_tunnel_start_reuses_active_forwarder(
+        self,
+        mock_tunnel_forwarder: tuple[MagicMock, MagicMock],
+        valid_config: SSHTunnelConfig,
+    ) -> None:
+        """Repeated start should preserve the published local endpoint."""
+        mock_class, mock_instance = mock_tunnel_forwarder
+        manager = SSHTunnelManager(valid_config)
+
+        assert manager.start() == 54321
+        assert manager.start() == 54321
+
+        mock_class.assert_called_once_with(
+            valid_config,
+            password="secret",
+            pkey=None,
+        )
+        mock_instance.start.assert_called_once_with()
+
+    def test_active_forwarder_without_port_raises_listener_error(
+        self,
+        mock_tunnel_forwarder: tuple[MagicMock, MagicMock],
+        valid_config: SSHTunnelConfig,
+    ) -> None:
+        """An inconsistent active state should fail with a classified error."""
+        _, mock_instance = mock_tunnel_forwarder
+        manager = SSHTunnelManager(valid_config)
+        manager.start()
+        manager._local_bind_port = None
+
+        with pytest.raises(SSHTunnelError) as exc_info:
+            manager.start()
+
+        assert exc_info.value.code == SSHTunnelErrorCode.LISTENER
+        mock_instance.start.assert_called_once_with()
+
+    def test_inactive_forwarder_is_stopped_before_replacement(
+        self,
+        mock_tunnel_forwarder: tuple[MagicMock, MagicMock],
+        valid_config: SSHTunnelConfig,
+    ) -> None:
+        """Restarting should stop an inactive native forwarder first."""
+        mock_class, mock_instance = mock_tunnel_forwarder
+        manager = SSHTunnelManager(valid_config)
+        manager.start()
+        mock_instance.is_active = False
+
+        assert manager.start() == 54321
+
+        mock_instance.stop.assert_called_once_with()
+        assert mock_instance.start.call_count == 2
+        assert mock_class.call_count == 2
+
     def test_tunnel_stop_calls_stop(self, mock_tunnel_forwarder, valid_config):
         """Stopping tunnel should call stop on forwarder."""
         mock_class, mock_instance = mock_tunnel_forwarder
@@ -446,6 +499,29 @@ class TestSSHTunnelManagerMocked:
         assert exc_info.value.code == SSHTunnelErrorCode.UNKNOWN
         mock_instance.stop.assert_called_once_with()
         assert manager.local_bind_port is None
+
+    def test_tunnel_start_cleanup_error_preserves_original_failure(
+        self,
+        mock_tunnel_forwarder: tuple[MagicMock, MagicMock],
+        valid_config: SSHTunnelConfig,
+    ) -> None:
+        """Cleanup failures must not replace the classified startup failure."""
+        _, mock_instance = mock_tunnel_forwarder
+        mock_instance.start.side_effect = RuntimeError("connect failed")
+        mock_instance.stop.side_effect = RuntimeError("cleanup failed")
+        manager = SSHTunnelManager(valid_config)
+
+        with (
+            patch("db_connect_mcp.core.tunnel.logger.warning") as warning,
+            pytest.raises(SSHTunnelError) as exc_info,
+        ):
+            manager.start()
+
+        assert exc_info.value.code == SSHTunnelErrorCode.UNKNOWN
+        warning.assert_called_once_with(
+            "Error cleaning up failed SSH tunnel startup: %s",
+            "RuntimeError",
+        )
 
     def test_tunnel_key_not_found_raises_error(self):
         """Non-existent key file should raise SSHTunnelError."""
