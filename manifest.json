@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "db-connect-mcp",
   "display_name": "Database Connect",
-  "version": "0.3.2",
+  "version": "0.7.1",
   "description": "Read-only database explorer for PostgreSQL, MySQL, and ClickHouse",
   "author": {
     "name": "Yuri Gui",
@@ -99,6 +99,10 @@
     {
       "name": "explain_query",
       "description": "Get query execution plan to analyze performance"
+    },
+    {
+      "name": "search_objects",
+      "description": "Search schemas, tables, views, columns, and indexes with progressive detail levels"
     }
   ],
   "compatibility": {

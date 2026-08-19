@@ -66,7 +66,8 @@ A read-only MCP (Model Context Protocol) server for exploratory data analysis ac
   - Cardinality analysis
 - **Data sampling** - Preview table data with configurable limits
 - **Custom queries** - Execute read-only SQL queries safely
-- **Database profiling** - Get high-level database metrics and largest tables
+- **Object search** - Find schemas, tables, views, columns, and indexes without loading the full catalog
+- **Query plans** - Inspect estimated plans or opt into `EXPLAIN ANALYZE` where supported
 
 ### 🔒 Safety Features
 
@@ -451,7 +452,7 @@ List all tables in a schema with metadata.
 Get detailed information about a table.
 
 - Parameters:
-  - `table_name`: Name of the table
+  - `table`: Name of the table
   - `schema` (optional): Schema name (default: "public")
 
 ### analyze_column
@@ -459,8 +460,8 @@ Get detailed information about a table.
 Analyze a column with statistics and distribution.
 
 - Parameters:
-  - `table_name`: Name of the table
-  - `column_name`: Name of the column
+  - `table`: Name of the table
+  - `column`: Name of the column
   - `schema` (optional): Schema name (default: "public")
 
 ### sample_data
@@ -468,7 +469,7 @@ Analyze a column with statistics and distribution.
 Get a sample of data from a table.
 
 - Parameters:
-  - `table_name`: Name of the table
+  - `table`: Name of the table
   - `schema` (optional): Schema name (default: "public")
   - `limit` (optional): Number of rows (default: 100, max: 1000)
 
@@ -482,10 +483,31 @@ Execute a read-only SQL query.
 
 ### get_table_relationships
 
-Get foreign key relationships in a schema.
+Get foreign key relationships for a table.
 
 - Parameters:
+  - `table`: Name of the table
   - `schema` (optional): Schema name (default: "public")
+
+### explain_query
+
+Get a database-specific query execution plan.
+
+- Parameters:
+  - `query`: SQL query to explain
+  - `analyze` (optional): Execute the query and include actual runtime statistics (default: false)
+
+### search_objects
+
+Search schemas, tables, views, columns, and indexes with progressive detail.
+
+- Parameters:
+  - `pattern`: SQL `LIKE` pattern, such as `%user%`
+  - `object_types` (optional): Object types to include
+  - `detail_level` (optional): `names`, `summary`, or `full` (default: `summary`)
+  - `schema` (optional): Restrict the search to a schema
+  - `table` (optional): Restrict column and index searches to a table
+  - `limit` (optional): Maximum matches (default: 100, max: 1000)
 
 ## Example Usage in Claude
 
