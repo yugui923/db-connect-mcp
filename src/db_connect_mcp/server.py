@@ -23,8 +23,11 @@ from mcp.types import (
     PaginatedRequestParams,
     TextContent,
     Tool,
+    ToolAnnotations,
 )
+from pydantic import BaseModel
 
+from db_connect_mcp import __version__
 from db_connect_mcp.adapters import create_adapter
 from db_connect_mcp.core import (
     DatabaseConnection,
@@ -34,7 +37,15 @@ from db_connect_mcp.core import (
     StatisticsAnalyzer,
 )
 from db_connect_mcp.models.config import DatabaseConfig, SSHTunnelConfig
-from db_connect_mcp.models.search import SearchDetailLevel, SearchObjectType
+from db_connect_mcp.models.database import DatabaseInfo, SchemaInfo
+from db_connect_mcp.models.query import ExplainPlan, QueryResult
+from db_connect_mcp.models.search import (
+    SearchDetailLevel,
+    SearchObjectType,
+    SearchResults,
+)
+from db_connect_mcp.models.statistics import ColumnStats
+from db_connect_mcp.models.table import RelationshipInfo, TableInfo
 
 # Load environment variables
 load_dotenv()
@@ -57,6 +68,120 @@ MAX_RESPONSE_DESCRIBE_TABLE = 100000  # Detailed table structure
 MAX_RESPONSE_EXPLAIN_QUERY = 100000  # Query execution plans
 MAX_RESPONSE_EXECUTE_QUERY = 100000  # Query results (up to 1000 rows)
 MAX_RESPONSE_SEARCH_OBJECTS = 100000  # Cross-cutting object search results
+
+LIST_RESULT_TOOLS = {
+    "get_table_relationships",
+    "list_schemas",
+    "list_tables",
+}
+
+READ_ONLY_TOOL_ANNOTATIONS = ToolAnnotations(
+    read_only_hint=True,
+    destructive_hint=False,
+    idempotent_hint=True,
+    open_world_hint=False,
+)
+
+
+def _truncation_info_schema() -> dict[str, Any]:
+    """Return the shared schema for optional response truncation metadata."""
+    return {
+        "type": "object",
+        "properties": {
+            "truncated": {"type": "boolean"},
+            "truncated_fields": {
+                "type": "array",
+                "items": {"type": "string"},
+            },
+            "message": {"type": "string"},
+        },
+        "required": ["truncated", "truncated_fields", "message"],
+        "additionalProperties": False,
+    }
+
+
+def _model_output_schema(model: type[BaseModel]) -> dict[str, Any]:
+    """Build an object-rooted output schema with truncation metadata support."""
+    schema = model.model_json_schema()
+    properties = cast(dict[str, Any], schema.setdefault("properties", {}))
+    properties["_truncation_info"] = _truncation_info_schema()
+    return schema
+
+
+def _list_output_schema(model: type[BaseModel]) -> dict[str, Any]:
+    """Build a legacy-compatible object envelope for a list of models."""
+    item_schema = model.model_json_schema()
+    definitions = item_schema.pop("$defs", None)
+    schema: dict[str, Any] = {
+        "type": "object",
+        "properties": {
+            "items": {"type": "array", "items": item_schema},
+            "_truncation_info": _truncation_info_schema(),
+        },
+        "required": ["items"],
+        "additionalProperties": False,
+    }
+    if definitions is not None:
+        schema["$defs"] = definitions
+    return schema
+
+
+def _read_only_tool(
+    *,
+    name: str,
+    title: str,
+    description: str,
+    input_schema: dict[str, Any],
+    output_schema: dict[str, Any],
+) -> Tool:
+    """Create a fully described read-only database tool."""
+    return Tool(
+        name=name,
+        title=title,
+        description=description,
+        input_schema=input_schema,
+        output_schema=output_schema,
+        annotations=READ_ONLY_TOOL_ANNOTATIONS,
+    )
+
+
+def _tool_error(code: str, message: str) -> CallToolResult:
+    """Return a model-visible tool error in text and structured forms."""
+    return CallToolResult(
+        content=[TextContent(type="text", text=message)],
+        structured_content={"error": {"code": code, "message": message}},
+        is_error=True,
+    )
+
+
+def _structured_tool_result(
+    tool_name: str, content: list[TextContent]
+) -> tuple[dict[str, Any], bool]:
+    """Convert the legacy JSON text payload into an MCP structured result."""
+    if len(content) != 1:
+        raise ValueError(f"{tool_name} returned an unexpected content shape")
+
+    parsed = json.loads(content[0].text)
+    is_error = isinstance(parsed, dict) and "error" in parsed
+
+    if tool_name in LIST_RESULT_TOOLS:
+        if isinstance(parsed, list):
+            return {"items": parsed}, is_error
+        if isinstance(parsed, dict) and isinstance(parsed.get("data"), list):
+            result = {"items": parsed["data"]}
+            if "_truncation_info" in parsed:
+                result["_truncation_info"] = parsed["_truncation_info"]
+            return result, is_error
+
+    if isinstance(parsed, dict) and isinstance(parsed.get("data"), dict):
+        result = dict(parsed["data"])
+        if "_truncation_info" in parsed:
+            result["_truncation_info"] = parsed["_truncation_info"]
+        return result, is_error
+    if isinstance(parsed, dict):
+        return parsed, is_error
+
+    raise ValueError(f"{tool_name} returned a non-object result")
 
 
 def truncate_json_response(data: str, max_length: int) -> str:
@@ -446,6 +571,18 @@ class DatabaseMCPServer:
         self.searcher: Optional[ObjectSearcher] = None
         self.server = Server(
             "db-connect-mcp",
+            version=__version__,
+            title="DB Connect MCP",
+            description=(
+                "Read-only database exploration and analysis for PostgreSQL, "
+                "MySQL, and ClickHouse"
+            ),
+            instructions=(
+                "Use search_objects for token-efficient discovery, then inspect "
+                "specific tables or run bounded read-only queries. Tool results "
+                "include structured content and equivalent JSON text."
+            ),
+            website_url="https://github.com/yugui923/db-connect-mcp",
             on_list_tools=self._list_tools,
             on_call_tool=self._call_tool,
         )
@@ -532,75 +669,77 @@ class DatabaseMCPServer:
             None,
         )
         if handler is None or available_tool is None:
-            return CallToolResult(
-                content=[
-                    TextContent(
-                        type="text",
-                        text=f"Unknown or unavailable tool: {params.name}",
-                    )
-                ],
-                isError=True,
+            return _tool_error(
+                "tool_unavailable", f"Unknown or unavailable tool: {params.name}"
             )
 
         arguments = params.arguments or {}
         try:
             Draft202012Validator(available_tool.input_schema).validate(arguments)
         except ValidationError as exc:
-            return CallToolResult(
-                content=[
-                    TextContent(
-                        type="text",
-                        text=f"Invalid arguments for {params.name}: {exc.message}",
-                    )
-                ],
-                isError=True,
+            return _tool_error(
+                "invalid_arguments",
+                f"Invalid arguments for {params.name}: {exc.message}",
             )
 
         try:
             content = await handler(arguments)
+            structured_content, is_error = _structured_tool_result(params.name, content)
         except Exception as exc:
             logger.warning("Tool %s failed: %s", params.name, exc)
-            return CallToolResult(
-                content=[TextContent(type="text", text=str(exc))],
-                isError=True,
-            )
+            return _tool_error("tool_execution_error", str(exc))
 
-        return CallToolResult(content=cast(list[ContentBlock], content))
+        return CallToolResult(
+            content=cast(list[ContentBlock], content),
+            structured_content=structured_content,
+            is_error=is_error,
+        )
 
     def _create_get_database_info_tool(self) -> Tool:
         """Create get_database_info tool."""
-        return Tool(
+        return _read_only_tool(
             name="get_database_info",
-            description="Get database information including version, size, and capabilities",
-            inputSchema={
+            title="Get Database Information",
+            description=(
+                "Get the configured database's version, dialect, read-only state, "
+                "sanitized connection URL, and supported capabilities."
+            ),
+            input_schema={
                 "type": "object",
                 "properties": {},
                 "required": [],
+                "additionalProperties": False,
             },
+            output_schema=_model_output_schema(DatabaseInfo),
         )
 
     def _create_list_schemas_tool(self) -> Tool:
         """Create list_schemas tool."""
-        return Tool(
+        return _read_only_tool(
             name="list_schemas",
-            description="List all schemas/databases in the database instance",
-            inputSchema={
+            title="List Schemas",
+            description="List schemas or databases visible to the configured user.",
+            input_schema={
                 "type": "object",
                 "properties": {},
                 "required": [],
+                "additionalProperties": False,
             },
+            output_schema=_list_output_schema(SchemaInfo),
         )
 
     def _create_list_tables_tool(self) -> Tool:
         """Create list_tables tool."""
-        return Tool(
+        return _read_only_tool(
             name="list_tables",
-            description="List all tables and views in a schema",
-            inputSchema={
+            title="List Tables",
+            description="List tables and optionally views in a database schema.",
+            input_schema={
                 "type": "object",
                 "properties": {
                     "schema": {
                         "type": "string",
+                        "minLength": 1,
                         "description": "Schema name (optional, uses default if not specified)",
                     },
                     "include_views": {
@@ -610,119 +749,179 @@ class DatabaseMCPServer:
                     },
                 },
                 "required": [],
+                "additionalProperties": False,
             },
+            output_schema=_list_output_schema(TableInfo),
         )
 
     def _create_describe_table_tool(self) -> Tool:
         """Create describe_table tool."""
-        return Tool(
+        return _read_only_tool(
             name="describe_table",
-            description="Get comprehensive table information including columns, indexes, and constraints",
-            inputSchema={
+            title="Describe Table",
+            description=(
+                "Get a table's columns, indexes, constraints, comments, and size "
+                "metadata."
+            ),
+            input_schema={
                 "type": "object",
                 "properties": {
-                    "table": {"type": "string", "description": "Table name"},
+                    "table": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Table name",
+                    },
                     "schema": {
                         "type": "string",
+                        "minLength": 1,
                         "description": "Schema name (optional)",
                     },
                 },
                 "required": ["table"],
+                "additionalProperties": False,
             },
+            output_schema=_model_output_schema(TableInfo),
         )
 
     def _create_execute_query_tool(self) -> Tool:
         """Create execute_query tool."""
-        return Tool(
+        return _read_only_tool(
             name="execute_query",
-            description="Execute a read-only SQL query (SELECT, WITH, EXPLAIN)",
-            inputSchema={
+            title="Execute Read-Only Query",
+            description=(
+                "Execute a bounded read-only SELECT, WITH, or EXPLAIN query and "
+                "return rows with execution metadata."
+            ),
+            input_schema={
                 "type": "object",
                 "properties": {
                     "query": {
                         "type": "string",
+                        "minLength": 1,
                         "description": "SQL query to execute",
                     },
                     "limit": {
                         "type": "integer",
                         "description": "Maximum number of rows to return (default: 1000)",
                         "default": 1000,
+                        "minimum": 1,
+                        "maximum": 10000,
                     },
                 },
                 "required": ["query"],
+                "additionalProperties": False,
             },
+            output_schema=_model_output_schema(QueryResult),
         )
 
     def _create_sample_data_tool(self) -> Tool:
         """Create sample_data tool."""
-        return Tool(
+        return _read_only_tool(
             name="sample_data",
-            description="Sample data from a table efficiently",
-            inputSchema={
+            title="Sample Table Data",
+            description="Return a bounded preview of rows from a table.",
+            input_schema={
                 "type": "object",
                 "properties": {
-                    "table": {"type": "string", "description": "Table name"},
+                    "table": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Table name",
+                    },
                     "schema": {
                         "type": "string",
+                        "minLength": 1,
                         "description": "Schema name (optional)",
                     },
                     "limit": {
                         "type": "integer",
                         "description": "Number of rows to sample (default: 100)",
                         "default": 100,
+                        "minimum": 1,
+                        "maximum": 1000,
                     },
                 },
                 "required": ["table"],
+                "additionalProperties": False,
             },
+            output_schema=_model_output_schema(QueryResult),
         )
 
     def _create_get_relationships_tool(self) -> Tool:
         """Create get_table_relationships tool."""
-        return Tool(
+        return _read_only_tool(
             name="get_table_relationships",
-            description="Get foreign key relationships for a table",
-            inputSchema={
+            title="Get Table Relationships",
+            description="List the foreign-key relationships for a table.",
+            input_schema={
                 "type": "object",
                 "properties": {
-                    "table": {"type": "string", "description": "Table name"},
+                    "table": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Table name",
+                    },
                     "schema": {
                         "type": "string",
+                        "minLength": 1,
                         "description": "Schema name (optional)",
                     },
                 },
                 "required": ["table"],
+                "additionalProperties": False,
             },
+            output_schema=_list_output_schema(RelationshipInfo),
         )
 
     def _create_analyze_column_tool(self) -> Tool:
         """Create analyze_column tool."""
-        return Tool(
+        return _read_only_tool(
             name="analyze_column",
-            description="Get comprehensive column statistics including percentiles and distributions",
-            inputSchema={
+            title="Analyze Column",
+            description=(
+                "Calculate column statistics including nulls, distinct values, "
+                "percentiles, and common values."
+            ),
+            input_schema={
                 "type": "object",
                 "properties": {
-                    "table": {"type": "string", "description": "Table name"},
-                    "column": {"type": "string", "description": "Column name"},
+                    "table": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Table name",
+                    },
+                    "column": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Column name",
+                    },
                     "schema": {
                         "type": "string",
+                        "minLength": 1,
                         "description": "Schema name (optional)",
                     },
                 },
                 "required": ["table", "column"],
+                "additionalProperties": False,
             },
+            output_schema=_model_output_schema(ColumnStats),
         )
 
     def _create_explain_query_tool(self) -> Tool:
         """Create explain_query tool."""
-        return Tool(
+        return _read_only_tool(
             name="explain_query",
-            description="Get query execution plan to analyze performance",
-            inputSchema={
+            title="Explain Query",
+            description=(
+                "Inspect a query execution plan. Setting analyze=true executes "
+                "the read-only query to collect runtime statistics."
+            ),
+            input_schema={
                 "type": "object",
                 "properties": {
                     "query": {
                         "type": "string",
+                        "minLength": 1,
                         "description": "SQL query to explain",
                     },
                     "analyze": {
@@ -732,7 +931,9 @@ class DatabaseMCPServer:
                     },
                 },
                 "required": ["query"],
+                "additionalProperties": False,
             },
+            output_schema=_model_output_schema(ExplainPlan),
         )
 
     def _create_search_objects_tool(self) -> Tool:
@@ -743,8 +944,9 @@ class DatabaseMCPServer:
         Three detail levels (``names`` / ``summary`` / ``full``) let the
         caller trade verbosity for tokens.
         """
-        return Tool(
+        return _read_only_tool(
             name="search_objects",
+            title="Search Database Objects",
             description=(
                 "Search and explore database objects (schemas, tables, views, "
                 "columns, indexes) with progressive disclosure for token "
@@ -755,11 +957,12 @@ class DatabaseMCPServer:
                 "For column/index search, narrow with `schema` (and optionally "
                 "`table`) to avoid the per-call table cap."
             ),
-            inputSchema={
+            input_schema={
                 "type": "object",
                 "properties": {
                     "pattern": {
                         "type": "string",
+                        "minLength": 1,
                         "description": (
                             "SQL LIKE pattern to match object names. Use '%' "
                             "to match all, '%user%' for substring, '_d' for "
@@ -768,6 +971,8 @@ class DatabaseMCPServer:
                     },
                     "object_types": {
                         "type": "array",
+                        "minItems": 1,
+                        "uniqueItems": True,
                         "items": {
                             "type": "string",
                             "enum": [
@@ -796,6 +1001,7 @@ class DatabaseMCPServer:
                     },
                     "schema": {
                         "type": "string",
+                        "minLength": 1,
                         "description": (
                             "Restrict search to a specific schema. Strongly "
                             "recommended when searching columns or indexes."
@@ -803,6 +1009,7 @@ class DatabaseMCPServer:
                     },
                     "table": {
                         "type": "string",
+                        "minLength": 1,
                         "description": (
                             "Restrict column/index search to a specific table. "
                             "Without `schema`, matches a table of that name in "
@@ -821,7 +1028,9 @@ class DatabaseMCPServer:
                     },
                 },
                 "required": ["pattern"],
+                "additionalProperties": False,
             },
+            output_schema=_model_output_schema(SearchResults),
         )
 
     # Tool handlers
@@ -840,8 +1049,6 @@ class DatabaseMCPServer:
             sanitized_url = f"<credentials>@{url_parts[-1]}"
         else:
             sanitized_url = self.config.url
-
-        from db_connect_mcp.models.database import DatabaseInfo
 
         db_info = DatabaseInfo(
             name=self.config.url.split("/")[-1],  # Extract DB name from URL

@@ -431,6 +431,12 @@ The same database URL formats and SSH tunnel environment variables shown in the 
 
 ## Available Tools
 
+All tools publish JSON Schema input and output contracts, read-only behavior
+annotations, and machine-readable structured results. The same result remains
+available as JSON text for clients that do not yet consume MCP structured
+content. Structured list results use an `items` envelope while their legacy
+text form remains a JSON array.
+
 ### get_database_info
 
 Get database metadata, including the dialect, version, connection details,
