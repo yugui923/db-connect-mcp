@@ -74,11 +74,14 @@ class MySQLAdapter(BaseAdapter):
                 create_time,
                 update_time
             FROM information_schema.TABLES
-            WHERE table_schema = DATABASE()
+            WHERE table_schema = COALESCE(:schema_name, DATABASE())
               AND table_name = :table_name
         """)
 
-        result = await conn.execute(query, {"table_name": table_info.name})
+        result = await conn.execute(
+            query,
+            {"schema_name": table_info.schema, "table_name": table_info.name},
+        )
         row = result.fetchone()
 
         if row:
@@ -108,13 +111,15 @@ class MySQLAdapter(BaseAdapter):
                 COLUMN_NAME,
                 COLUMN_COMMENT
             FROM information_schema.COLUMNS
-            WHERE TABLE_SCHEMA = DATABASE()
+            WHERE TABLE_SCHEMA = COALESCE(:schema_name, DATABASE())
               AND TABLE_NAME = :table_name
               AND COLUMN_COMMENT != ''
         """)
 
         try:
-            result = await conn.execute(query, {"table_name": table_name})
+            result = await conn.execute(
+                query, {"schema_name": schema, "table_name": table_name}
+            )
             rows = result.fetchall()
 
             # Build lookup dict
@@ -190,13 +195,18 @@ class MySQLAdapter(BaseAdapter):
             type_query = text("""
                 SELECT data_type
                 FROM information_schema.COLUMNS
-                WHERE table_schema = DATABASE()
+                WHERE table_schema = COALESCE(:schema_name, DATABASE())
                   AND table_name = :table_name
                   AND column_name = :column_name
             """)
 
             type_result = await conn.execute(
-                type_query, {"table_name": table_name, "column_name": column_name}
+                type_query,
+                {
+                    "schema_name": schema,
+                    "table_name": table_name,
+                    "column_name": column_name,
+                },
             )
             type_row = type_result.fetchone()
             data_type = type_row[0] if type_row else "unknown"

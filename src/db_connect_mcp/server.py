@@ -19,9 +19,15 @@ from mcp.types import (
     CallToolRequestParams,
     CallToolResult,
     ContentBlock,
+    ListResourceTemplatesResult,
+    ListResourcesResult,
     ListToolsResult,
     PaginatedRequestParams,
+    ReadResourceRequestParams,
+    ReadResourceResult,
+    ResourceTemplate,
     TextContent,
+    TextResourceContents,
     Tool,
     ToolAnnotations,
 )
@@ -31,10 +37,12 @@ from db_connect_mcp import __version__
 from db_connect_mcp.adapters import create_adapter
 from db_connect_mcp.core import (
     DatabaseConnection,
+    DatabaseResourceCatalog,
     MetadataInspector,
     ObjectSearcher,
     QueryExecutor,
     StatisticsAnalyzer,
+    paginate_resources,
 )
 from db_connect_mcp.models.config import DatabaseConfig, SSHTunnelConfig
 from db_connect_mcp.models.database import DatabaseInfo, SchemaInfo
@@ -68,6 +76,10 @@ MAX_RESPONSE_DESCRIBE_TABLE = 100000  # Detailed table structure
 MAX_RESPONSE_EXPLAIN_QUERY = 100000  # Query execution plans
 MAX_RESPONSE_EXECUTE_QUERY = 100000  # Query results (up to 1000 rows)
 MAX_RESPONSE_SEARCH_OBJECTS = 100000  # Cross-cutting object search results
+MAX_RESOURCE_CONTENT = 100000  # Individual schema or table resource
+
+TOOL_CATALOG_TTL_MS = 3600000
+RESOURCE_CATALOG_TTL_MS = 30000
 
 LIST_RESULT_TOOLS = {
     "get_table_relationships",
@@ -569,6 +581,7 @@ class DatabaseMCPServer:
         self.executor: Optional[QueryExecutor] = None
         self.analyzer: Optional[StatisticsAnalyzer] = None
         self.searcher: Optional[ObjectSearcher] = None
+        self.resource_catalog: DatabaseResourceCatalog | None = None
         self.server = Server(
             "db-connect-mcp",
             version=__version__,
@@ -585,6 +598,9 @@ class DatabaseMCPServer:
             website_url="https://github.com/yugui923/db-connect-mcp",
             on_list_tools=self._list_tools,
             on_call_tool=self._call_tool,
+            on_list_resources=self._list_resources,
+            on_list_resource_templates=self._list_resource_templates,
+            on_read_resource=self._read_resource,
         )
 
     async def initialize(self) -> None:
@@ -595,6 +611,12 @@ class DatabaseMCPServer:
         self.executor = QueryExecutor(self.connection, self.adapter)
         self.analyzer = StatisticsAnalyzer(self.connection, self.adapter)
         self.searcher = ObjectSearcher(self.inspector)
+        self.resource_catalog = DatabaseResourceCatalog(
+            self.config,
+            self.connection,
+            self.adapter,
+            self.inspector,
+        )
 
         # Register MCP tool handlers
         await self._register_tools()
@@ -616,7 +638,83 @@ class DatabaseMCPServer:
         _params: PaginatedRequestParams | None,
     ) -> ListToolsResult:
         """List tools supported by the configured database."""
-        return ListToolsResult(tools=self._available_tools())
+        return ListToolsResult(
+            tools=self._available_tools(),
+            ttl_ms=TOOL_CATALOG_TTL_MS,
+            cache_scope="private",
+        )
+
+    async def _list_resources(
+        self,
+        _ctx: ServerRequestContext[Any],
+        params: PaginatedRequestParams | None,
+    ) -> ListResourcesResult:
+        """List a stable page of database metadata resources."""
+        if self.resource_catalog is None:
+            raise RuntimeError("Server not initialized")
+
+        resources = await self.resource_catalog.list()
+        page, next_cursor = paginate_resources(
+            resources, params.cursor if params is not None else None
+        )
+        return ListResourcesResult(
+            resources=page,
+            next_cursor=next_cursor,
+            ttl_ms=RESOURCE_CATALOG_TTL_MS,
+            cache_scope="private",
+        )
+
+    async def _read_resource(
+        self,
+        _ctx: ServerRequestContext[Any],
+        params: ReadResourceRequestParams,
+    ) -> ReadResourceResult:
+        """Read one database metadata resource as JSON."""
+        if self.resource_catalog is None:
+            raise RuntimeError("Server not initialized")
+
+        payload = await self.resource_catalog.read(params.uri)
+        text_content = truncate_json_response(
+            json.dumps(payload, indent=2), MAX_RESOURCE_CONTENT
+        )
+        return ReadResourceResult(
+            contents=[
+                TextResourceContents(
+                    uri=params.uri,
+                    mime_type="application/json",
+                    text=text_content,
+                )
+            ],
+            ttl_ms=RESOURCE_CATALOG_TTL_MS,
+            cache_scope="private",
+        )
+
+    async def _list_resource_templates(
+        self,
+        _ctx: ServerRequestContext[Any],
+        _params: PaginatedRequestParams | None,
+    ) -> ListResourceTemplatesResult:
+        """List URI templates for direct schema and table context access."""
+        return ListResourceTemplatesResult(
+            resource_templates=[
+                ResourceTemplate(
+                    uri_template="db-connect://schema/{schema}",
+                    name="database-schema",
+                    title="Database Schema",
+                    description="Schema counts and metadata",
+                    mime_type="application/json",
+                ),
+                ResourceTemplate(
+                    uri_template="db-connect://table/{schema}/{table}",
+                    name="database-table",
+                    title="Database Table",
+                    description="Columns, indexes, constraints, and comments",
+                    mime_type="application/json",
+                ),
+            ],
+            ttl_ms=TOOL_CATALOG_TTL_MS,
+            cache_scope="private",
+        )
 
     def _available_tools(self) -> list[Tool]:
         """Build the tool surface supported by the configured database."""
@@ -1038,31 +1136,10 @@ class DatabaseMCPServer:
         self, arguments: dict[str, Any]
     ) -> list[TextContent]:
         """Handle get_database_info request."""
-        if self.inspector is None:
+        if self.resource_catalog is None:
             raise RuntimeError("Server not initialized")
 
-        version = await self.connection.get_version()
-
-        # Sanitize connection URL (remove password)
-        url_parts = self.config.url.split("@")
-        if len(url_parts) > 1:
-            sanitized_url = f"<credentials>@{url_parts[-1]}"
-        else:
-            sanitized_url = self.config.url
-
-        db_info = DatabaseInfo(
-            name=self.config.url.split("/")[-1],  # Extract DB name from URL
-            dialect=self.config.dialect,
-            version=version,
-            size_bytes=None,
-            schema_count=None,
-            table_count=None,
-            capabilities=self.adapter.capabilities,
-            server_encoding=None,
-            collation=None,
-            connection_url=sanitized_url,
-            read_only=self.config.read_only,
-        )
+        db_info = await self.resource_catalog.get_database_info()
 
         response = json.dumps(db_info.model_dump(mode="json"), indent=2)
         return [
