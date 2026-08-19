@@ -77,6 +77,13 @@ A read-only MCP (Model Context Protocol) server for exploratory data analysis ac
 - **Connection string safety** - Automatically adds read-only parameters
 - **Database-specific safety** - Each adapter implements appropriate safety measures
 
+### 🔭 Observability
+
+db-connect-mcp inherits the MCP SDK's built-in OpenTelemetry server
+instrumentation. The API is a no-op until the launching process configures an
+SDK and exporter. Review exporter sampling and redaction before production use,
+because database identifiers and error details may be sensitive.
+
 ### 💡 Best Practices
 
 > **Tip:** db-connect-mcp works best with databases that have **proper comments on tables and columns**. When your database includes descriptive comments, the MCP server can provide richer context to AI assistants, leading to better understanding of your data model and more accurate query suggestions.
