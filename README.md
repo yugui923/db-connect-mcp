@@ -79,13 +79,10 @@ A read-only MCP (Model Context Protocol) server for exploratory data analysis ac
 
 ### 🔭 Observability
 
-MCP tool and resource operations create OpenTelemetry server spans using the
-current GenAI MCP semantic attributes. Spans record the operation, protocol
-version, tool name, resource URI, and low-cardinality error type. They do not
-record SQL arguments, query results, or exception messages.
-
-The OpenTelemetry API is a no-op by default. Configure an SDK and exporter in
-the process that launches db-connect-mcp when trace collection is wanted.
+db-connect-mcp inherits the MCP SDK's built-in OpenTelemetry server
+instrumentation. The API is a no-op until the launching process configures an
+SDK and exporter. Review exporter sampling and redaction before production use,
+because database identifiers and error details may be sensitive.
 
 ### 💡 Best Practices
 

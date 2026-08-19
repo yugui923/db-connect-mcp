@@ -54,7 +54,6 @@ from db_connect_mcp.models.search import (
 )
 from db_connect_mcp.models.statistics import ColumnStats
 from db_connect_mcp.models.table import RelationshipInfo, TableInfo
-from db_connect_mcp.telemetry import record_mcp_error, start_mcp_server_span
 
 # Load environment variables
 load_dotenv()
@@ -639,14 +638,11 @@ class DatabaseMCPServer:
         _params: PaginatedRequestParams | None,
     ) -> ListToolsResult:
         """List tools supported by the configured database."""
-        with start_mcp_server_span(
-            "tools/list", protocol_version=_ctx.protocol_version
-        ):
-            return ListToolsResult(
-                tools=self._available_tools(),
-                ttl_ms=TOOL_CATALOG_TTL_MS,
-                cache_scope="private",
-            )
+        return ListToolsResult(
+            tools=self._available_tools(),
+            ttl_ms=TOOL_CATALOG_TTL_MS,
+            cache_scope="private",
+        )
 
     async def _list_resources(
         self,
@@ -654,22 +650,19 @@ class DatabaseMCPServer:
         params: PaginatedRequestParams | None,
     ) -> ListResourcesResult:
         """List a stable page of database metadata resources."""
-        with start_mcp_server_span(
-            "resources/list", protocol_version=_ctx.protocol_version
-        ):
-            if self.resource_catalog is None:
-                raise RuntimeError("Server not initialized")
+        if self.resource_catalog is None:
+            raise RuntimeError("Server not initialized")
 
-            resources = await self.resource_catalog.list()
-            page, next_cursor = paginate_resources(
-                resources, params.cursor if params is not None else None
-            )
-            return ListResourcesResult(
-                resources=page,
-                next_cursor=next_cursor,
-                ttl_ms=RESOURCE_CATALOG_TTL_MS,
-                cache_scope="private",
-            )
+        resources = await self.resource_catalog.list()
+        page, next_cursor = paginate_resources(
+            resources, params.cursor if params is not None else None
+        )
+        return ListResourcesResult(
+            resources=page,
+            next_cursor=next_cursor,
+            ttl_ms=RESOURCE_CATALOG_TTL_MS,
+            cache_scope="private",
+        )
 
     async def _read_resource(
         self,
@@ -677,29 +670,24 @@ class DatabaseMCPServer:
         params: ReadResourceRequestParams,
     ) -> ReadResourceResult:
         """Read one database metadata resource as JSON."""
-        with start_mcp_server_span(
-            "resources/read",
-            protocol_version=_ctx.protocol_version,
-            resource_uri=params.uri,
-        ):
-            if self.resource_catalog is None:
-                raise RuntimeError("Server not initialized")
+        if self.resource_catalog is None:
+            raise RuntimeError("Server not initialized")
 
-            payload = await self.resource_catalog.read(params.uri)
-            text_content = truncate_json_response(
-                json.dumps(payload, indent=2), MAX_RESOURCE_CONTENT
-            )
-            return ReadResourceResult(
-                contents=[
-                    TextResourceContents(
-                        uri=params.uri,
-                        mime_type="application/json",
-                        text=text_content,
-                    )
-                ],
-                ttl_ms=RESOURCE_CATALOG_TTL_MS,
-                cache_scope="private",
-            )
+        payload = await self.resource_catalog.read(params.uri)
+        text_content = truncate_json_response(
+            json.dumps(payload, indent=2), MAX_RESOURCE_CONTENT
+        )
+        return ReadResourceResult(
+            contents=[
+                TextResourceContents(
+                    uri=params.uri,
+                    mime_type="application/json",
+                    text=text_content,
+                )
+            ],
+            ttl_ms=RESOURCE_CATALOG_TTL_MS,
+            cache_scope="private",
+        )
 
     async def _list_resource_templates(
         self,
@@ -707,29 +695,26 @@ class DatabaseMCPServer:
         _params: PaginatedRequestParams | None,
     ) -> ListResourceTemplatesResult:
         """List URI templates for direct schema and table context access."""
-        with start_mcp_server_span(
-            "resources/templates/list", protocol_version=_ctx.protocol_version
-        ):
-            return ListResourceTemplatesResult(
-                resource_templates=[
-                    ResourceTemplate(
-                        uri_template="db-connect://schema/{schema}",
-                        name="database-schema",
-                        title="Database Schema",
-                        description="Schema counts and metadata",
-                        mime_type="application/json",
-                    ),
-                    ResourceTemplate(
-                        uri_template="db-connect://table/{schema}/{table}",
-                        name="database-table",
-                        title="Database Table",
-                        description="Columns, indexes, constraints, and comments",
-                        mime_type="application/json",
-                    ),
-                ],
-                ttl_ms=TOOL_CATALOG_TTL_MS,
-                cache_scope="private",
-            )
+        return ListResourceTemplatesResult(
+            resource_templates=[
+                ResourceTemplate(
+                    uri_template="db-connect://schema/{schema}",
+                    name="database-schema",
+                    title="Database Schema",
+                    description="Schema counts and metadata",
+                    mime_type="application/json",
+                ),
+                ResourceTemplate(
+                    uri_template="db-connect://table/{schema}/{table}",
+                    name="database-table",
+                    title="Database Table",
+                    description="Columns, indexes, constraints, and comments",
+                    mime_type="application/json",
+                ),
+            ],
+            ttl_ms=TOOL_CATALOG_TTL_MS,
+            cache_scope="private",
+        )
 
     def _available_tools(self) -> list[Tool]:
         """Build the tool surface supported by the configured database."""
@@ -756,22 +741,7 @@ class DatabaseMCPServer:
 
     async def _call_tool(
         self,
-        ctx: ServerRequestContext[Any],
-        params: CallToolRequestParams,
-    ) -> CallToolResult:
-        """Trace and dispatch an MCP tool call."""
-        with start_mcp_server_span(
-            "tools/call",
-            target=params.name,
-            protocol_version=ctx.protocol_version,
-        ) as span:
-            result = await self._dispatch_tool(params)
-            if result.is_error:
-                record_mcp_error(span, "tool_error")
-            return result
-
-    async def _dispatch_tool(
-        self,
+        _ctx: ServerRequestContext[Any],
         params: CallToolRequestParams,
     ) -> CallToolResult:
         """Dispatch a tool call while preserving model-visible error results."""

@@ -51,7 +51,6 @@ dependencies = [
     "urllib3>=2.7.0",  # CVE-2025-66418, CVE-2025-66471, CVE-2026-21441: decompression bomb fixes
     "python-multipart>=0.0.32",  # CVE-2026-24486: path traversal fix
     "cryptography>=49.0.0",  # CVE-2026-26007, CVE-2026-34073: ECC + DNS constraint fixes
-    "opentelemetry-api>=1.44.0,<2.0.0",
 ]
 
 [project.urls]
