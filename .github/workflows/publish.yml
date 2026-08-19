@@ -25,6 +25,11 @@ jobs:
         with:
           python-version: "3.13"
 
+      - name: Verify release metadata
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: python scripts/verify_release_metadata.py --tag "$RELEASE_TAG"
+
       - name: Build distributions
         run: uv build
 

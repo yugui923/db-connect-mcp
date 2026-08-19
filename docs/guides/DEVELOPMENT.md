@@ -304,11 +304,12 @@ python -m build
 
 ### Version Bumping
 
-Update version in `pyproject.toml`:
+Update the canonical version in `pyproject.toml`, then synchronize
+`src/db_connect_mcp/__init__.py`, `server.json`, `manifest.json`, and `uv.lock`.
+Verify the result before tagging:
 
-```toml
-[project]
-version = "0.2.0"  # Update this
+```bash
+python scripts/verify_release_metadata.py --tag vX.Y.Z
 ```
 
 ### Publishing to PyPI
@@ -324,7 +325,8 @@ uv publish --publish-url https://test.pypi.org/legacy/
 uv publish
 ```
 
-Or use GitHub Actions workflow (`.github/workflows/publish.yml`).
+Production releases use the GitHub Actions workflow
+(`.github/workflows/publish.yml`) when a matching `vX.Y.Z` tag is pushed.
 
 ## Troubleshooting
 

@@ -74,6 +74,9 @@ jobs:
       - name: Verify Python version
         run: .venv/bin/python -c 'import sys; assert sys.version_info[:2] == (3, 13), sys.version'
 
+      - name: Verify release metadata
+        run: .venv/bin/python scripts/verify_release_metadata.py
+
       - name: Initialize PostgreSQL test database
         env:
           PGPASSWORD: testpass
