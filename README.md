@@ -77,6 +77,16 @@ A read-only MCP (Model Context Protocol) server for exploratory data analysis ac
 - **Connection string safety** - Automatically adds read-only parameters
 - **Database-specific safety** - Each adapter implements appropriate safety measures
 
+### 🔭 Observability
+
+MCP tool and resource operations create OpenTelemetry server spans using the
+current GenAI MCP semantic attributes. Spans record the operation, protocol
+version, tool name, resource URI, and low-cardinality error type. They do not
+record SQL arguments, query results, or exception messages.
+
+The OpenTelemetry API is a no-op by default. Configure an SDK and exporter in
+the process that launches db-connect-mcp when trace collection is wanted.
+
 ### 💡 Best Practices
 
 > **Tip:** db-connect-mcp works best with databases that have **proper comments on tables and columns**. When your database includes descriptive comments, the MCP server can provide richer context to AI assistants, leading to better understanding of your data model and more accurate query suggestions.

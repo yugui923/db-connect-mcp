@@ -892,7 +892,6 @@ class TestErrorHandling:
 # =============================================================================
 
 
-@pytest.mark.skip(reason="Live server tests timeout in CI - run manually")
 class TestRealHTTPClient:
     """Tests using real HTTP client against live server.
 
@@ -934,7 +933,10 @@ class TestRealHTTPClient:
                 # With auth - should succeed
                 response = client.get(
                     f"{base_url}/mcp",
-                    headers={"Authorization": f"Bearer {auth_token}"},
+                    headers={
+                        "Accept": "application/json",
+                        "Authorization": f"Bearer {auth_token}",
+                    },
                 )
                 assert response.status_code != 401
 
@@ -1005,7 +1007,6 @@ class TestRealHTTPClient:
 # =============================================================================
 
 
-@pytest.mark.skip(reason="Live server tests timeout in CI - run manually")
 class TestAsyncHTTPClient:
     """Tests using async HTTP client."""
 
