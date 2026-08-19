@@ -15,7 +15,7 @@ SPEC.loader.exec_module(MODULE)
 
 
 def test_release_metadata_is_synchronized() -> None:
-    assert MODULE.verify_release_metadata() == "0.8.0"
+    assert MODULE.verify_release_metadata() == "0.9.0"
 
 
 def test_release_tag_must_match_metadata() -> None:

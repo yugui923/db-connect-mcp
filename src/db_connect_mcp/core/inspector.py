@@ -79,7 +79,9 @@ class MetadataInspector:
                 schema_info = await self.adapter.enrich_schema_info(conn, schema_info)
                 result.append(schema_info)
 
-            return result
+            return sorted(
+                result, key=lambda schema: (schema.name.casefold(), schema.name)
+            )
 
     async def get_tables(
         self, schema: Optional[str] = None, include_views: bool = True
@@ -127,7 +129,15 @@ class MetadataInspector:
                 table_info = await self.adapter.enrich_table_info(conn, table_info)
                 tables.append(table_info)
 
-            return tables
+            return sorted(
+                tables,
+                key=lambda table: (
+                    (table.schema or "").casefold(),
+                    table.name.casefold(),
+                    table.table_type,
+                    table.name,
+                ),
+            )
 
     async def describe_table(
         self, table_name: str, schema: Optional[str] = None
@@ -305,7 +315,18 @@ class MetadataInspector:
                 )
                 relationships.append(rel)
 
-            return relationships
+            return sorted(
+                relationships,
+                key=lambda relationship: (
+                    (relationship.from_schema or "").casefold(),
+                    relationship.from_table.casefold(),
+                    tuple(relationship.from_columns),
+                    (relationship.to_schema or "").casefold(),
+                    relationship.to_table.casefold(),
+                    tuple(relationship.to_columns),
+                    relationship.constraint_name,
+                ),
+            )
 
     def _column_from_sa(self, col_data: dict) -> ColumnInfo:
         """Convert SQLAlchemy column data to ColumnInfo."""

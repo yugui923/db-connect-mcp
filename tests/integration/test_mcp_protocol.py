@@ -212,6 +212,7 @@ class TestMCPServerLifecycle:
             assert result is not None
             assert "2026-07-28" in result.supported_versions
             assert result.capabilities.tools is not None
+            assert result.capabilities.resources is not None
             assert result.instructions is not None
             assert "search_objects" in result.instructions
 
@@ -248,6 +249,22 @@ class TestMCPToolRegistration:
             assert "execute_query" in tool_names
             assert "sample_data" in tool_names
 
+        finally:
+            await server.cleanup()
+
+    @pytest.mark.asyncio
+    async def test_tool_catalog_has_private_cache_hint(
+        self, pg_config: DatabaseConfig
+    ) -> None:
+        """Modern clients receive a cache hint for the stable tool catalog."""
+        server, client = await MCPProtocolHelper.create_test_server_and_client(
+            pg_config, use_discovery=True
+        )
+
+        try:
+            response = await client.list_tools()
+            assert response.ttl_ms == 3_600_000
+            assert response.cache_scope == "private"
         finally:
             await server.cleanup()
 
@@ -405,6 +422,53 @@ class TestMCPToolCalls:
             assert data["rows"][0]["test_col"] == 1
             assert response.structured_content == data
 
+        finally:
+            await server.cleanup()
+
+
+class TestMCPResources:
+    """Test database context exposed through MCP resources."""
+
+    @pytest.mark.asyncio
+    async def test_resource_catalog_and_reads(self, pg_config: DatabaseConfig) -> None:
+        """Catalog resources are stable, cacheable, and readable as JSON."""
+        server, client = await MCPProtocolHelper.create_test_server_and_client(
+            pg_config, use_discovery=True
+        )
+
+        try:
+            response = await client.list_resources()
+            uris = [resource.uri for resource in response.resources]
+
+            assert uris == sorted(uris)
+            assert "db-connect://database" in uris
+            assert "db-connect://schema/public" in uris
+            assert "db-connect://table/public/products" in uris
+            assert response.ttl_ms == 30_000
+            assert response.cache_scope == "private"
+
+            templates_response = await client.list_resource_templates()
+            templates = {
+                template.uri_template
+                for template in templates_response.resource_templates
+            }
+            assert "db-connect://schema/{schema}" in templates
+            assert "db-connect://table/{schema}/{table}" in templates
+            assert templates_response.ttl_ms == 3_600_000
+            assert templates_response.cache_scope == "private"
+
+            read_response = await client.read_resource(
+                "db-connect://table/public/products"
+            )
+            assert read_response.ttl_ms == 30_000
+            assert read_response.cache_scope == "private"
+            assert len(read_response.contents) == 1
+            contents = read_response.contents[0]
+            assert contents.mime_type == "application/json"
+            table = json.loads(contents.text)
+            assert table["name"] == "products"
+            assert table["schema"] == "public"
+            assert table["columns"]
         finally:
             await server.cleanup()
 

@@ -429,6 +429,23 @@ The same database URL formats and SSH tunnel environment variables shown in the 
 | Column Stats | ✅ Full    | ✅ Full  | ✅ Full    |
 | Sampling     | ✅ Full    | ✅ Full  | ✅ Full    |
 
+## MCP Resources
+
+Modern MCP clients can discover database context as private, cache-aware JSON
+resources in addition to calling tools:
+
+- `db-connect://database` — database identity, dialect, and capabilities
+- `db-connect://schema/{schema}` — schema counts and metadata
+- `db-connect://table/{schema}/{table}` — columns, indexes, constraints, and comments
+
+The schema and table forms are also advertised as resource templates for direct
+access when the identifier is already known.
+
+Resource catalogs are URI-sorted and cursor-paginated in pages of 100. Cursors
+are tied to a catalog snapshot; if schemas or tables change between pages, the
+server asks the client to restart pagination instead of returning an
+inconsistent traversal.
+
 ## Available Tools
 
 All tools publish JSON Schema input and output contracts, read-only behavior

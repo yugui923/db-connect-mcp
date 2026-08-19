@@ -261,6 +261,15 @@ class ObjectSearcher:
         early_termination: bool,
         notes: list[str],
     ) -> SearchResults:
+        results.sort(
+            key=lambda item: (
+                item.object_type,
+                (item.schema or "").casefold(),
+                (item.table or "").casefold(),
+                item.name.casefold(),
+                item.name,
+            )
+        )
         total = len(results)
         truncated = total > limit
         if truncated:
