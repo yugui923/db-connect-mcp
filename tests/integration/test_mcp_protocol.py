@@ -17,9 +17,11 @@ from typing import Any
 
 import anyio
 import pytest
+from jsonschema import Draft202012Validator
 from mcp import ClientSession
 from mcp.types import TextContent
 
+from db_connect_mcp import __version__
 from db_connect_mcp.models.config import DatabaseConfig
 from db_connect_mcp.server import DatabaseMCPServer
 
@@ -41,6 +43,8 @@ class MCPProtocolHelper:
     @staticmethod
     async def create_test_server_and_client(
         config: DatabaseConfig,
+        *,
+        use_discovery: bool = False,
     ) -> tuple[DatabaseMCPServer, ClientSession]:
         """Create a test server and connected client for testing.
 
@@ -86,9 +90,12 @@ class MCPProtocolHelper:
         await server_task.__aenter__()
         server_task.start_soon(run_server)
 
-        # Initialize client
+        # Negotiate the protocol using the requested handshake.
         await client.__aenter__()
-        await client.initialize()
+        if use_discovery:
+            await client.discover()
+        else:
+            await client.initialize()
 
         return server, client
 
@@ -193,6 +200,29 @@ class TestMCPServerLifecycle:
             async with server.connection.get_connection():
                 pass
 
+    @pytest.mark.asyncio
+    async def test_modern_server_discovery(self, pg_config: DatabaseConfig):
+        """Test 2026-era discovery advertises identity and tool capabilities."""
+        server, client = await MCPProtocolHelper.create_test_server_and_client(
+            pg_config, use_discovery=True
+        )
+
+        try:
+            result = client.discover_result
+            assert result is not None
+            assert "2026-07-28" in result.supported_versions
+            assert result.capabilities.tools is not None
+            assert result.instructions is not None
+            assert "search_objects" in result.instructions
+
+            server_info = client.server_info
+            assert server_info is not None
+            assert server_info.name == "db-connect-mcp"
+            assert server_info.version == __version__
+            assert server_info.title == "DB Connect MCP"
+        finally:
+            await server.cleanup()
+
 
 class TestMCPToolRegistration:
     """Test MCP tool registration based on database capabilities."""
@@ -259,6 +289,17 @@ class TestMCPToolRegistration:
                 assert tool.input_schema["type"] == "object"
                 assert "properties" in tool.input_schema
                 assert "required" in tool.input_schema
+                assert tool.input_schema["additionalProperties"] is False
+
+                assert tool.title
+                assert tool.output_schema is not None
+                assert tool.output_schema["type"] == "object"
+                Draft202012Validator.check_schema(tool.output_schema)
+                assert tool.annotations is not None
+                assert tool.annotations.read_only_hint is True
+                assert tool.annotations.destructive_hint is False
+                assert tool.annotations.idempotent_hint is True
+                assert tool.annotations.open_world_hint is False
 
                 # Validate required fields
                 required = tool.input_schema["required"]
@@ -293,6 +334,15 @@ class TestMCPToolCalls:
             assert "version" in data
             assert "capabilities" in data
             assert data["dialect"] == "postgresql"
+            assert response.structured_content == data
+            tool = next(
+                tool
+                for tool in (await client.list_tools()).tools
+                if tool.name == "get_database_info"
+            )
+            Draft202012Validator(tool.output_schema).validate(
+                response.structured_content
+            )
 
         finally:
             await server.cleanup()
@@ -316,6 +366,15 @@ class TestMCPToolCalls:
             schema = data[0]
             assert "name" in schema
             assert "table_count" in schema
+            assert response.structured_content == {"items": data}
+            tool = next(
+                tool
+                for tool in (await client.list_tools()).tools
+                if tool.name == "list_schemas"
+            )
+            Draft202012Validator(tool.output_schema).validate(
+                response.structured_content
+            )
 
         finally:
             await server.cleanup()
@@ -344,6 +403,7 @@ class TestMCPToolCalls:
             assert data["row_count"] == 1
             assert data["columns"] == ["test_col"]
             assert data["rows"][0]["test_col"] == 1
+            assert response.structured_content == data
 
         finally:
             await server.cleanup()

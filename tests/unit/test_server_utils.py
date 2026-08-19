@@ -4,7 +4,7 @@ import os
 from unittest.mock import MagicMock, patch
 
 import pytest
-from mcp.types import CallToolRequestParams
+from mcp.types import CallToolRequestParams, TextContent
 
 from db_connect_mcp.models.capabilities import DatabaseCapabilities
 from db_connect_mcp.models.config import DatabaseConfig
@@ -13,6 +13,7 @@ from db_connect_mcp.server import (
     _load_ssh_tunnel_config,
     _parse_bool_env,
     _parse_int_env,
+    _structured_tool_result,
 )
 
 
@@ -122,6 +123,12 @@ class TestMCPToolDispatch:
 
         assert result.is_error
         assert "unavailable" in str(result.content)
+        assert result.structured_content == {
+            "error": {
+                "code": "tool_unavailable",
+                "message": f"Unknown or unavailable tool: {tool_name}",
+            }
+        }
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -145,6 +152,62 @@ class TestMCPToolDispatch:
 
         assert result.is_error
         assert expected_error in str(result.content)
+        assert result.structured_content["error"]["code"] == "invalid_arguments"
+
+    @pytest.mark.asyncio
+    async def test_unknown_arguments_are_rejected(
+        self,
+        server_without_optional_capabilities: DatabaseMCPServer,
+    ) -> None:
+        """Input contracts should reject undeclared properties."""
+        result = await server_without_optional_capabilities._call_tool(
+            MagicMock(),
+            CallToolRequestParams(
+                name="get_database_info", arguments={"unexpected": True}
+            ),
+        )
+
+        assert result.is_error
+        assert result.structured_content["error"]["code"] == "invalid_arguments"
+
+
+class TestStructuredToolResults:
+    """Tests for converting legacy JSON text into structured tool results."""
+
+    def test_object_result_preserves_shape(self) -> None:
+        content = [TextContent(type="text", text='{"dialect": "postgresql"}')]
+
+        result, is_error = _structured_tool_result("get_database_info", content)
+
+        assert result == {"dialect": "postgresql"}
+        assert is_error is False
+
+    def test_list_result_uses_items_envelope(self) -> None:
+        content = [TextContent(type="text", text='[{"name": "public"}]')]
+
+        result, is_error = _structured_tool_result("list_schemas", content)
+
+        assert result == {"items": [{"name": "public"}]}
+        assert is_error is False
+
+    def test_truncated_list_moves_metadata_beside_items(self) -> None:
+        content = [
+            TextContent(
+                type="text",
+                text=(
+                    '{"data": [{"name": "public"}], "_truncation_info": '
+                    '{"truncated": true}}'
+                ),
+            )
+        ]
+
+        result, is_error = _structured_tool_result("list_schemas", content)
+
+        assert result == {
+            "items": [{"name": "public"}],
+            "_truncation_info": {"truncated": True},
+        }
+        assert is_error is False
 
 
 class TestLoadSSHTunnelConfig:
