@@ -35,4 +35,6 @@ def test_release_metadata_uses_tomli_when_tomllib_is_unavailable(
     fallback_module = importlib.util.module_from_spec(fallback_spec)
     fallback_spec.loader.exec_module(fallback_module)
 
-    assert fallback_module.verify_release_metadata() == "0.7.1"
+    assert fallback_module.verify_release_metadata() == (
+        MODULE.verify_release_metadata()
+    )
