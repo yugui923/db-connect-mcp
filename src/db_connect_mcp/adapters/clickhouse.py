@@ -80,11 +80,14 @@ class ClickHouseAdapter(BaseAdapter):
                 sampling_key,
                 comment
             FROM system.tables
-            WHERE database = currentDatabase()
+            WHERE database = coalesce(:schema_name, currentDatabase())
               AND name = :table_name
         """)
 
-        result = await conn.execute(query, {"table_name": table_info.name})
+        result = await conn.execute(
+            query,
+            {"schema_name": table_info.schema, "table_name": table_info.name},
+        )
         row = result.fetchone()
 
         if row:
@@ -106,13 +109,14 @@ class ClickHouseAdapter(BaseAdapter):
                     sum(data_compressed_bytes) as compressed,
                     sum(data_uncompressed_bytes) as uncompressed
                 FROM system.parts
-                WHERE database = currentDatabase()
+                WHERE database = coalesce(:schema_name, currentDatabase())
                   AND table = :table_name
                   AND active = 1
             """)
 
             result = await conn.execute(
-                compression_query, {"table_name": table_info.name}
+                compression_query,
+                {"schema_name": table_info.schema, "table_name": table_info.name},
             )
             row = result.fetchone()
 
@@ -143,13 +147,15 @@ class ClickHouseAdapter(BaseAdapter):
                 name,
                 comment
             FROM system.columns
-            WHERE database = currentDatabase()
+            WHERE database = coalesce(:schema_name, currentDatabase())
               AND table = :table_name
               AND comment != ''
         """)
 
         try:
-            result = await conn.execute(query, {"table_name": table_name})
+            result = await conn.execute(
+                query, {"schema_name": schema, "table_name": table_name}
+            )
             rows = result.fetchall()
 
             # Build lookup dict

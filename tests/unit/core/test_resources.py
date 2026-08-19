@@ -122,6 +122,9 @@ class TestDatabaseResourceCatalog:
 
         assert schema["name"] == "sales team"
         assert table["name"] == "sales team orders"
+        catalog.inspector.describe_table.assert_awaited_once_with(
+            "sales team orders", "sales team"
+        )
 
     @pytest.mark.asyncio
     async def test_unknown_resource_is_rejected(
