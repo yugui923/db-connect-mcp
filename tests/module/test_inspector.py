@@ -8,6 +8,8 @@ Validates:
 - Table relationships (foreign keys)
 """
 
+from collections.abc import AsyncGenerator
+
 import pytest
 
 from db_connect_mcp.core import MetadataInspector
@@ -390,25 +392,33 @@ class TestExpressionBasedIndexes:
     """Test that expression-based indexes don't crash describe_table."""
 
     @pytest.fixture(autouse=True)
-    async def _setup_expression_index_table(self):
+    async def _setup_expression_index_table(
+        self, worker_id: str
+    ) -> AsyncGenerator[str, None]:
         """Create a test table with expression-based indexes.
 
-        Uses a separate writable connection since pg_connection is read-only.
+        Uses a worker-specific schema and a separate writable connection since
+        pg_connection is read-only. The isolated schema prevents other parallel
+        metadata tests from discovering the table while this fixture removes it.
         """
         import os
 
         from sqlalchemy import text
         from sqlalchemy.ext.asyncio import create_async_engine
+        from sqlalchemy.schema import CreateSchema, DropSchema
 
         url = os.getenv("PG_TEST_DATABASE_URL")
         if not url:
             pytest.skip("PG_TEST_DATABASE_URL not set")
 
+        schema_name = f"_test_expr_indexes_{worker_id}"
+        qualified_table = f'"{schema_name}"._test_expr_indexes'
         engine = create_async_engine(url)
         async with engine.begin() as conn:
+            await conn.execute(CreateSchema(schema_name, if_not_exists=True))
             await conn.execute(
                 text(
-                    "CREATE TABLE IF NOT EXISTS _test_expr_indexes ("
+                    f"CREATE TABLE IF NOT EXISTS {qualified_table} ("
                     "  id serial PRIMARY KEY,"
                     "  name text NOT NULL,"
                     "  email text NOT NULL,"
@@ -419,43 +429,51 @@ class TestExpressionBasedIndexes:
             await conn.execute(
                 text(
                     "CREATE INDEX IF NOT EXISTS idx_expr_lower_name "
-                    "ON _test_expr_indexes (lower(name))"
+                    f"ON {qualified_table} (lower(name))"
                 )
             )
             await conn.execute(
                 text(
                     "CREATE INDEX IF NOT EXISTS idx_expr_mixed "
-                    "ON _test_expr_indexes (id, lower(email))"
+                    f"ON {qualified_table} (id, lower(email))"
                 )
             )
             await conn.execute(
                 text(
                     "CREATE INDEX IF NOT EXISTS idx_expr_normal "
-                    "ON _test_expr_indexes (name, email)"
+                    f"ON {qualified_table} (name, email)"
                 )
             )
 
-        yield
+        yield schema_name
 
         async with engine.begin() as conn:
-            await conn.execute(text("DROP TABLE IF EXISTS _test_expr_indexes"))
+            await conn.execute(DropSchema(schema_name, cascade=True, if_exists=True))
         await engine.dispose()
 
     @pytest.mark.asyncio
     async def test_describe_table_with_expression_index(
-        self, pg_inspector: MetadataInspector
+        self,
+        pg_inspector: MetadataInspector,
+        _setup_expression_index_table: str,
     ):
         """describe_table should not fail on tables with expression indexes."""
-        table_info = await pg_inspector.describe_table("_test_expr_indexes", "public")
+        table_info = await pg_inspector.describe_table(
+            "_test_expr_indexes", _setup_expression_index_table
+        )
         assert table_info.name == "_test_expr_indexes"
         assert len(table_info.indexes) >= 3
 
     @pytest.mark.asyncio
     async def test_expression_index_columns_are_strings(
-        self, pg_inspector: MetadataInspector
+        self,
+        pg_inspector: MetadataInspector,
+        _setup_expression_index_table: str,
     ):
         """All index column entries should be strings, never None."""
-        table_info = await pg_inspector.describe_table("_test_expr_indexes", "public")
+        table_info = await pg_inspector.describe_table(
+            "_test_expr_indexes", _setup_expression_index_table
+        )
         for idx in table_info.indexes:
             for col in idx.columns:
                 assert isinstance(col, str), (
@@ -465,10 +483,14 @@ class TestExpressionBasedIndexes:
 
     @pytest.mark.asyncio
     async def test_expression_index_contains_expression_text(
-        self, pg_inspector: MetadataInspector
+        self,
+        pg_inspector: MetadataInspector,
+        _setup_expression_index_table: str,
     ):
         """Expression-based index should include expression text in columns."""
-        table_info = await pg_inspector.describe_table("_test_expr_indexes", "public")
+        table_info = await pg_inspector.describe_table(
+            "_test_expr_indexes", _setup_expression_index_table
+        )
         idx_map = {idx.name: idx for idx in table_info.indexes}
 
         lower_name_idx = idx_map.get("idx_expr_lower_name")
@@ -481,9 +503,15 @@ class TestExpressionBasedIndexes:
         assert any("lower" in col for col in mixed_idx.columns)
 
     @pytest.mark.asyncio
-    async def test_normal_index_unchanged(self, pg_inspector: MetadataInspector):
+    async def test_normal_index_unchanged(
+        self,
+        pg_inspector: MetadataInspector,
+        _setup_expression_index_table: str,
+    ):
         """Normal column indexes should still work as before."""
-        table_info = await pg_inspector.describe_table("_test_expr_indexes", "public")
+        table_info = await pg_inspector.describe_table(
+            "_test_expr_indexes", _setup_expression_index_table
+        )
         idx_map = {idx.name: idx for idx in table_info.indexes}
 
         normal_idx = idx_map.get("idx_expr_normal")
