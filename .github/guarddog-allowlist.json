@@ -1,0 +1,16 @@
+{
+  "allow": [
+    {
+      "ecosystem": "pypi",
+      "package": "pyright",
+      "version": "1.1.411",
+      "reason": "Pyright bundles its JavaScript runtime and type stubs for process-management APIs; the findings are declarations and tool internals."
+    },
+    {
+      "ecosystem": "pypi",
+      "package": "sqlalchemy",
+      "version": "2.0.51",
+      "reason": "SQLAlchemy's test profiler writes .profile performance data; GuardDog mistakes the file extension for an operating-system autostart path."
+    }
+  ]
+}

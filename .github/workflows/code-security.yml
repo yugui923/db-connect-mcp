@@ -1,0 +1,196 @@
+name: Code security
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GUARDDOG_IMAGE: ghcr.io/datadog/guarddog@sha256:5b0804d480e83405120fc90c62b60ad844310418c836e567055b1ba8843e033d # v3.2.0
+
+jobs:
+  opengrep:
+    name: OpenGrep
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install OpenGrep
+        env:
+          OPENGREP_VERSION: "1.27.1"
+          OPENGREP_SHA256: "58053da76672bbeb5b0a5441021c58338707052e10f81d777140ca879bd491ce"
+          OPENGREP_RULES_COMMIT: "e7643a008ec9027c96dfef7bdf5aedcac3847da8"
+        run: |
+          set -euo pipefail
+          url="https://github.com/opengrep/opengrep/releases/download/v${OPENGREP_VERSION}/opengrep_manylinux_x86"
+          curl -fsSL -o /tmp/opengrep "$url"
+          echo "${OPENGREP_SHA256}  /tmp/opengrep" | sha256sum --check --strict
+          chmod 0755 /tmp/opengrep
+          git init --quiet /tmp/opengrep-rules
+          git -C /tmp/opengrep-rules remote add origin \
+            https://github.com/amplify-security/opengrep-rules.git
+          git -C /tmp/opengrep-rules fetch --quiet --depth=1 origin \
+            "$OPENGREP_RULES_COMMIT"
+          test "$(git -C /tmp/opengrep-rules rev-parse FETCH_HEAD)" = \
+            "$OPENGREP_RULES_COMMIT"
+          git -C /tmp/opengrep-rules checkout --quiet --detach FETCH_HEAD
+          mkdir /tmp/opengrep-selected
+          while IFS= read -r rule_path; do
+            test -n "$rule_path"
+            install -Dm0644 "/tmp/opengrep-rules/$rule_path" \
+              "/tmp/opengrep-selected/$rule_path"
+          done <<'RULES'
+          dockerfile/security/last-user-is-root.yaml
+          python/cryptography/security/insecure-cipher-algorithms.yaml
+          python/cryptography/security/insecure-cipher-mode-ecb.yaml
+          python/cryptography/security/insecure-hash-algorithms.yaml
+          python/jwt/security/jwt-none-alg.yaml
+          python/jwt/security/unverified-jwt-decode.yaml
+          python/lang/security/audit/network/disabled-cert-validation.yaml
+          python/lang/security/audit/paramiko-implicit-trust-host-key.yaml
+          python/lang/security/audit/paramiko/paramiko-exec-command.yaml
+          python/lang/security/audit/subprocess-shell-true.yaml
+          python/lang/security/audit/weak-ssl-version.yaml
+          python/lang/security/deserialization/avoid-pyyaml-load.yaml
+          python/lang/security/deserialization/pickle.yaml
+          python/lang/security/unverified-ssl-context.yaml
+          python/lang/security/use-defused-xml.yaml
+          python/lang/security/use-defused-xmlrpc.yaml
+          python/requests/security/disabled-cert-validation.yaml
+          python/requests/security/no-auth-over-http.yaml
+          RULES
+      - name: Scan for high-signal code vulnerabilities
+        run: >-
+          /tmp/opengrep scan --disable-version-check
+          --config /tmp/opengrep-selected --severity ERROR --error .
+
+  guarddog-pypi:
+    name: GuardDog / PyPI
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build exact Python dependency snapshot
+        run: |
+          set -euo pipefail
+          python - <<'PY' > "${RUNNER_TEMP}/guarddog-requirements.txt"
+          import tomllib
+
+          with open("uv.lock", "rb") as lock_file:
+              lock = tomllib.load(lock_file)
+
+          packages = lock["package"]
+          root = next(
+              package
+              for package in packages
+              if package["name"] == "db-connect-mcp"
+              and package.get("source", {}).get("editable") == "."
+          )
+          names = {dependency["name"] for dependency in root["dependencies"]}
+          for group in root.get("dev-dependencies", {}).values():
+              names.update(dependency["name"] for dependency in group)
+          versions = {
+              package["name"]: package["version"]
+              for package in packages
+              if package.get("name") in names and "version" in package
+          }
+          missing = names - versions.keys()
+          if missing:
+              raise SystemExit(f"Missing locked versions: {sorted(missing)}")
+          for name in sorted(names):
+              print(f"{name}=={versions[name]}")
+          PY
+      - name: Scan locked Python dependencies
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            --tmpfs /tmp:rw,nosuid,nodev,size=2g \
+            --cap-drop=ALL \
+            --security-opt=no-new-privileges \
+            --env GUARDDOG_PARALLELISM=4 \
+            --volume "${RUNNER_TEMP}/guarddog-requirements.txt:/work/requirements.txt:ro" \
+            "$GUARDDOG_IMAGE" pypi verify --output-format json \
+            /work/requirements.txt > "${RUNNER_TEMP}/guarddog.json"
+          expected_count=$(wc -l < "${RUNNER_TEMP}/guarddog-requirements.txt")
+          actual_count=$(jq 'length' "${RUNNER_TEMP}/guarddog.json")
+          test "$actual_count" -eq "$expected_count"
+          if ! jq --exit-status '
+            all(.[].result;
+              (.risk_score.score | type) == "number"
+              and (.risk_score.label | type) == "string"
+            )
+          ' "${RUNNER_TEMP}/guarddog.json" > /dev/null; then
+            echo "::error::GuardDog returned incomplete PyPI scan results"
+            jq -r '
+              .[]
+              | select(
+                  (.result.risk_score.score | type) != "number"
+                  or (.result.risk_score.label | type) != "string"
+                )
+              | "\(.dependency)@\(.version): \(.result.errors // {"scan-result": "missing risk score"} | tojson)"
+            ' "${RUNNER_TEMP}/guarddog.json"
+            exit 1
+          fi
+          jq -r '
+            .[]
+            | select((.result.errors // {}) | length > 0)
+            | "\(.dependency)@\(.version): tolerated detector errors: \(.result.errors | keys | join(", "))"
+          ' "${RUNNER_TEMP}/guarddog.json"
+          jq -r '.[] | select(.result.risk_score.score > 0) | "\(.dependency)@\(.version): \(.result.risk_score.label) (\(.result.risk_score.score))"' \
+            "${RUNNER_TEMP}/guarddog.json"
+      - name: Enforce GuardDog high-risk policy
+        env:
+          GUARDDOG_ECOSYSTEM: pypi
+        run: |
+          set -euo pipefail
+          jq -r --arg ecosystem "$GUARDDOG_ECOSYSTEM" \
+            --slurpfile allowlist .github/guarddog-allowlist.json '
+              .[]
+              | select(.result.risk_score.label == "high_risk")
+              | . as $finding
+              | select(
+                  ($allowlist[0].allow
+                    | any(
+                        .ecosystem == $ecosystem
+                        and .package == $finding.dependency
+                        and .version == $finding.version
+                      )
+                  ) | not
+                )
+              | "\(.dependency)@\(.version): \(.result.risk_score.score)"
+            ' "${RUNNER_TEMP}/guarddog.json" > "${RUNNER_TEMP}/guarddog-blocked.txt"
+          if test -s "${RUNNER_TEMP}/guarddog-blocked.txt"; then
+            echo "::error::GuardDog found unallowlisted high-risk PyPI dependencies"
+            sed 's/^/  /' "${RUNNER_TEMP}/guarddog-blocked.txt"
+            exit 1
+          fi
+
+  gate:
+    name: Code security / gate
+    if: ${{ always() }}
+    needs: [opengrep, guarddog-pypi]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    permissions: {}
+    steps:
+      - name: Require every code-security job to pass
+        env:
+          OPENGREP_RESULT: ${{ needs.opengrep.result }}
+          GUARDDOG_PYPI_RESULT: ${{ needs.guarddog-pypi.result }}
+        run: |
+          test "$OPENGREP_RESULT" = "success"
+          test "$GUARDDOG_PYPI_RESULT" = "success"
