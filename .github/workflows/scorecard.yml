@@ -6,13 +6,14 @@ on:
   schedule:
     - cron: "0 6 * * 1" # Weekly on Monday
 
-permissions: read-all
+permissions: {}
 
 jobs:
   analysis:
     name: Scorecard analysis
     runs-on: ubuntu-latest
     permissions:
+      contents: read
       security-events: write
       id-token: write
     steps:

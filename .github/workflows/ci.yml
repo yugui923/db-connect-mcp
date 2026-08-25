@@ -6,11 +6,18 @@ on:
   pull_request:
     branches: [main]
 
-permissions: read-all
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
 
     services:
       postgres:
@@ -57,6 +64,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install uv
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
@@ -68,8 +77,15 @@ jobs:
         with:
           python-version: "3.13"
 
+      - name: Enable Socket Firewall
+        uses: SocketDev/action@ba6de6cc0565af1f42295590380973573297e31f # v1.3.2
+        with:
+          mode: firewall-free
+          firewall-version: "1.15.0"
+          job-summary: errors
+
       - name: Install dependencies
-        run: uv sync --python 3.13 --dev
+        run: sfw uv sync --frozen --python 3.13 --dev
 
       - name: Verify Python version
         run: .venv/bin/python -c 'import sys; assert sys.version_info[:2] == (3, 13), sys.version'
@@ -123,6 +139,9 @@ jobs:
 
   python-compatibility:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -130,6 +149,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install uv
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
@@ -141,8 +162,15 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
+      - name: Enable Socket Firewall
+        uses: SocketDev/action@ba6de6cc0565af1f42295590380973573297e31f # v1.3.2
+        with:
+          mode: firewall-free
+          firewall-version: "1.15.0"
+          job-summary: errors
+
       - name: Install dependencies
-        run: uv sync --python "${{ matrix.python-version }}" --dev
+        run: sfw uv sync --frozen --python "${{ matrix.python-version }}" --dev
 
       - name: Verify Python version
         env:
@@ -154,8 +182,13 @@ jobs:
 
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install uv
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
@@ -167,11 +200,36 @@ jobs:
         with:
           python-version: "3.13"
 
+      - name: Enable Socket Firewall
+        uses: SocketDev/action@ba6de6cc0565af1f42295590380973573297e31f # v1.3.2
+        with:
+          mode: firewall-free
+          firewall-version: "1.15.0"
+          job-summary: errors
+
       - name: Build package
-        run: uv build --python 3.13
+        run: sfw uv build --python 3.13
 
       - name: Verify build artifacts
         run: |
           ls -la dist/
           test -f dist/*.whl
           test -f dist/*.tar.gz
+
+  gate:
+    name: CI / gate
+    if: ${{ always() }}
+    needs: [test, python-compatibility, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    permissions: {}
+    steps:
+      - name: Require every CI job to pass
+        env:
+          TEST_RESULT: ${{ needs.test.result }}
+          COMPATIBILITY_RESULT: ${{ needs.python-compatibility.result }}
+          BUILD_RESULT: ${{ needs.build.result }}
+        run: |
+          test "$TEST_RESULT" = "success"
+          test "$COMPATIBILITY_RESULT" = "success"
+          test "$BUILD_RESULT" = "success"

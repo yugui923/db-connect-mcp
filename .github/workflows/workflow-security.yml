@@ -1,0 +1,75 @@
+name: Workflow security
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  security:
+    name: Workflow security / gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Check workflow permissions and integrity
+        uses: zizmorcore/zizmor-action@3dc1ecc9bcb9e94e9b2c709687979e1298497054 # v0.6.2
+        with:
+          advanced-security: "false"
+          annotations: "true"
+          min-confidence: high
+          min-severity: high
+          online-audits: "false"
+          version: "1.29.0"
+      - name: Install Gitleaks
+        env:
+          GITLEAKS_VERSION: "8.30.1"
+          GITLEAKS_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+        run: |
+          set -euo pipefail
+          url="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -fsSL -o /tmp/gitleaks.tgz "$url"
+          echo "${GITLEAKS_SHA256}  /tmp/gitleaks.tgz" | sha256sum --check --strict
+          tar -xzf /tmp/gitleaks.tgz -C /tmp gitleaks
+          sudo install -m 0755 /tmp/gitleaks /usr/local/bin/gitleaks
+      - name: Scan changed history for secrets
+        env:
+          GITLEAKS_EVENT_NAME: ${{ github.event_name }}
+          GITLEAKS_PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          GITLEAKS_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          GITLEAKS_PUSH_BASE_SHA: ${{ github.event.before }}
+          GITLEAKS_PUSH_HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          case "$GITLEAKS_EVENT_NAME" in
+            pull_request)
+              base_sha="$GITLEAKS_PR_BASE_SHA"
+              head_sha="$GITLEAKS_PR_HEAD_SHA"
+              ;;
+            push)
+              base_sha="$GITLEAKS_PUSH_BASE_SHA"
+              head_sha="$GITLEAKS_PUSH_HEAD_SHA"
+              ;;
+            *)
+              echo "unsupported event: $GITLEAKS_EVENT_NAME" >&2
+              exit 1
+              ;;
+          esac
+          [[ "$base_sha" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$head_sha" =~ ^[0-9a-f]{40}$ ]]
+          git cat-file -e "$base_sha^{commit}"
+          git cat-file -e "$head_sha^{commit}"
+          gitleaks detect --no-banner --redact \
+            --log-opts="$base_sha..$head_sha"
