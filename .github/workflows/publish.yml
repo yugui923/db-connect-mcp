@@ -29,13 +29,23 @@ jobs:
         with:
           python-version: "3.13"
 
+      - name: Enable Socket Firewall
+        uses: SocketDev/action@ba6de6cc0565af1f42295590380973573297e31f # v1.3.2
+        with:
+          mode: firewall-free
+          firewall-version: "1.15.0"
+          job-summary: errors
+
       - name: Verify release metadata
         env:
           RELEASE_TAG: ${{ github.ref_name }}
         run: python scripts/verify_release_metadata.py --tag "$RELEASE_TAG"
 
+      - name: Install locked build dependencies
+        run: sfw uv sync --frozen --python 3.13 --dev --no-install-project
+
       - name: Build distributions
-        run: uv build
+        run: uv build --no-build-isolation --python .venv/bin/python
 
       - name: Store distributions
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
