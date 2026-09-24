@@ -191,4 +191,4 @@ Handled automatically in `conftest.py` -- sets `WindowsSelectorEventLoopPolicy` 
 - [Docker Setup](DOCKER.md) -- Database infrastructure
 - [SSH Tunnel](SSH_TUNNEL.md) -- Tunnel feature details
 - [Development Guide](DEVELOPMENT.md) -- Full dev workflow
-- [CLAUDE.md](../CLAUDE.md) -- Claude Code guidance
+- [AGENTS.md](../../AGENTS.md) -- AI coding agent guidance

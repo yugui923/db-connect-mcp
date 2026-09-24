@@ -539,9 +539,9 @@ Search schemas, tables, views, columns, and indexes with progressive detail.
   - `table` (optional): Restrict column and index searches to a table
   - `limit` (optional): Maximum matches (default: 100, max: 1000)
 
-## Example Usage in Claude
+## Example Usage
 
-Once configured, you can use the server in Claude:
+Once configured, you can use the server with any compatible MCP client:
 
 ```
 "Can you analyze my database and tell me about the table structure?"
