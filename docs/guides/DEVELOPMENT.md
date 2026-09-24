@@ -394,7 +394,7 @@ Types: `feat`, `fix`, `docs`, `style`, `refactor`, `test`, `chore`
 - [Testing Guide](TESTING.md) - Testing documentation
 - [Docker Setup](DOCKER.md) - Database infrastructure
 - [SSH Tunnel](SSH_TUNNEL.md) - Tunnel feature documentation
-- [CLAUDE.md](../../CLAUDE.md) - Claude Code guidance
+- [AGENTS.md](../../AGENTS.md) - AI coding agent guidance
 - [MCP Documentation](https://modelcontextprotocol.io/) - MCP protocol reference
 - [SQLAlchemy Docs](https://docs.sqlalchemy.org/) - Database toolkit
 - [Pydantic Docs](https://docs.pydantic.dev/) - Data validation
