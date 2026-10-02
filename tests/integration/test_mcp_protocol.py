@@ -18,7 +18,7 @@ from typing import Any
 import anyio
 import pytest
 from jsonschema import Draft202012Validator
-from mcp import ClientSession
+from mcp import Client, ClientSession
 from mcp.types import TextContent
 
 from db_connect_mcp import __version__
@@ -221,6 +221,27 @@ class TestMCPServerLifecycle:
             assert server_info.name == "db-connect-mcp"
             assert server_info.version == __version__
             assert server_info.title == "DB Connect MCP"
+        finally:
+            await server.cleanup()
+
+
+class TestModernStdioProtocol:
+    """Prove the stdio-like low-level server also serves the modern protocol."""
+
+    @pytest.mark.asyncio
+    async def test_discovery_and_tool_call(self, pg_config: DatabaseConfig) -> None:
+        server = DatabaseMCPServer(pg_config)
+        await server.initialize()
+        try:
+            async with Client(server.server) as client:
+                assert client.protocol_version == "2026-07-28"
+                assert client.server_info is not None
+                assert client.server_info.name == "db-connect-mcp"
+                result = await client.call_tool(
+                    "execute_query", {"query": "SELECT 1 AS answer"}
+                )
+                assert not result.is_error
+                assert result.structured_content["rows"][0]["answer"] == 1
         finally:
             await server.cleanup()
 

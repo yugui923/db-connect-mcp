@@ -1661,31 +1661,38 @@ class _OAuthMCPASGIApp:
         await self.session_manager.handle_request(scope, receive, send)
 
 
-async def _run_streamable_http(
+def _create_streamable_http_app(
     mcp_server: DatabaseMCPServer,
-    host: str,
-    port: int,
     oauth_issuer: str | None = None,
     oauth_audience: str | None = None,
     oauth_scopes: list[str] | None = None,
-) -> None:
-    """Run the MCP server using Streamable HTTP transport.
-
-    Supports three authentication modes:
-    1. No auth: If neither MCP_AUTH_TOKEN nor oauth_issuer is set
-    2. Simple bearer token: If MCP_AUTH_TOKEN env var is set
-    3. OAuth 2.0 JWT: If oauth_issuer and oauth_audience are provided
-    """
-    import uvicorn
+) -> Any:
+    """Build the production HTTP app, including its authentication and lifespan."""
     from starlette.applications import Starlette
     from starlette.routing import Route
 
     from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
+    from mcp.server.transport_security import TransportSecuritySettings
 
+    allowed_hosts = ["127.0.0.1:*", "localhost:*", "[::1]:*"]
+    allowed_hosts.extend(
+        host.strip()
+        for host in os.getenv("MCP_ALLOWED_HOSTS", "").split(",")
+        if host.strip()
+    )
+    allowed_origins = [
+        origin.strip()
+        for origin in os.getenv("MCP_ALLOWED_ORIGINS", "").split(",")
+        if origin.strip()
+    ]
     session_manager = StreamableHTTPSessionManager(
         app=mcp_server.server,
         json_response=True,
         stateless=True,
+        security_settings=TransportSecuritySettings(
+            allowed_hosts=allowed_hosts,
+            allowed_origins=allowed_origins,
+        ),
     )
 
     # Determine authentication mode
@@ -1707,20 +1714,36 @@ async def _run_streamable_http(
             token_verifier,
             required_scopes=oauth_scopes,
         )
-        logger.info(f"OAuth 2.0 JWT verification enabled (issuer: {oauth_issuer})")
-        if oauth_scopes:
-            logger.info(f"Required scopes: {', '.join(oauth_scopes)}")
+        logger.info("OAuth 2.0 JWT verification enabled")
     else:
         # Simple bearer token or no auth mode
         mcp_asgi_app = _MCPASGIApp(session_manager, auth_token)
         if auth_token:
             logger.info("Bearer token authentication enabled (MCP_AUTH_TOKEN)")
 
-    app = Starlette(
+    return Starlette(
         routes=[Route("/mcp", endpoint=mcp_asgi_app)],
         lifespan=lambda app: session_manager.run(),
     )
 
+
+async def _run_streamable_http(
+    mcp_server: DatabaseMCPServer,
+    host: str,
+    port: int,
+    oauth_issuer: str | None = None,
+    oauth_audience: str | None = None,
+    oauth_scopes: list[str] | None = None,
+) -> None:
+    """Run the production Streamable HTTP application."""
+    import uvicorn
+
+    app = _create_streamable_http_app(
+        mcp_server,
+        oauth_issuer=oauth_issuer,
+        oauth_audience=oauth_audience,
+        oauth_scopes=oauth_scopes,
+    )
     uvicorn_config = uvicorn.Config(app, host=host, port=port, log_level="info")
     server = uvicorn.Server(uvicorn_config)
 
