@@ -1,6 +1,6 @@
 # Remote MCP Server (Streamable HTTP Transport)
 
-The server supports running as a remote MCP server over HTTP using the Streamable HTTP transport, in addition to the default stdio transport.
+The server supports running as a remote MCP server over HTTP using the Streamable HTTP transport, in addition to the default stdio transport. MCP Python SDK 2.2 supports both the 2026-07-28 session-free protocol and older initialize-based clients on the same endpoint. Existing stdio client configurations, database URLs, and SSH settings do not need to change; the server already uses stateless HTTP for older clients.
 
 ## Quick Start
 
@@ -16,19 +16,21 @@ The server will be accessible at `http://localhost:8000/mcp`.
 
 ## CLI Options
 
-| Flag | Default | Description |
-| ---- | ------- | ----------- |
-| `--transport` | `stdio` | Transport protocol: `stdio` or `streamable-http` |
-| `--host` | `0.0.0.0` | Host to bind to (streamable-http only) |
-| `--port` | `8000` | Port to listen on (streamable-http only) |
+| Flag          | Default   | Description                                      |
+| ------------- | --------- | ------------------------------------------------ |
+| `--transport` | `stdio`   | Transport protocol: `stdio` or `streamable-http` |
+| `--host`      | `0.0.0.0` | Host to bind to (streamable-http only)           |
+| `--port`      | `8000`    | Port to listen on (streamable-http only)         |
+
+The HTTP endpoint accepts both client generations without a transport flag. Modern clients send `server/discover` and per-request protocol metadata; older clients continue to send `initialize`. Modern requests carry no `Mcp-Session-Id`. The server still uses a process-wide read-only database connection pool and an optional SSH tunnel; stateless refers to the MCP protocol, not the database lifecycle.
 
 ### OAuth 2.0 Options
 
-| Flag | Environment Variable | Description |
-| ---- | -------------------- | ----------- |
-| `--oauth-issuer` | `MCP_OAUTH_ISSUER` | OAuth issuer URL (e.g., `https://your-tenant.auth0.com/`) |
-| `--oauth-audience` | `MCP_OAUTH_AUDIENCE` | Expected audience claim (your API identifier) |
-| `--oauth-scopes` | `MCP_OAUTH_SCOPES` | Required scopes (comma-separated) |
+| Flag               | Environment Variable | Description                                               |
+| ------------------ | -------------------- | --------------------------------------------------------- |
+| `--oauth-issuer`   | `MCP_OAUTH_ISSUER`   | OAuth issuer URL (e.g., `https://your-tenant.auth0.com/`) |
+| `--oauth-audience` | `MCP_OAUTH_AUDIENCE` | Expected audience claim (your API identifier)             |
+| `--oauth-scopes`   | `MCP_OAUTH_SCOPES`   | Required scopes (comma-separated)                         |
 
 ## Authentication
 
@@ -66,6 +68,7 @@ python -m db_connect_mcp --transport streamable-http \
 ```
 
 Features:
+
 - Validates JWT signatures using JWKS from the identity provider
 - Verifies token expiration, issuer, and audience claims
 - Supports scope-based authorization
@@ -84,6 +87,7 @@ python -m db_connect_mcp --transport streamable-http \
 ```
 
 In Auth0:
+
 1. Create an API with your audience identifier
 2. Define permissions (scopes) like `read:database`, `write:database`
 3. Authorize your client applications
@@ -97,6 +101,7 @@ python -m db_connect_mcp --transport streamable-http \
 ```
 
 In Azure AD:
+
 1. Register an application
 2. Configure API permissions
 3. Use the application's client ID as the audience
@@ -174,11 +179,11 @@ npx -y @modelcontextprotocol/inspector
 
 ## Error Responses
 
-| Status | Error | Description |
-| ------ | ----- | ----------- |
-| 401 | `unauthorized` | Missing bearer token |
-| 401 | `invalid_token` | Token validation failed (expired, wrong signature, etc.) |
-| 403 | `insufficient_scope` | Token lacks required scopes |
+| Status | Error                | Description                                              |
+| ------ | -------------------- | -------------------------------------------------------- |
+| 401    | `unauthorized`       | Missing bearer token                                     |
+| 401    | `invalid_token`      | Token validation failed (expired, wrong signature, etc.) |
+| 403    | `insufficient_scope` | Token lacks required scopes                              |
 
 Example error response:
 
@@ -202,12 +207,16 @@ https://mcp.example.com/staging-mysql/mcp -> instance on port 8002
 
 All existing environment variables (`DATABASE_URL`, `DB_POOL_SIZE`, SSH tunnel config, etc.) work the same regardless of transport. The following are specific to remote mode:
 
-| Variable | Default | Description |
-| -------- | ------- | ----------- |
-| `MCP_AUTH_TOKEN` | (none) | Bearer token for simple authentication |
-| `MCP_OAUTH_ISSUER` | (none) | OAuth issuer URL for JWT verification |
-| `MCP_OAUTH_AUDIENCE` | (none) | Expected audience claim |
-| `MCP_OAUTH_SCOPES` | (none) | Required scopes (comma-separated) |
+| Variable              | Default | Description                                                                                                     |
+| --------------------- | ------- | --------------------------------------------------------------------------------------------------------------- |
+| `MCP_AUTH_TOKEN`      | (none)  | Bearer token for simple authentication                                                                          |
+| `MCP_OAUTH_ISSUER`    | (none)  | OAuth issuer URL for JWT verification                                                                           |
+| `MCP_OAUTH_AUDIENCE`  | (none)  | Expected audience claim                                                                                         |
+| `MCP_OAUTH_SCOPES`    | (none)  | Required scopes (comma-separated)                                                                               |
+| `MCP_ALLOWED_HOSTS`   | (none)  | Extra comma-separated HTTP Host values allowed by the transport, beyond localhost and loopback hosts with ports |
+| `MCP_ALLOWED_ORIGINS` | (none)  | Extra comma-separated Origin values allowed by the transport; requests without an Origin are allowed            |
+
+The transport rejects unexpected Host/Origin headers by default. If a reverse proxy forwards a public `Host`, set `MCP_ALLOWED_HOSTS` to its exact hostname (including the port when forwarded). If a browser client sends an `Origin`, add its exact origin, including scheme and optional port, to `MCP_ALLOWED_ORIGINS`. Do not use wildcard entries or disable DNS rebinding protection. Keep proxy access authenticated and use HTTPS externally. These settings affect HTTP only; existing stdio configurations are unaffected.
 
 ## Security Recommendations
 
