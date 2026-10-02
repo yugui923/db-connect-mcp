@@ -40,7 +40,7 @@ A read-only MCP (Model Context Protocol) server for exploratory data analysis ac
 
 3. **Restart Claude Desktop** and start querying your database!
 
-> **Note**: Using `python -m db_connect_mcp` ensures the command works even if Python's Scripts directory isn't in your PATH. Existing `mcpServers` configurations remain valid: stdio is still the default. The optional [remote Streamable HTTP mode](docs/guides/REMOTE_MCP.md) serves both older initialize-based clients and 2026-07-28 session-free MCP clients at `/mcp` without changing the database or SSH configuration.
+> **Note**: Using `python -m db_connect_mcp` ensures the command works even if Python's Scripts directory isn't in your PATH. Existing `mcpServers` configurations remain valid: stdio is still the default. The optional [remote Streamable HTTP mode](docs/guides/REMOTE_MCP.md) serves both older initialize-based clients and 2026-07-28 session-free MCP clients at `/mcp` without changing the database or SSH configuration. **Existing HTTP deployments must review forwarded Host/Origin values**: the upgrade enables transport validation and may require `MCP_ALLOWED_HOSTS` / `MCP_ALLOWED_ORIGINS`.
 
 ## Features
 

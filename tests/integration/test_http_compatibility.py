@@ -139,6 +139,29 @@ async def test_production_http_authenticates_before_dispatch(
 
 
 @pytest.mark.asyncio
+async def test_production_http_does_not_log_oauth_configuration(
+    pg_database_url: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    server = DatabaseMCPServer(DatabaseConfig(url=pg_database_url))
+    await server.initialize()
+    try:
+        with patch(
+            "db_connect_mcp.auth.JWTTokenVerifier", return_value=_SyntheticVerifier()
+        ):
+            _create_streamable_http_app(
+                server,
+                oauth_issuer="https://username:password@issuer.example",
+                oauth_audience="database",
+                oauth_scopes=["read:database", "password=secret"],
+            )
+        assert "OAuth 2.0 JWT verification enabled" in caplog.text
+        assert "password" not in caplog.text
+        assert "secret" not in caplog.text
+    finally:
+        await server.cleanup()
+
+
+@pytest.mark.asyncio
 async def test_production_http_oauth_scopes_apply_to_modern_requests(
     pg_database_url: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -187,6 +210,12 @@ async def test_production_http_rejects_bad_origin_and_large_body(
                     json=_modern_request(),
                 )
                 assert origin.status_code == 403
+                invalid_host = await client.post(
+                    url,
+                    headers={**MODERN_HEADERS, "Host": "mcp.example.com"},
+                    json=_modern_request(),
+                )
+                assert invalid_host.status_code == 421
                 oversized = await client.post(
                     url,
                     headers=MODERN_HEADERS,
@@ -219,6 +248,16 @@ async def test_production_http_allows_configured_proxy_host(
                 )
                 assert response.status_code == 200
                 assert response.json()["result"]["supportedVersions"]
+                with_port = await client.post(
+                    url,
+                    headers={
+                        **MODERN_HEADERS,
+                        "Host": "mcp.example.com:443",
+                        "Origin": "https://mcp.example.com",
+                    },
+                    json=_modern_request(),
+                )
+                assert with_port.status_code == 421
     finally:
         await server.cleanup()
 

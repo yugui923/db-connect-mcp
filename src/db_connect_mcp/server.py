@@ -1714,9 +1714,7 @@ def _create_streamable_http_app(
             token_verifier,
             required_scopes=oauth_scopes,
         )
-        logger.info(f"OAuth 2.0 JWT verification enabled (issuer: {oauth_issuer})")
-        if oauth_scopes:
-            logger.info(f"Required scopes: {', '.join(oauth_scopes)}")
+        logger.info("OAuth 2.0 JWT verification enabled")
     else:
         # Simple bearer token or no auth mode
         mcp_asgi_app = _MCPASGIApp(session_manager, auth_token)

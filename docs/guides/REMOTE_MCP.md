@@ -8,11 +8,11 @@ The server supports running as a remote MCP server over HTTP using the Streamabl
 # Set your database URL
 export DATABASE_URL="postgresql+asyncpg://user:pass@localhost:5432/mydb"
 
-# Start the remote MCP server
-python -m db_connect_mcp --transport streamable-http --port 8000
+# Start the HTTP server locally; expose it only behind authenticated HTTPS
+python -m db_connect_mcp --transport streamable-http --host 127.0.0.1 --port 8000
 ```
 
-The server will be accessible at `http://localhost:8000/mcp`.
+The server will be accessible at `http://localhost:8000/mcp` on the same machine. Do not expose the unauthenticated default on a public or shared network: bind locally as shown above, or configure bearer/OAuth authentication, HTTPS, and network restrictions before using `--host 0.0.0.0`. The CLI still defaults to `0.0.0.0` for existing deployments.
 
 ## CLI Options
 
@@ -216,7 +216,9 @@ All existing environment variables (`DATABASE_URL`, `DB_POOL_SIZE`, SSH tunnel c
 | `MCP_ALLOWED_HOSTS`   | (none)  | Extra comma-separated HTTP Host values allowed by the transport, beyond localhost and loopback hosts with ports |
 | `MCP_ALLOWED_ORIGINS` | (none)  | Extra comma-separated Origin values allowed by the transport; requests without an Origin are allowed            |
 
-The transport rejects unexpected Host/Origin headers by default. If a reverse proxy forwards a public `Host`, set `MCP_ALLOWED_HOSTS` to its exact hostname (including the port when forwarded). If a browser client sends an `Origin`, add its exact origin, including scheme and optional port, to `MCP_ALLOWED_ORIGINS`. Do not use wildcard entries or disable DNS rebinding protection. Keep proxy access authenticated and use HTTPS externally. These settings affect HTTP only; existing stdio configurations are unaffected.
+**HTTP deployment compatibility:** This upgrade enables Host/Origin validation that was previously off. Existing reverse proxies forwarding `Host: mcp.example.com` or an internal upstream host such as `db-connect:8000` will return HTTP 421 until that exact value is added to `MCP_ALLOWED_HOSTS`. Include the port if the proxy forwards one (`mcp.example.com` and `mcp.example.com:443` are different entries). A request with an Origin not on `MCP_ALLOWED_ORIGINS` returns 403; requests without an Origin are allowed. Check forwarded headers before rolling out and canary the upgraded instance. Do not use wildcard entries or disable DNS rebinding protection. Keep proxy access authenticated and use HTTPS externally. These settings affect HTTP only; existing stdio configurations are unaffected.
+
+`MCP_ALLOWED_ORIGINS` is a transport security allowlist, **not CORS configuration**. Cross-origin browser clients still need a separately configured proxy to handle OPTIONS preflights and `Access-Control-Allow-*` headers; adding an origin here alone will not make browsers work.
 
 ## Security Recommendations
 
