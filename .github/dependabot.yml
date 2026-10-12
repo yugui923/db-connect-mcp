@@ -1,44 +1,30 @@
 version: 2
+multi-ecosystem-groups:
+  routine-dependencies:
+    schedule:
+      interval: monthly
 updates:
-  # Python dependencies via pip/uv
   - package-ecosystem: pip
     directory: "/"
-    schedule:
-      interval: monthly
+    patterns:
+      - "*"
+    multi-ecosystem-group: routine-dependencies
     cooldown:
       default-days: 7
-    open-pull-requests-limit: 10
-    groups:
-      development:
-        patterns:
-          - "pytest*"
-          - "ruff"
-          - "pyright"
-          - "pytest-*"
+    allow:
+      - dependency-name: "*"
         update-types:
-          - minor
-          - patch
-      production:
-        patterns:
-          - "*"
-        exclude-patterns:
-          - "pytest*"
-          - "ruff"
-          - "pyright"
-          - "pytest-*"
-        update-types:
-          - minor
-          - patch
-
-  # GitHub Actions
+          - version-update:semver-minor
+          - version-update:semver-patch
   - package-ecosystem: github-actions
     directory: "/"
-    schedule:
-      interval: monthly
+    patterns:
+      - "*"
+    multi-ecosystem-group: routine-dependencies
     cooldown:
       default-days: 7
-    open-pull-requests-limit: 10
-    groups:
-      codeql-actions:
-        patterns:
-          - "github/codeql-action/*"
+    allow:
+      - dependency-name: "*"
+        update-types:
+          - version-update:semver-minor
+          - version-update:semver-patch
