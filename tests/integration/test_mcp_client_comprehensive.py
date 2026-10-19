@@ -976,8 +976,10 @@ class TestMCPToolRegistration:
 
     @pytest.mark.asyncio
     @pytest.mark.postgresql
-    async def test_postgresql_registers_all_10_tools(self, pg_client: ClientSession):
-        """Verify PostgreSQL registers all 10 tools."""
+    async def test_postgresql_registers_health_and_legacy_tools(
+        self, pg_client: ClientSession
+    ):
+        """Verify PostgreSQL adds health without removing existing tools."""
         tools = await get_available_tools(pg_client)
 
         expected = {
@@ -991,6 +993,7 @@ class TestMCPToolRegistration:
             "analyze_column",
             "explain_query",
             "search_objects",
+            "postgres_health",
         }
         assert tools == expected
 

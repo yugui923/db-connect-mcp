@@ -63,6 +63,8 @@ class QueryExecutor:
         query: str,
         params: Optional[dict[str, Any]] = None,
         limit: Optional[int] = 1000,
+        *,
+        max_result_bytes: int = 100_000,
     ) -> QueryResult:
         """
         Execute a SELECT/WITH query safely.
@@ -78,23 +80,32 @@ class QueryExecutor:
         Raises:
             ValueError: If query is not a safe read-only query
         """
-        # Validate query is safe
+        # Validate query and enforce a hard output cap even when SQL has its own LIMIT.
         self._validate_query(query)
+        self._validate_limit(limit)
+        assert limit is not None
 
-        # Add LIMIT if not present and limit is specified
         modified_query = query
-        if limit is not None and not self._has_limit(query):
+        if query.lstrip().upper().startswith(("SELECT ", "WITH ")):
+            # Bound the SQL sent to the database: async execute may buffer rows.
+            # Fetch one extra row to report exact truncation.
+            modified_query = (
+                f"SELECT * FROM ({query.strip().rstrip(';')}) AS bounded_query "
+                f"LIMIT {limit + 1}"
+            )
+        elif not self._has_limit(query):
             modified_query = self._add_limit(query, limit)
 
         start_time = time.time()
 
         async with self.connection.get_connection() as conn:
             result = await conn.execute(text(modified_query), params or {})
-            rows_data = result.fetchall()
+            rows_data = result.fetchmany(limit + 1)
 
             # Convert to list of dicts
             columns = list(result.keys())
-            rows = [dict(zip(columns, row)) for row in rows_data]
+            truncated = len(rows_data) > limit
+            rows = [dict(zip(columns, row)) for row in rows_data[:limit]]
 
             # Pre-process rows to handle timezone-aware datetimes and bytes
             # orjson doesn't support timezone-aware datetimes or bytes even with a default handler
@@ -129,14 +140,16 @@ class QueryExecutor:
                         processed_row[key] = value
                 processed_rows.append(processed_row)
 
-            # Now use orjson with fallback for remaining types
+            # Bound serialized output independently of SQL LIMIT and row count.
             json_bytes = orjson.dumps(processed_rows, default=str)
+            if len(json_bytes) > max_result_bytes:
+                raise ValueError(
+                    f"Query result exceeds {max_result_bytes} bytes; "
+                    "select fewer or smaller columns"
+                )
             rows = orjson.loads(json_bytes)
 
             execution_time = (time.time() - start_time) * 1000  # Convert to ms
-
-            # Check if results were truncated
-            truncated = limit is not None and len(rows) == limit
 
             return QueryResult(
                 query=modified_query,
@@ -168,7 +181,8 @@ class QueryExecutor:
         # Use adapter for database-specific efficient sampling
         query = await self.adapter.get_sample_query(table_name, schema, limit)
 
-        return await self.execute_query(query, limit=limit)
+        # Existing sample_data truncates individual cells in its MCP handler.
+        return await self.execute_query(query, limit=limit, max_result_bytes=1_000_000)
 
     async def explain_query(self, query: str, analyze: bool = False) -> ExplainPlan:
         """
@@ -234,6 +248,15 @@ class QueryExecutor:
                 recommendations_omitted=plan_info.get("recommendations_omitted", 0),
             )
 
+    @staticmethod
+    def _validate_limit(limit: int | None) -> None:
+        if (
+            isinstance(limit, bool)
+            or not isinstance(limit, int)
+            or not 1 <= limit <= 10000
+        ):
+            raise ValueError("Query limit must be an integer between 1 and 10000")
+
     def _validate_query(self, query: str) -> None:
         """
         Validate that query is safe (read-only).
@@ -250,6 +273,10 @@ class QueryExecutor:
         # Remove comments
         normalized = re.sub(r"--[^\n]*", "", normalized)
         normalized = re.sub(r"/\*.*?\*/", "", normalized, flags=re.DOTALL)
+
+        # Reject stacked statements, including those hidden after a terminal semicolon.
+        if ";" in normalized.rstrip(";").strip():
+            raise ValueError("Only one SQL statement is allowed")
 
         # Get first keyword
         first_keyword = normalized.split()[0] if normalized.split() else ""

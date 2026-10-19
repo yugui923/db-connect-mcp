@@ -1,0 +1,7 @@
+# PostgreSQL health snapshot
+
+`postgres_health` appears only for PostgreSQL connections. It returns XID age (maximum across connectable databases), invalid or not-ready index count, unvalidated constraint count, maximum WAL bytes retained by a replication slot, and percentage of `max_connections` used by client backends. Each finding includes `observed_value`, `threshold`, `observed_at`, `severity`, and `state`. The full result is JSON text for older MCP clients and typed structured content for newer clients.
+
+Default advisory warning/critical thresholds are 100M/180M transactions for XID age, 80%/95% connection utilization, 1/10 indexes or constraints, and 1/10 GiB slot retention. Missing values are `insufficient_data`; permission failures are `unavailable`. These are snapshots, not alerts or proof of a root cause. This count includes idle client sessions but not reserved-slot accounting; treat saturation as an approximation. A slot with no `restart_lsn` contributes no retention estimate. Investigate using authorized monitoring before acting; do not run maintenance or change schema based solely on this output.
+
+The server never installs extensions or modifies database objects. Use a database role with read-only privileges. Query results now have a hard 10,000-row maximum even for supplied SQL with a larger LIMIT, and programmatic calls cannot request no limit; server text/structured response caps still apply.

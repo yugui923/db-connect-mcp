@@ -44,6 +44,8 @@ from db_connect_mcp.core import (
     StatisticsAnalyzer,
     paginate_resources,
 )
+from db_connect_mcp.core.pg_health import PostgresHealthChecker
+from db_connect_mcp.models.health import HealthReport
 from db_connect_mcp.models.config import DatabaseConfig, SSHTunnelConfig
 from db_connect_mcp.models.database import DatabaseInfo, SchemaInfo
 from db_connect_mcp.models.query import (
@@ -754,6 +756,9 @@ class DatabaseMCPServer:
             self._create_search_objects_tool(),
         ]
 
+        if self.config.dialect == "postgresql":
+            tools.append(self._create_postgres_health_tool())
+
         if self.adapter.capabilities.foreign_keys:
             tools.append(self._create_get_relationships_tool())
 
@@ -780,6 +785,8 @@ class DatabaseMCPServer:
             "sample_data": self.handle_sample_data,
             "search_objects": self.handle_search_objects,
         }
+        if self.config.dialect == "postgresql":
+            handlers["postgres_health"] = self.handle_postgres_health
         if self.adapter.capabilities.foreign_keys:
             handlers["get_table_relationships"] = self.handle_get_relationships
         if self.adapter.capabilities.advanced_stats:
@@ -818,6 +825,38 @@ class DatabaseMCPServer:
             structured_content=structured_content,
             is_error=is_error,
         )
+
+    def _create_postgres_health_tool(self) -> Tool:
+        return _read_only_tool(
+            name="postgres_health",
+            title="PostgreSQL Health Snapshot",
+            description=(
+                "Read-only point-in-time aggregate checks for XID age, invalid indexes, "
+                "unvalidated constraints, replication slot retention, and connection utilization. "
+                "Thresholds are advisory; missing data is not interpreted as healthy."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {},
+                "required": [],
+                "additionalProperties": False,
+            },
+            output_schema=_model_output_schema(HealthReport),
+        )
+
+    async def handle_postgres_health(
+        self, arguments: dict[str, Any]
+    ) -> list[TextContent]:
+        report = await PostgresHealthChecker(self.connection).check()
+        return [
+            TextContent(
+                type="text",
+                text=truncate_json_response(
+                    json.dumps(report.model_dump(mode="json"), indent=2),
+                    MAX_RESPONSE_DATABASE_INFO,
+                ),
+            )
+        ]
 
     def _create_get_database_info_tool(self) -> Tool:
         """Create get_database_info tool."""
