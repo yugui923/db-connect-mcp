@@ -45,7 +45,7 @@ class QueryExecutor:
     """Safe query execution with validation and limits."""
 
     # Allowed query types (read-only operations)
-    ALLOWED_QUERY_TYPES = {"SELECT", "WITH", "SHOW", "DESCRIBE", "EXPLAIN"}
+    ALLOWED_QUERY_TYPES = {"SELECT", "WITH"}
 
     def __init__(self, connection: DatabaseConnection, adapter: "BaseAdapter"):
         """
@@ -72,7 +72,7 @@ class QueryExecutor:
         Args:
             query: SQL query to execute
             params: Query parameters for parameterized queries
-            limit: Maximum number of rows to return (None for no limit)
+            limit: Maximum number of rows to return (1 to 10,000)
 
         Returns:
             Query result with rows and metadata
@@ -85,16 +85,12 @@ class QueryExecutor:
         self._validate_limit(limit)
         assert limit is not None
 
-        modified_query = query
-        if query.lstrip().upper().startswith(("SELECT ", "WITH ")):
-            # Bound the SQL sent to the database: async execute may buffer rows.
-            # Fetch one extra row to report exact truncation.
-            modified_query = (
-                f"SELECT * FROM ({query.strip().rstrip(';')}) AS bounded_query "
-                f"LIMIT {limit + 1}"
-            )
-        elif not self._has_limit(query):
-            modified_query = self._add_limit(query, limit)
+        # Bound the SQL sent to the database: async execute may buffer rows.
+        # All accepted query types are SELECT/WITH (possibly prefixed by comments).
+        modified_query = (
+            f"SELECT * FROM ({query.strip().rstrip(';').rstrip()}\n) AS bounded_query "
+            f"LIMIT {limit + 1}"
+        )
 
         start_time = time.time()
 
@@ -142,7 +138,11 @@ class QueryExecutor:
 
             # Bound serialized output independently of SQL LIMIT and row count.
             json_bytes = orjson.dumps(processed_rows, default=str)
-            if len(json_bytes) > max_result_bytes:
+            # Include response metadata in the budget, not just row values.
+            metadata_bytes = len(modified_query.encode("utf-8")) + len(
+                orjson.dumps(columns)
+            )
+            if len(json_bytes) + metadata_bytes > max_result_bytes:
                 raise ValueError(
                     f"Query result exceeds {max_result_bytes} bytes; "
                     "select fewer or smaller columns"
@@ -267,27 +267,33 @@ class QueryExecutor:
         Raises:
             ValueError: If query is not allowed
         """
-        # Normalize query
-        normalized = query.strip().upper()
-
-        # Remove comments
-        normalized = re.sub(r"--[^\n]*", "", normalized)
-        normalized = re.sub(r"/\*.*?\*/", "", normalized, flags=re.DOTALL)
-
-        # Reject stacked statements, including those hidden after a terminal semicolon.
-        if ";" in normalized.rstrip(";").strip():
+        # Ignore SQL strings, quoted identifiers and comments while checking syntax.
+        # Unrecognized quoting is rejected rather than risking stacked statements.
+        tokens = re.compile(
+            r"--[^\n]*|/\*.*?\*/|'(?:''|[^'])*'|\"(?:\"\"|[^\"])*\"|"
+            r"\$(?P<tag>[A-Za-z_][A-Za-z_0-9]*)?\$.*?\$(?P=tag)\$",
+            re.DOTALL,
+        )
+        sanitized = tokens.sub(lambda match: " " * len(match.group()), query)
+        # Do not silently accept malformed quoting.
+        if (
+            "'" in sanitized
+            or '"' in sanitized
+            or "/*" in sanitized
+            or "$" in sanitized
+        ):
+            raise ValueError("Unterminated SQL quote or comment")
+        statement = sanitized.strip()
+        if ";" in statement.rstrip().rstrip(";"):
             raise ValueError("Only one SQL statement is allowed")
-
-        # Get first keyword
+        normalized = statement.upper()
         first_keyword = normalized.split()[0] if normalized.split() else ""
-
         if first_keyword not in self.ALLOWED_QUERY_TYPES:
             raise ValueError(
-                f"Only {', '.join(self.ALLOWED_QUERY_TYPES)} queries are allowed. "
-                f"Got: {first_keyword}"
+                f"Only SELECT or WITH queries are allowed. Got: {first_keyword}"
             )
 
-        # Check for dangerous keywords anywhere in query
+        # Check for dangerous keywords outside strings and comments
         dangerous_keywords = {
             "DROP",
             "DELETE",

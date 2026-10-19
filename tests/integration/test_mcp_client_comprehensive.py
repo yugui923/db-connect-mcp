@@ -998,6 +998,16 @@ class TestMCPToolRegistration:
         assert tools == expected
 
     @pytest.mark.asyncio
+    @pytest.mark.postgresql
+    async def test_postgres_health_via_protocol(self, pg_client: ClientSession):
+        """MCP clients receive both a validated typed payload and JSON text."""
+        response = await pg_client.call_tool("postgres_health", arguments={})
+        assert not response.is_error
+        assert response.structured_content is not None
+        assert response.structured_content["findings"]
+        assert json.loads(response.content[0].text) == response.structured_content
+
+    @pytest.mark.asyncio
     @pytest.mark.mysql
     async def test_mysql_registers_9_tools(self, mysql_client: ClientSession):
         """Verify MySQL registers 9 tools (no analyze_column)."""

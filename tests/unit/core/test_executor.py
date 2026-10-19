@@ -91,20 +91,16 @@ class TestQueryValidation:
         executor = QueryExecutor(mock_connection, mock_adapter)
         executor._validate_query("WITH cte AS (SELECT 1) SELECT * FROM cte")
 
-    def test_validate_show_allowed(self, mock_connection, mock_adapter):
-        """Test SHOW queries are allowed."""
+    @pytest.mark.parametrize(
+        "query", ["SHOW TABLES", "DESCRIBE users", "EXPLAIN SELECT 1"]
+    )
+    def test_validate_unbounded_statement_rejected(
+        self, mock_connection, mock_adapter, query
+    ):
+        """Statements that cannot be wrapped with a row cap are rejected."""
         executor = QueryExecutor(mock_connection, mock_adapter)
-        executor._validate_query("SHOW TABLES")
-
-    def test_validate_describe_allowed(self, mock_connection, mock_adapter):
-        """Test DESCRIBE queries are allowed."""
-        executor = QueryExecutor(mock_connection, mock_adapter)
-        executor._validate_query("DESCRIBE users")
-
-    def test_validate_explain_allowed(self, mock_connection, mock_adapter):
-        """Test EXPLAIN queries are allowed."""
-        executor = QueryExecutor(mock_connection, mock_adapter)
-        executor._validate_query("EXPLAIN SELECT * FROM users")
+        with pytest.raises(ValueError, match="SELECT or WITH"):
+            executor._validate_query(query)
 
     def test_validate_insert_rejected(self, mock_connection, mock_adapter):
         """Test INSERT queries are rejected."""

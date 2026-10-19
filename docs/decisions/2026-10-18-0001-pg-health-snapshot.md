@@ -14,4 +14,4 @@ Add a PostgreSQL-only `postgres_health` tool that collects six aggregate catalog
 
 ## Consequences
 
-No new dependency, persistent monitoring state, extension installation, or exposure of slot names is needed. Catalog aggregates can still be costly on enormous installations, and the default thresholds are not a substitute for local operational policy. The SQL text validator is not a full SQL parser; database read-only roles remain essential. Existing callers using `limit=None` must now supply a bounded positive limit.
+No new dependency, persistent monitoring state, extension installation, or exposure of slot names is needed. Catalog aggregates can still be costly on enormous installations, and the default thresholds are not a substitute for local operational policy. The SQL text validator is not a full SQL parser; database read-only roles remain essential. Existing callers using `limit=None` must now supply a bounded positive limit. Raw SHOW, DESCRIBE and EXPLAIN calls through `execute_query` are rejected; use dedicated metadata/explain tools. Only PostgreSQL permission-denied errors are represented as unavailable; operational failures surface as errors.

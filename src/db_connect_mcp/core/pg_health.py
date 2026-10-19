@@ -96,7 +96,14 @@ class PostgresHealthChecker:
                 async with self.connection.get_connection() as conn:
                     result = await conn.execute(text(query))
                     values[check] = result.scalar_one_or_none()
-            except DBAPIError:
+            except DBAPIError as exc:
+                # PostgreSQL insufficient_privilege only; timeouts, failover and
+                # connection failures must surface to the caller, not look like ACLs.
+                if (
+                    getattr(exc.orig, "sqlstate", None) != "42501"
+                    and getattr(exc.orig, "pgcode", None) != "42501"
+                ):
+                    raise
                 unavailable.add(check)
         findings = evaluate_health(values, at)
         for finding in findings:

@@ -14,6 +14,18 @@ def test_query_rejects_unbounded_or_invalid_limit(limit: int | None) -> None:
         executor._validate_limit(limit)
 
 
+@pytest.mark.parametrize("query", ["SHOW TABLES", "DESCRIBE users", "EXPLAIN SELECT 1"])
+def test_query_rejects_unbounded_statement_types(query: str) -> None:
+    executor = QueryExecutor(MagicMock(), MagicMock())
+    with pytest.raises(ValueError, match="SELECT or WITH"):
+        executor._validate_query(query)
+
+
+def test_query_accepts_semicolon_inside_string() -> None:
+    executor = QueryExecutor(MagicMock(), MagicMock())
+    executor._validate_query("SELECT ';' AS separator")
+
+
 def test_query_rejects_multiple_sql_statements() -> None:
     executor = QueryExecutor(MagicMock(), MagicMock())
     with pytest.raises(ValueError, match="statement"):

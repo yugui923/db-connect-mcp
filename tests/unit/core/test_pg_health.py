@@ -1,8 +1,12 @@
 """PostgreSQL health evaluation tests."""
 
 from datetime import datetime, timezone
+from unittest.mock import AsyncMock, MagicMock
 
-from db_connect_mcp.core.pg_health import evaluate_health
+import pytest
+from sqlalchemy.exc import OperationalError, ProgrammingError
+
+from db_connect_mcp.core.pg_health import PostgresHealthChecker, evaluate_health
 
 
 def test_evaluate_health_reports_threshold_and_insufficient_data() -> None:
@@ -25,6 +29,29 @@ def test_evaluate_health_reports_threshold_and_insufficient_data() -> None:
     assert by_check["invalid_indexes"].severity == "warning"
     assert by_check["slot_retained_bytes"].state == "insufficient_data"
     assert all(finding.observed_at == observed for finding in findings)
+
+
+@pytest.mark.asyncio
+async def test_health_propagates_non_permission_database_failure() -> None:
+    connection = MagicMock()
+    connection.dialect = "postgresql"
+    connection.get_connection.return_value.__aenter__ = AsyncMock(
+        side_effect=OperationalError("timeout", {}, Exception("timeout"))
+    )
+    with pytest.raises(OperationalError):
+        await PostgresHealthChecker(connection).check()
+
+
+@pytest.mark.asyncio
+async def test_health_classifies_permission_denial_as_unavailable() -> None:
+    connection = MagicMock()
+    connection.dialect = "postgresql"
+    original = Exception("permission denied")
+    original.sqlstate = "42501"  # type: ignore[attr-defined]
+    denied = ProgrammingError("query", {}, original)
+    connection.get_connection.return_value.__aenter__ = AsyncMock(side_effect=denied)
+    report = await PostgresHealthChecker(connection).check()
+    assert all(finding.state == "unavailable" for finding in report.findings)
 
 
 def test_evaluate_health_avoids_false_saturation_with_unknown_capacity() -> None:
