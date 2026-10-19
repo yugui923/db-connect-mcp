@@ -1,6 +1,7 @@
 """Safe query execution with validation."""
 
 import datetime
+import json
 import re
 import time
 from typing import TYPE_CHECKING, Any, Optional
@@ -201,8 +202,10 @@ class QueryExecutor:
             # Get raw plan output
             # PostgreSQL EXPLAIN (FORMAT JSON) returns JSON as string
             # Other databases may return multiple rows of text
-            if len(rows) == 1 and isinstance(rows[0][0], str):
-                # Single row - might be JSON or text
+            if len(rows) == 1 and isinstance(rows[0][0], (dict, list)):
+                # Some drivers decode EXPLAIN JSON before returning it.
+                plan_text = json.dumps(rows[0][0])
+            elif len(rows) == 1 and isinstance(rows[0][0], str):
                 plan_text = rows[0][0]
             else:
                 # Multiple rows - join as text

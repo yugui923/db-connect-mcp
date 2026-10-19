@@ -60,7 +60,7 @@ class ExplainPlan(BaseModel):
 
     query: str = Field(..., description="Analyzed SQL query")
     plan: str = Field(..., description="Execution plan as formatted string")
-    plan_json: Optional[dict[str, Any]] = Field(
+    plan_json: dict[str, Any] | list[dict[str, Any]] | None = Field(
         None, description="Execution plan as JSON (if supported)"
     )
     estimated_cost: Optional[float] = Field(None, description="Estimated query cost")
