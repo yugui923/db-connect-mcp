@@ -60,6 +60,33 @@ class PgStatReporter:
                 )
                 if metric not in names:
                     return TopQueriesReport(status="unsupported_version", queries=[])
+                if include_query_text:
+                    source = f'"{schema}"."pg_stat_statements"'
+                    query_column = "LEFT(query, :text_limit)"
+                    parameters = {"limit": limit, "text_limit": query_text_limit}
+                else:
+                    # The view invokes showtext=true internally even if query is not
+                    # selected. Verify the extension's boolean overload before use.
+                    function = await conn.execute(
+                        text("""
+                        SELECT EXISTS (
+                            SELECT 1 FROM pg_catalog.pg_proc p
+                            JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
+                            WHERE n.nspname = :schema AND p.proname = 'pg_stat_statements'
+                              AND p.pronargs = 1
+                              AND p.proargtypes[0] = 'pg_catalog.bool'::regtype
+                              AND p.proargnames[1] = 'showtext'
+                        )
+                    """),
+                        {"schema": row[0]},
+                    )
+                    if not function.fetchone()[0]:
+                        return TopQueriesReport(
+                            status="unsupported_version", queries=[]
+                        )
+                    source = f'"{schema}"."pg_stat_statements"(showtext := false)'
+                    query_column = "NULL"
+                    parameters = {"limit": limit}
                 # Sorting all tracked statements may be expensive despite LIMIT.
                 # SET LOCAL applies only to this transaction, not a pooled session.
                 await conn.execute(text("SET LOCAL statement_timeout = '5s'"))
@@ -67,18 +94,14 @@ class PgStatReporter:
                 rows = await conn.execute(
                     text(f"""
                     SELECT queryid, calls, {metric}, {metric} / NULLIF(calls, 0), rows,
-                           CASE WHEN :include_text THEN LEFT(query, :text_limit) ELSE NULL END
-                    FROM "{schema}"."pg_stat_statements"
+                           {query_column}
+                    FROM {source}
                     WHERE dbid = (SELECT oid FROM pg_catalog.pg_database WHERE datname = current_database())
                       AND userid = (SELECT oid FROM pg_catalog.pg_roles WHERE rolname = current_user)
                     ORDER BY {metric} DESC NULLS LAST, queryid
                     LIMIT :limit
                 """),
-                    {
-                        "include_text": include_query_text,
-                        "text_limit": query_text_limit,
-                        "limit": limit,
-                    },
+                    parameters,
                 )
                 return TopQueriesReport(
                     status="available",

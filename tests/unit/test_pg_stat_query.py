@@ -82,7 +82,42 @@ async def test_report_uses_bounded_schema_qualified_sql_and_opt_in_text(
     assert "current_database()" in sql
     assert "current_user" in sql
     assert "pg_catalog.pg_roles" in sql
-    assert parameters == {"limit": 3, "include_text": True, "text_limit": 80}
+    assert parameters == {"limit": 3, "text_limit": 80}
+
+
+@pytest.mark.asyncio
+async def test_report_default_uses_showtext_false_when_function_available(
+    reporter_factory,
+) -> None:
+    reporter, queries = reporter_factory(
+        [
+            ("public",),
+            columns(*BASE_COLUMNS, "total_exec_time"),
+            (True,),
+            [(42, 1, 5.0, 5.0, 2, None)],
+        ]
+    )
+    report = await reporter.get_top_queries()
+    assert report.status == "available"
+    assert report.queries[0].query is None
+    assert "pg_catalog.pg_proc" in queries[2][0]
+    sql, parameters = queries[4]
+    assert 'FROM "public"."pg_stat_statements"(showtext := false)' in sql
+    assert "LEFT(query" not in sql
+    assert parameters == {"limit": 10}
+
+
+@pytest.mark.asyncio
+async def test_report_default_without_showtext_function_is_unsupported(
+    reporter_factory,
+) -> None:
+    reporter, queries = reporter_factory(
+        [("public",), columns(*BASE_COLUMNS, "total_exec_time"), (False,)]
+    )
+    report = await reporter.get_top_queries()
+    assert report.status == "unsupported_version"
+    assert report.queries == []
+    assert len(queries) == 3
 
 
 @pytest.mark.asyncio
@@ -117,6 +152,7 @@ async def test_report_legacy_total_time_returns_metrics(reporter_factory) -> Non
         [
             ("public",),
             columns(*BASE_COLUMNS, "total_time"),
+            (True,),
             [(42, 0, 7.5, None, 0, None)],
         ]
     )
@@ -125,8 +161,8 @@ async def test_report_legacy_total_time_returns_metrics(reporter_factory) -> Non
     assert report.queries[0].total_exec_time_ms == 7.5
     assert report.queries[0].mean_exec_time_ms == 0
     assert report.queries[0].query is None
-    assert "total_time / NULLIF(calls, 0)" in queries[3][0]
-    assert queries[3][1]["include_text"] is False
+    assert "total_time / NULLIF(calls, 0)" in queries[4][0]
+    assert 'pg_stat_statements"(showtext := false)' in queries[4][0]
 
 
 @pytest.mark.asyncio
@@ -147,18 +183,28 @@ async def test_report_extension_not_loaded_returns_status(
     reporter_factory, state
 ) -> None:
     reporter, queries = reporter_factory(
-        [("public",), columns(*BASE_COLUMNS, "total_exec_time"), db_error(state)]
+        [
+            ("public",),
+            columns(*BASE_COLUMNS, "total_exec_time"),
+            (True,),
+            db_error(state),
+        ]
     )
     report = await reporter.get_top_queries()
     assert report.status == "extension_not_loaded"
     assert report.queries == []
-    assert len(queries) == 4
+    assert len(queries) == 5
 
 
 @pytest.mark.asyncio
 async def test_report_query_timeout_propagates_as_error(reporter_factory) -> None:
     reporter, _ = reporter_factory(
-        [("public",), columns(*BASE_COLUMNS, "total_exec_time"), db_error("57014")]
+        [
+            ("public",),
+            columns(*BASE_COLUMNS, "total_exec_time"),
+            (True,),
+            db_error("57014"),
+        ]
     )
     with pytest.raises(DBAPIError):
         await reporter.get_top_queries()
