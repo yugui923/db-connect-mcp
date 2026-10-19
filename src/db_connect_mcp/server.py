@@ -952,7 +952,7 @@ class DatabaseMCPServer:
             name="execute_query",
             title="Execute Read-Only Query",
             description=(
-                "Execute a bounded read-only SELECT, WITH, or EXPLAIN query and "
+                "Execute a bounded read-only SELECT or WITH query and "
                 "return rows with execution metadata."
             ),
             input_schema={
@@ -1344,6 +1344,38 @@ class DatabaseMCPServer:
         final_result = wrap_response_with_truncation_info(result_data, truncated_fields)
 
         response = json.dumps(final_result, indent=2)
+        if len(response) > MAX_RESPONSE_SAMPLE_DATA:
+            # Prefer compact JSON before dropping rows. When even that exceeds
+            # the MCP cap, retain the largest prefix that fits with metadata.
+            response = json.dumps(
+                final_result, separators=(",", ":"), ensure_ascii=False
+            )
+            if len(response) > MAX_RESPONSE_SAMPLE_DATA and result_data["rows"]:
+                result_data["truncated"] = True
+                result_data["warning"] = "Sample truncated to response size limit"
+                if "rows" not in truncated_fields:
+                    truncated_fields.append("rows")
+                final_result = wrap_response_with_truncation_info(
+                    result_data, truncated_fields
+                )
+                rows = result_data["rows"]
+                low, high = 0, len(rows)
+                while low < high:
+                    mid = (low + high + 1) // 2
+                    result_data["rows"] = rows[:mid]
+                    result_data["row_count"] = mid
+                    candidate = json.dumps(
+                        final_result, separators=(",", ":"), ensure_ascii=False
+                    )
+                    if len(candidate) <= MAX_RESPONSE_SAMPLE_DATA:
+                        low = mid
+                    else:
+                        high = mid - 1
+                result_data["rows"] = rows[:low]
+                result_data["row_count"] = low
+                response = json.dumps(
+                    final_result, separators=(",", ":"), ensure_ascii=False
+                )
         return [
             TextContent(
                 type="text",

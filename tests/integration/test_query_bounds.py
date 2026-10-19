@@ -1,8 +1,11 @@
 """Live query result caps, including caller-authored SQL LIMIT."""
 
+import json
+from unittest.mock import AsyncMock
+
 import pytest
 
-
+from db_connect_mcp.server import DatabaseMCPServer, _structured_tool_result
 from db_connect_mcp.adapters import create_adapter
 from db_connect_mcp.core.connection import DatabaseConnection
 from db_connect_mcp.core.executor import QueryExecutor
@@ -81,6 +84,49 @@ async def test_mysql_existing_limit_is_bounded(mysql_database_url: str) -> None:
         assert result.row_count == 1
         assert result.truncated
         assert result.rows[0]["n"] == 1
+    finally:
+        await connection.dispose()
+
+
+@pytest.mark.asyncio
+async def test_sample_data_live_pg_large_text_and_bytea_fit_mcp(
+    pg_database_url: str,
+) -> None:
+    config = DatabaseConfig(url=pg_database_url)
+    connection = DatabaseConnection(config)
+    await connection.initialize()
+    try:
+        server = DatabaseMCPServer.__new__(DatabaseMCPServer)
+        server.executor = QueryExecutor(connection, create_adapter(config))
+        for expression, column in [
+            ("repeat('x', 500)", "description"),
+            ("decode(repeat('78', 800000), 'hex')", "blob"),
+        ]:
+            # No DDL or fixture mutations: sampling a read-only set-returning
+            # query exercises real PG streaming and MCP serialization.
+            query = (
+                f"SELECT {expression} AS {column} "
+                "FROM generate_series(1, 300) AS n LIMIT 300"
+            )
+            server.executor.adapter.get_sample_query = AsyncMock(return_value=query)
+            content = await server.handle_sample_data(
+                {"table": "synthetic", "limit": 300}
+            )
+            payload = json.loads(content[0].text)
+            assert "error" not in payload
+            assert len(content[0].text) <= 100_000
+            structured, is_error = _structured_tool_result("sample_data", content)
+            assert not is_error
+            assert structured["rows"]
+            assert structured["row_count"] == len(structured["rows"])
+            assert structured["truncated"] is True
+            assert "rows" in structured["_truncation_info"]["truncated_fields"]
+            if column == "blob":
+                assert len(structured["rows"][0][column]) == 500
+                assert (
+                    f"rows[].{column}"
+                    in structured["_truncation_info"]["truncated_fields"]
+                )
     finally:
         await connection.dispose()
 

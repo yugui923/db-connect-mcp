@@ -9,7 +9,7 @@ import orjson
 import pytest
 
 from db_connect_mcp.core.executor import QueryExecutor
-from db_connect_mcp.server import DatabaseMCPServer
+from db_connect_mcp.server import DatabaseMCPServer, _structured_tool_result
 
 
 @pytest.mark.parametrize("limit", [None, 0, -1, 10001])
@@ -161,3 +161,70 @@ async def test_sample_data_truncates_large_cell_before_byte_budget() -> None:
     payload = json.loads(content[0].text)
     assert payload["data"]["rows"][0]["description"] == "x" * 497 + "..."
     assert "rows[].description" in payload["_truncation_info"]["truncated_fields"]
+
+
+@pytest.mark.asyncio
+async def test_sample_data_preserves_rows_within_mcp_budget() -> None:
+    result = MagicMock()
+    result.keys.return_value = ["description"]
+    result.fetchone = AsyncMock(side_effect=[("x" * 500,) for _ in range(300)] + [None])
+    result.close = AsyncMock()
+    conn = MagicMock()
+    conn.stream = AsyncMock(return_value=result)
+
+    @asynccontextmanager
+    async def get_connection():
+        yield conn
+
+    connection = MagicMock(dialect="postgresql")
+    connection.get_connection = get_connection
+    adapter = MagicMock()
+    adapter.get_sample_query = AsyncMock(
+        return_value="SELECT description FROM t LIMIT 300"
+    )
+    server = DatabaseMCPServer.__new__(DatabaseMCPServer)
+    server.executor = QueryExecutor(connection, adapter)
+    content = await server.handle_sample_data({"table": "t", "limit": 300})
+    payload = json.loads(content[0].text)
+    assert "error" not in payload
+    structured, is_error = _structured_tool_result("sample_data", content)
+    assert not is_error
+    assert len(content[0].text) <= 100_000
+    assert 0 < structured["row_count"] == len(structured["rows"]) < 300
+    assert structured["truncated"] is True
+    assert "rows" in structured["_truncation_info"]["truncated_fields"]
+    assert result.close.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_sample_data_previews_binary_before_byte_budget() -> None:
+    result = MagicMock()
+    result.keys.return_value = ["blob"]
+    result.fetchone = AsyncMock(side_effect=[(b"x" * 1_100_000,), None])
+    result.close = AsyncMock()
+    conn = MagicMock()
+    conn.stream = AsyncMock(return_value=result)
+
+    @asynccontextmanager
+    async def get_connection():
+        yield conn
+
+    connection = MagicMock(dialect="postgresql")
+    connection.get_connection = get_connection
+    adapter = MagicMock()
+    adapter.get_sample_query = AsyncMock(return_value="SELECT blob FROM t LIMIT 2")
+    server = DatabaseMCPServer.__new__(DatabaseMCPServer)
+    server.executor = QueryExecutor(connection, adapter)
+    content = await server.handle_sample_data({"table": "t", "limit": 2})
+    payload = json.loads(content[0].text)
+    assert len(payload["data"]["rows"][0]["blob"]) == 500
+    assert payload["data"]["rows"][0]["blob"].endswith("...")
+    assert "rows[].blob" in payload["_truncation_info"]["truncated_fields"]
+
+
+def test_execute_query_description_excludes_rejected_explain() -> None:
+    server = DatabaseMCPServer.__new__(DatabaseMCPServer)
+    tool = server._create_execute_query_tool()
+    assert "SELECT" in tool.description
+    assert "WITH" in tool.description
+    assert "EXPLAIN" not in tool.description

@@ -1,5 +1,6 @@
 """Safe query execution with validation."""
 
+import base64
 import datetime
 import json
 import re
@@ -140,7 +141,18 @@ class QueryExecutor:
                         # Preserve the MCP sample preview's 500-character cell
                         # limit before the byte budget rejects a large raw cell.
                         for key, value in values.items():
-                            if isinstance(value, str) and len(value) > 500:
+                            if isinstance(value, bytes):
+                                # Only encode the prefix needed for the preview;
+                                # do not materialize huge base64 payloads.
+                                encoded_preview = base64.b64encode(value[:375]).decode(
+                                    "ascii"
+                                )
+                                if len(value) > 375:
+                                    values[key] = encoded_preview[:497] + "..."
+                                    preview_truncated_columns.add(key)
+                                else:
+                                    values[key] = encoded_preview
+                            elif isinstance(value, str) and len(value) > 500:
                                 values[key] = value[:497] + "..."
                                 preview_truncated_columns.add(key)
                     for key, value in values.items():
