@@ -68,6 +68,7 @@ A read-only MCP (Model Context Protocol) server for exploratory data analysis ac
 - **Custom queries** - Execute read-only SQL queries safely
 - **Object search** - Find schemas, tables, views, columns, and indexes without loading the full catalog
 - **Query plans** - Inspect estimated plans or opt into `EXPLAIN ANALYZE` where supported
+- **Hypothetical indexes (PostgreSQL, opt-in)** - Compare HypoPG planner estimates without creating a real index. Requires an administrator-installed HypoPG extension, `DB_HYPOPG_ENABLED=true` on the server, and `opt_in=true` on each `compare_hypothetical_index` call. Provide a single simple SELECT, schema, table, and 1–4 column names; comments, CTEs, functions, literals, parameters, and multiple statements are rejected. The tool uses one read-only connection and `EXPLAIN` without `ANALYZE`, caps planning/lock waits at 5s/1s, and rolls back session-local changes. These estimates are **not** measured speedups.
 
 ### 🔒 Safety Features
 

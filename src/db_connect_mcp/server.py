@@ -44,6 +44,7 @@ from db_connect_mcp.core import (
     StatisticsAnalyzer,
     paginate_resources,
 )
+from db_connect_mcp.core.hypopg import HypoPGComparison, HypoPGResult
 from db_connect_mcp.core.pg_health import PostgresHealthChecker
 from db_connect_mcp.core.pg_stat import PgStatReporter
 from db_connect_mcp.models.config import DatabaseConfig, SSHTunnelConfig
@@ -776,6 +777,8 @@ class DatabaseMCPServer:
 
         if self.adapter.capabilities.explain_plans:
             tools.append(self._create_explain_query_tool())
+        if self.config.hypopg_enabled and self.config.dialect == "postgresql":
+            tools.append(self._create_hypopg_tool())
 
         if (
             self.config.dialect == "postgresql"
@@ -862,6 +865,8 @@ class DatabaseMCPServer:
             handlers["analyze_column"] = self.handle_analyze_column
         if self.adapter.capabilities.explain_plans:
             handlers["explain_query"] = self.handle_explain_query
+        if self.config.hypopg_enabled and self.config.dialect == "postgresql":
+            handlers["compare_hypothetical_index"] = self.handle_hypopg
 
         if (
             self.config.dialect == "postgresql"
@@ -1173,6 +1178,46 @@ class DatabaseMCPServer:
             },
             output_schema=_model_output_schema(ExplainPlan),
         )
+
+    def _create_hypopg_tool(self) -> Tool:
+        """Expose comparison only when the operator explicitly enables it."""
+        return _read_only_tool(
+            name="compare_hypothetical_index",
+            title="Compare Hypothetical Index",
+            description=(
+                "Compare PostgreSQL planner cost estimates before and after a session-local "
+                "HypoPG index. Requires explicit per-call opt-in; never creates a real index."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "minLength": 1, "maxLength": 8192},
+                    "schema": {"type": "string"},
+                    "table": {"type": "string"},
+                    "columns": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "minItems": 1,
+                        "maxItems": 4,
+                    },
+                    "opt_in": {"type": "boolean", "const": True},
+                },
+                "required": ["query", "schema", "table", "columns", "opt_in"],
+                "additionalProperties": False,
+            },
+            output_schema=_model_output_schema(HypoPGResult),
+        )
+
+    async def handle_hypopg(self, arguments: dict[str, Any]) -> list[TextContent]:
+        """Perform one opted-in comparison."""
+        result = await HypoPGComparison(self.connection).compare(
+            arguments["query"],
+            arguments["schema"],
+            arguments["table"],
+            arguments["columns"],
+            opt_in=arguments["opt_in"],
+        )
+        return [TextContent(type="text", text=result.model_dump_json())]
 
     def _create_search_objects_tool(self) -> Tool:
         """Create search_objects tool.
@@ -1992,6 +2037,7 @@ async def main(
             os.getenv("ENABLE_PG_STAT_STATEMENTS"),
             default=False,
         ),
+        hypopg_enabled=os.getenv("DB_HYPOPG_ENABLED") == "true",
     )
 
     # Create and initialize server

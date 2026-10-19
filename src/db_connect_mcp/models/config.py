@@ -214,6 +214,10 @@ class DatabaseConfig(BaseModel):
         le=300,
         description="Pool checkout timeout in seconds",
     )
+    hypopg_enabled: bool = Field(
+        default=False,
+        description="Expose opt-in PostgreSQL hypothetical index comparison when HypoPG is installed",
+    )
     read_only: bool = Field(
         default=True,
         description="Enforce read-only connections",
