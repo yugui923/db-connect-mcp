@@ -142,6 +142,13 @@ DATABASE_URL=your_database_connection_string_here
 
 The server automatically detects the database type and adds appropriate read-only parameters.
 
+For PostgreSQL, set `ENABLE_PG_STAT_STATEMENTS=true` to advertise the optional
+`get_top_queries` tool. It reads bounded cumulative statistics for the current
+user/database if `pg_stat_statements` was installed and preloaded by the database
+administrator. It does not install extensions. Query text is omitted unless
+explicitly requested and can contain sensitive information. See the
+[top-query report contract](docs/specs/pg-stat-report.md) for bounds and statuses.
+
 ### Connection String Examples
 
 The server now provides more flexible and secure URL handling:

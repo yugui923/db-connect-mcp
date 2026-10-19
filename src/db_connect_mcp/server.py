@@ -45,9 +45,11 @@ from db_connect_mcp.core import (
     paginate_resources,
 )
 from db_connect_mcp.core.pg_health import PostgresHealthChecker
-from db_connect_mcp.models.health import HealthReport
+from db_connect_mcp.core.pg_stat import PgStatReporter
 from db_connect_mcp.models.config import DatabaseConfig, SSHTunnelConfig
 from db_connect_mcp.models.database import DatabaseInfo, SchemaInfo
+from db_connect_mcp.models.health import HealthReport
+from db_connect_mcp.models.pg_stat import TopQueriesReport
 from db_connect_mcp.models.query import (
     MAX_EXPLAIN_ADVICE,
     MAX_EXPLAIN_ADVICE_LENGTH,
@@ -609,6 +611,7 @@ class DatabaseMCPServer:
         self.executor: Optional[QueryExecutor] = None
         self.analyzer: Optional[StatisticsAnalyzer] = None
         self.searcher: Optional[ObjectSearcher] = None
+        self.pg_stat_reporter: PgStatReporter | None = None
         self.resource_catalog: DatabaseResourceCatalog | None = None
         self.server = Server(
             "db-connect-mcp",
@@ -639,6 +642,11 @@ class DatabaseMCPServer:
         self.executor = QueryExecutor(self.connection, self.adapter)
         self.analyzer = StatisticsAnalyzer(self.connection, self.adapter)
         self.searcher = ObjectSearcher(self.inspector)
+        if (
+            self.config.dialect == "postgresql"
+            and self.config.enable_pg_stat_statements
+        ):
+            self.pg_stat_reporter = PgStatReporter(self.connection)
         self.resource_catalog = DatabaseResourceCatalog(
             self.config,
             self.connection,
@@ -768,7 +776,56 @@ class DatabaseMCPServer:
         if self.adapter.capabilities.explain_plans:
             tools.append(self._create_explain_query_tool())
 
+        if (
+            self.config.dialect == "postgresql"
+            and self.config.enable_pg_stat_statements
+        ):
+            tools.append(self._create_top_queries_tool())
+
         return tools
+
+    def _create_top_queries_tool(self) -> Tool:
+        return _read_only_tool(
+            name="get_top_queries",
+            title="Get Top PostgreSQL Queries",
+            description=(
+                "Opt-in aggregated pg_stat_statements metrics for the current database "
+                "and current user. Query text is omitted unless explicitly requested; "
+                "it may contain sensitive literals. Does not install extensions."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 50,
+                        "default": 10,
+                    },
+                    "include_query_text": {"type": "boolean", "default": False},
+                    "query_text_limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 2000,
+                        "default": 200,
+                    },
+                },
+                "additionalProperties": False,
+            },
+            output_schema=_model_output_schema(TopQueriesReport),
+        )
+
+    async def handle_get_top_queries(
+        self, arguments: dict[str, Any]
+    ) -> list[TextContent]:
+        if self.pg_stat_reporter is None:
+            raise RuntimeError("PostgreSQL statement reporting is not initialized")
+        report = await self.pg_stat_reporter.get_top_queries(
+            limit=arguments.get("limit", 10),
+            include_query_text=arguments.get("include_query_text", False),
+            query_text_limit=arguments.get("query_text_limit", 200),
+        )
+        return [TextContent(type="text", text=report.model_dump_json(indent=2))]
 
     async def _call_tool(
         self,
@@ -793,6 +850,12 @@ class DatabaseMCPServer:
             handlers["analyze_column"] = self.handle_analyze_column
         if self.adapter.capabilities.explain_plans:
             handlers["explain_query"] = self.handle_explain_query
+
+        if (
+            self.config.dialect == "postgresql"
+            and self.config.enable_pg_stat_statements
+        ):
+            handlers["get_top_queries"] = self.handle_get_top_queries
 
         handler = handlers.get(params.name)
         available_tool = next(
@@ -1912,6 +1975,11 @@ async def main(
         url=database_url,
         ssh_tunnel=ssh_tunnel_config,
         statement_timeout=statement_timeout,
+        enable_pg_stat_statements=_parse_bool_env(
+            "ENABLE_PG_STAT_STATEMENTS",
+            os.getenv("ENABLE_PG_STAT_STATEMENTS"),
+            default=False,
+        ),
     )
 
     # Create and initialize server
