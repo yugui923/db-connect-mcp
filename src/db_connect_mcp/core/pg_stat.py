@@ -24,19 +24,21 @@ class PgStatReporter:
                 "limit and query_text_limit must be within the documented bounds"
             )
         async with self.connection.get_connection() as conn:
-            # Resolve the installed extension schema without relying on search_path.
-            result = await conn.execute(
-                text("""
-                SELECT n.nspname FROM pg_catalog.pg_extension e
-                JOIN pg_catalog.pg_namespace n ON n.oid = e.extnamespace
-                WHERE e.extname = 'pg_stat_statements'
-            """)
-            )
-            row = result.fetchone()
-            if row is None:
-                return TopQueriesReport(status="extension_not_installed", queries=[])
-            schema = str(row[0]).replace('"', '""')
             try:
+                # Resolve the installed extension schema without relying on search_path.
+                result = await conn.execute(
+                    text("""
+                    SELECT n.nspname FROM pg_catalog.pg_extension e
+                    JOIN pg_catalog.pg_namespace n ON n.oid = e.extnamespace
+                    WHERE e.extname = 'pg_stat_statements'
+                """)
+                )
+                row = result.fetchone()
+                if row is None:
+                    return TopQueriesReport(
+                        status="extension_not_installed", queries=[]
+                    )
+                schema = str(row[0]).replace('"', '""')
                 # PG 13+ exposes total_exec_time; older releases use total_time.
                 columns = await conn.execute(
                     text("""
@@ -58,14 +60,17 @@ class PgStatReporter:
                 )
                 if metric not in names:
                     return TopQueriesReport(status="unsupported_version", queries=[])
-                # Only rows for current database; no cross-user query text by default.
+                # Sorting all tracked statements may be expensive despite LIMIT.
+                # SET LOCAL applies only to this transaction, not a pooled session.
+                await conn.execute(text("SET LOCAL statement_timeout = '5s'"))
+                # Include the current role, even if it is a non-login SET ROLE target.
                 rows = await conn.execute(
                     text(f"""
                     SELECT queryid, calls, {metric}, {metric} / NULLIF(calls, 0), rows,
                            CASE WHEN :include_text THEN LEFT(query, :text_limit) ELSE NULL END
                     FROM "{schema}"."pg_stat_statements"
                     WHERE dbid = (SELECT oid FROM pg_catalog.pg_database WHERE datname = current_database())
-                      AND userid = (SELECT usesysid FROM pg_catalog.pg_user WHERE usename = current_user)
+                      AND userid = (SELECT oid FROM pg_catalog.pg_roles WHERE rolname = current_user)
                     ORDER BY {metric} DESC NULLS LAST, queryid
                     LIMIT :limit
                 """),

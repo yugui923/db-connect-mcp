@@ -27,3 +27,4 @@ class TopQueriesReport(BaseModel):
         "unsupported_version",
     ]
     queries: list[TopQuery]
+    truncated: bool = False

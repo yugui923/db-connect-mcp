@@ -85,6 +85,7 @@ MAX_RESPONSE_DESCRIBE_TABLE = 100000  # Detailed table structure
 MAX_RESPONSE_EXPLAIN_QUERY = 100000  # Query execution plans
 MAX_RESPONSE_EXECUTE_QUERY = 100000  # Query results (up to 1000 rows)
 MAX_RESPONSE_SEARCH_OBJECTS = 100000  # Cross-cutting object search results
+MAX_RESPONSE_TOP_QUERIES = 50000  # Statement metrics and optional query text
 MAX_RESOURCE_CONTENT = 100000  # Individual schema or table resource
 
 TOOL_CATALOG_TTL_MS = 3600000
@@ -825,7 +826,18 @@ class DatabaseMCPServer:
             include_query_text=arguments.get("include_query_text", False),
             query_text_limit=arguments.get("query_text_limit", 200),
         )
-        return [TextContent(type="text", text=report.model_dump_json(indent=2))]
+        payload = report.model_dump_json(indent=2)
+        if len(payload.encode("utf-8")) > MAX_RESPONSE_TOP_QUERIES:
+            # Retain the ordered metrics when escaped or multibyte query text expands.
+            report = report.model_copy(deep=True)
+            report.truncated = True
+            for query in report.queries:
+                query.query = None
+            payload = report.model_dump_json(indent=2)
+            while len(payload.encode("utf-8")) > MAX_RESPONSE_TOP_QUERIES:
+                report.queries.pop()
+                payload = report.model_dump_json(indent=2)
+        return [TextContent(type="text", text=payload)]
 
     async def _call_tool(
         self,
