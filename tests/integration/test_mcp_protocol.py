@@ -172,7 +172,14 @@ async def test_diagnostic_prompt_is_available_over_mcp(
         assert "diagnose_query" in [prompt.name for prompt in prompts.prompts]
         result = await client.get_prompt("diagnose_query", {"problem": "slow report"})
         assert result.messages[0].content.type == "text"
-        assert "slow report" in result.messages[0].content.text
+        text = result.messages[0].content.text
+        assert "slow report" in text
+        assert "tools/list" in text
+        assert "get_top_queries" in text and "postgres_health" in text
+        assert "only if advertised" in text
+        assert "result" in text and "does not bound plan execution" in text
+        assert "HypoPG" in text and "opt-in" in text
+        assert "external LLM" in text
     finally:
         await server.cleanup()
 
