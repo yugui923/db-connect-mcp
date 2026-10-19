@@ -4,10 +4,11 @@ import datetime
 import json
 import re
 import time
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, Optional, cast
 
 import orjson
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncConnection
 
 from db_connect_mcp.core.connection import DatabaseConnection
 from db_connect_mcp.models.query import ExplainPlan, QueryResult
@@ -85,7 +86,8 @@ class QueryExecutor:
         self._validate_limit(limit)
         assert limit is not None
 
-        # Bound the SQL sent to the database: async execute may buffer rows.
+        # Bound row count in the SQL sent to the database. The ClickHouse
+        # synchronous DBAPI still materializes its result before fetchmany.
         # All accepted query types are SELECT/WITH (possibly prefixed by comments).
         modified_query = (
             f"SELECT * FROM ({query.strip().rstrip(';').rstrip()}\n) AS bounded_query "
@@ -95,62 +97,64 @@ class QueryExecutor:
         start_time = time.time()
 
         async with self.connection.get_connection() as conn:
-            result = await conn.execute(text(modified_query), params or {})
-            rows_data = result.fetchmany(limit + 1)
-
-            # Convert to list of dicts
-            columns = list(result.keys())
-            truncated = len(rows_data) > limit
-            rows = [dict(zip(columns, row)) for row in rows_data[:limit]]
-
-            # Pre-process rows to handle timezone-aware datetimes and bytes
-            # orjson doesn't support timezone-aware datetimes or bytes even with a default handler
-            import base64
-
-            processed_rows = []
-            for row in rows:
-                processed_row = {}
-                for key, value in row.items():
-                    # Convert timezone-aware datetime/time to ISO string
-                    if isinstance(value, datetime.datetime):
-                        # datetime.datetime has tzinfo
-                        if value.tzinfo is not None:
-                            processed_row[key] = value.isoformat()
-                        else:
-                            # Let orjson handle naive datetime objects
-                            processed_row[key] = value
-                    elif isinstance(value, datetime.time):
-                        # datetime.time has tzinfo
-                        if value.tzinfo is not None:
-                            processed_row[key] = value.isoformat()
-                        else:
-                            # Let orjson handle naive time objects
-                            processed_row[key] = value
-                    elif isinstance(value, datetime.date):
-                        # datetime.date doesn't have tzinfo, let orjson handle it
-                        processed_row[key] = value
-                    elif isinstance(value, bytes):
-                        # Convert bytes to base64 string
-                        processed_row[key] = base64.b64encode(value).decode("utf-8")
-                    else:
-                        processed_row[key] = value
-                processed_rows.append(processed_row)
-
-            # Bound serialized output independently of SQL LIMIT and row count.
-            json_bytes = orjson.dumps(processed_rows, default=str)
-            # Include response metadata in the budget, not just row values.
-            metadata_bytes = len(modified_query.encode("utf-8")) + len(
-                orjson.dumps(columns)
-            )
-            if len(json_bytes) + metadata_bytes > max_result_bytes:
-                raise ValueError(
-                    f"Query result exceeds {max_result_bytes} bytes; "
-                    "select fewer or smaller columns"
+            is_clickhouse = self.connection.dialect in {"clickhouse", "clickhousedb"}
+            if is_clickhouse:
+                result = await conn.execute(text(modified_query), params or {})
+            else:
+                result = await cast(AsyncConnection, conn).stream(
+                    text(modified_query), params or {}
                 )
-            rows = orjson.loads(json_bytes)
+            try:
+                columns = list(result.keys())
+                # Leave room for the response envelope (timing, count, flags, warning),
+                # and account for query/column metadata before fetching any rows.
+                budget = (
+                    max_result_bytes
+                    - len(modified_query.encode("utf-8"))
+                    - len(orjson.dumps(columns))
+                    - 256
+                )
+                if budget < 2:
+                    raise ValueError(
+                        f"Query result exceeds {max_result_bytes} bytes; "
+                        "select fewer or smaller columns"
+                    )
+                rows: list[dict[str, Any]] = []
+                used = 2  # JSON array brackets
+                truncated = False
+                for index in range(limit + 1):
+                    row = (
+                        result.fetchone() if is_clickhouse else await result.fetchone()
+                    )
+                    if row is None:
+                        break
+                    if index == limit:
+                        truncated = True
+                        break
+                    # A single decoded cell can already be large at this point;
+                    # reject it before retaining another row or serializing the array.
+                    values = dict(zip(columns, row))
+                    for key, value in values.items():
+                        if (
+                            isinstance(value, (datetime.datetime, datetime.time))
+                            and value.tzinfo is not None
+                        ):
+                            values[key] = value.isoformat()
+                    encoded = orjson.dumps(values, default=json_default)
+                    used += len(encoded) + (1 if rows else 0)
+                    if used > budget:
+                        raise ValueError(
+                            f"Query result exceeds {max_result_bytes} bytes; "
+                            "select fewer or smaller columns"
+                        )
+                    rows.append(orjson.loads(encoded))
+            finally:
+                if is_clickhouse:
+                    result.close()
+                else:
+                    await result.close()
 
-            execution_time = (time.time() - start_time) * 1000  # Convert to ms
-
+            execution_time = (time.time() - start_time) * 1000
             return QueryResult(
                 query=modified_query,
                 rows=rows,
