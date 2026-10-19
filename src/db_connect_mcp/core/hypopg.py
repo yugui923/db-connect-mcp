@@ -1,10 +1,11 @@
 """Opt-in, session-local PostgreSQL hypothetical-index plan comparison."""
 
 import re
-from typing import Any
+from typing import Any, cast
 
 from pydantic import BaseModel, Field
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncConnection
 
 from db_connect_mcp.core.connection import DatabaseConnection
 
@@ -82,8 +83,15 @@ class HypoPGComparison:
         columns = [self.validate_identifier(column) for column in columns]
         quoted_columns = ", ".join('"' + column + '"' for column in columns)
         index_sql = f'CREATE INDEX ON "{schema}"."{table}" ({quoted_columns})'
-        async with self.connection.get_connection() as conn:
+        async with self.connection.get_connection() as connection:
+            # PostgreSQL uses an async SQLAlchemy connection, never the ClickHouse wrapper.
+            conn = cast(AsyncConnection, connection)
+            oid: int | None = None
+            extension_schema: str | None = None
             try:
+                # The connection setup uses SET SESSION CHARACTERISTICS, which does
+                # not change a transaction that has already begun during checkout.
+                await conn.execute(text("SET TRANSACTION READ ONLY"))
                 await conn.execute(text("SET LOCAL statement_timeout = '5000ms'"))
                 await conn.execute(text("SET LOCAL lock_timeout = '1000ms'"))
                 extension = await conn.execute(
@@ -134,13 +142,7 @@ class HypoPGComparison:
                 if index_row is None:
                     raise ValueError("HypoPG did not return a hypothetical index")
                 oid = int(index_row[0])
-                try:
-                    hypothetical = await self._explain(conn, safe_query)
-                finally:
-                    await conn.execute(
-                        text(f'SELECT "{extension_schema}".hypopg_drop_index(:oid)'),
-                        {"oid": oid},
-                    )
+                hypothetical = await self._explain(conn, safe_query)
                 return HypoPGResult(
                     baseline_plan=baseline,
                     hypothetical_plan=hypothetical,
@@ -151,8 +153,25 @@ class HypoPGComparison:
                     hypothetical_index=index_sql,
                 )
             finally:
-                # Transactional cleanup even if detection, creation or EXPLAIN fails.
-                await conn.rollback()
+                # A failed statement aborts the transaction, but HypoPG's indexes
+                # are session-local and survive rollback. Roll back first, then drop
+                # on this very connection. Never return an unverified backend to pool.
+                try:
+                    await conn.rollback()
+                    if oid is not None and extension_schema is not None:
+                        dropped = await conn.execute(
+                            text(
+                                f'SELECT "{extension_schema}".hypopg_drop_index(:oid)'
+                            ),
+                            {"oid": oid},
+                        )
+                        row = dropped.fetchone()
+                        if row is None or row[0] is not True:
+                            raise RuntimeError("HypoPG index cleanup was not confirmed")
+                        await conn.rollback()
+                except BaseException:
+                    await conn.invalidate()
+                    raise
 
     @staticmethod
     async def _explain(conn: Any, query: str) -> dict[str, Any]:
