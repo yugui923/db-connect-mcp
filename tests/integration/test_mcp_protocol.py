@@ -162,6 +162,21 @@ class MCPProtocolHelper:
         return data
 
 
+@pytest.mark.asyncio
+async def test_diagnostic_prompt_is_available_over_mcp(
+    pg_config: DatabaseConfig,
+) -> None:
+    server, client = await MCPProtocolHelper.create_test_server_and_client(pg_config)
+    try:
+        prompts = await client.list_prompts()
+        assert "diagnose_query" in [prompt.name for prompt in prompts.prompts]
+        result = await client.get_prompt("diagnose_query", {"problem": "slow report"})
+        assert result.messages[0].content.type == "text"
+        assert "slow report" in result.messages[0].content.text
+    finally:
+        await server.cleanup()
+
+
 class TestMCPServerLifecycle:
     """Test MCP server initialization, cleanup, and lifecycle management."""
 
