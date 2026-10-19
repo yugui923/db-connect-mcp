@@ -18,6 +18,7 @@ class HypoPGResult(BaseModel):
     baseline_estimated_cost: float
     hypothetical_estimated_cost: float
     hypothetical_index: str
+    hypothetical_index_used: bool
     note: str = Field(
         default="Planner estimates only; no query executed, no persistent index created."
     )
@@ -87,6 +88,7 @@ class HypoPGComparison:
             # PostgreSQL uses an async SQLAlchemy connection, never the ClickHouse wrapper.
             conn = cast(AsyncConnection, connection)
             oid: int | None = None
+            create_attempted = False
             extension_schema: str | None = None
             try:
                 # The connection setup uses SET SESSION CHARACTERISTICS, which does
@@ -109,15 +111,22 @@ class HypoPGComparison:
                 extension_schema = self.validate_identifier(row[0])
                 relation = await conn.execute(
                     text(
-                        "SELECT c.oid FROM pg_catalog.pg_class c "
+                        "SELECT c.oid, pg_catalog.has_table_privilege(c.oid, 'SELECT') "
+                        "AND pg_catalog.has_schema_privilege(n.oid, 'USAGE') "
+                        "FROM pg_catalog.pg_class c "
                         "JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace "
                         "WHERE n.nspname = :schema AND c.relname = :table AND c.relkind IN ('r', 'p')"
                     ),
                     {"schema": schema, "table": table},
                 )
-                if relation.fetchone() is None:
+                relation_row = relation.fetchone()
+                if relation_row is None:
                     raise ValueError(
-                        "Candidate must name an accessible ordinary or partitioned table"
+                        "Candidate must name an ordinary or partitioned table"
+                    )
+                if not relation_row[1]:
+                    raise ValueError(
+                        "Candidate table requires schema USAGE and table SELECT privilege"
                     )
                 available = await conn.execute(
                     text(
@@ -132,6 +141,7 @@ class HypoPGComparison:
                 if not set(columns).issubset({r[0] for r in available.fetchall()}):
                     raise ValueError("Candidate columns must exist on the named table")
                 baseline = await self._explain(conn, safe_query)
+                create_attempted = True
                 created = await conn.execute(
                     text(
                         f'SELECT * FROM "{extension_schema}".hypopg_create_index(:definition)'
@@ -142,6 +152,7 @@ class HypoPGComparison:
                 if index_row is None:
                     raise ValueError("HypoPG did not return a hypothetical index")
                 oid = int(index_row[0])
+                index_name = str(index_row[1])
                 hypothetical = await self._explain(conn, safe_query)
                 return HypoPGResult(
                     baseline_plan=baseline,
@@ -151,6 +162,9 @@ class HypoPGComparison:
                         hypothetical["Plan"]["Total Cost"]
                     ),
                     hypothetical_index=index_sql,
+                    hypothetical_index_used=self._uses_index(
+                        hypothetical["Plan"], index_name
+                    ),
                 )
             finally:
                 # A failed statement aborts the transaction, but HypoPG's indexes
@@ -169,9 +183,19 @@ class HypoPGComparison:
                         if row is None or row[0] is not True:
                             raise RuntimeError("HypoPG index cleanup was not confirmed")
                         await conn.rollback()
+                    elif create_attempted:
+                        # A lost create response can hide a session-local index.
+                        await conn.invalidate()
                 except BaseException:
                     await conn.invalidate()
                     raise
+
+    @staticmethod
+    def _uses_index(plan: dict[str, Any], index_name: str) -> bool:
+        return plan.get("Index Name") == index_name or any(
+            HypoPGComparison._uses_index(child, index_name)
+            for child in plan.get("Plans", [])
+        )
 
     @staticmethod
     async def _explain(conn: Any, query: str) -> dict[str, Any]:

@@ -89,7 +89,7 @@ async def test_same_session_and_cleanup_on_explain_failure():
             return result
         if "pg_catalog.pg_class" in sql:
             result = MagicMock()
-            result.fetchone.return_value = (1,)
+            result.fetchone.return_value = (1, True)
             result.fetchall.return_value = [("id",)]
             return result
         if "hypopg_create_index" in sql:
@@ -129,9 +129,9 @@ def comparison_session():
     conn = AsyncMock()
     calls = []
     extension = ("extensions",)
-    relation = (1,)
+    relation = (1, True)
     attributes = [("id",), ("name",)]
-    index = (123, "index")
+    index = (123, "<123>btree_users_id")
     plans = [
         [{"Plan": {"Total Cost": 15.0}}],
         [{"Plan": {"Total Cost": 5.0}}],
@@ -170,6 +170,7 @@ async def test_comparison_returns_both_plans_and_drops_index(comparison_session)
     assert result.baseline_estimated_cost == 15.0
     assert result.hypothetical_estimated_cost == 5.0
     assert result.hypothetical_index == 'CREATE INDEX ON "public"."users" ("id")'
+    assert result.hypothetical_index_used is False
     assert [sql for sql, _ in calls if "EXPLAIN" in sql] == [
         "EXPLAIN (FORMAT JSON) SELECT * FROM users WHERE id = 1"
     ] * 2
@@ -182,11 +183,50 @@ async def test_comparison_returns_both_plans_and_drops_index(comparison_session)
     assert conn.rollback.await_count == 2
 
 
+@pytest.mark.asyncio
+async def test_reports_hypothetical_index_usage_from_nested_plan(comparison_session):
+    comparison, conn, _ = comparison_session
+    original_execute = conn.execute.side_effect
+    explain_count = 0
+
+    async def execute(statement, params=None):
+        nonlocal explain_count
+        if "EXPLAIN" in str(statement):
+            explain_count += 1
+            result = MagicMock()
+            plan = (
+                {
+                    "Plan": {
+                        "Total Cost": 5.0,
+                        "Plans": [
+                            {
+                                "Node Type": "Index Scan",
+                                "Index Name": "<123>btree_users_id",
+                                "Total Cost": 3.0,
+                            }
+                        ],
+                    }
+                }
+                if explain_count == 2
+                else {"Plan": {"Total Cost": 15.0}}
+            )
+            result.fetchone.return_value = ([plan],)
+            return result
+        return await original_execute(statement, params)
+
+    conn.execute.side_effect = execute
+    result = await comparison.compare(
+        "SELECT * FROM users WHERE id = 1", "public", "users", ["id"], opt_in=True
+    )
+    assert result.hypothetical_index_used is True
+
+
 @pytest.mark.parametrize(
     ("change", "message"),
     [
         ("missing_extension", "not installed"),
         ("missing_table", "ordinary or partitioned table"),
+        ("inaccessible_table", "SELECT privilege"),
         ("missing_column", "columns must exist"),
         ("missing_index", "did not return"),
         ("unsafe_extension_schema", "simple PostgreSQL identifiers"),
@@ -216,6 +256,10 @@ async def test_comparison_fails_closed_and_rolls_back(
             response = MagicMock()
             response.fetchone.return_value = None
             return response
+        if change == "inaccessible_table" and "FROM pg_catalog.pg_class" in sql:
+            response = MagicMock()
+            response.fetchone.return_value = (1, False)
+            return response
         if change == "missing_column" and "FROM pg_catalog.pg_attribute" in sql:
             response = MagicMock()
             response.fetchall.return_value = []
@@ -233,6 +277,38 @@ async def test_comparison_fails_closed_and_rolls_back(
         )
     assert not any("hypopg_drop_index" in sql for sql, _ in calls)
     conn.rollback.assert_awaited_once()
+    if change == "missing_index":
+        conn.invalidate.assert_awaited_once()
+    else:
+        conn.invalidate.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["execute", "fetchone", "invalid_oid"])
+async def test_unconfirmed_create_invalidates_backend(comparison_session, failure):
+    comparison, conn, calls = comparison_session
+    original_execute = conn.execute.side_effect
+
+    async def execute(statement, params=None):
+        if "hypopg_create_index" in str(statement):
+            if failure == "execute":
+                raise RuntimeError("create response lost")
+            response = MagicMock()
+            if failure == "fetchone":
+                response.fetchone.side_effect = RuntimeError("create response lost")
+            else:
+                response.fetchone.return_value = ("invalid", "index")
+            return response
+        return await original_execute(statement, params)
+
+    conn.execute.side_effect = execute
+    with pytest.raises((RuntimeError, ValueError)):
+        await comparison.compare(
+            "SELECT * FROM users", "public", "users", ["id"], opt_in=True
+        )
+    conn.rollback.assert_awaited_once()
+    conn.invalidate.assert_awaited_once()
+    assert not any("hypopg_drop_index" in sql for sql, _ in calls)
 
 
 @pytest.mark.asyncio
