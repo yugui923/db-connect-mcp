@@ -197,6 +197,44 @@ async def test_sample_data_preserves_rows_within_mcp_budget() -> None:
 
 
 @pytest.mark.asyncio
+async def test_sample_data_omits_preview_marker_when_only_dropped_row_is_previewed() -> (
+    None
+):
+    result = MagicMock()
+    result.keys.return_value = ["description"]
+    result.fetchone = AsyncMock(
+        side_effect=[("x" * 500,) for _ in range(300)] + [("y" * 1000,), None]
+    )
+    result.close = AsyncMock()
+    conn = MagicMock()
+    conn.stream = AsyncMock(return_value=result)
+
+    @asynccontextmanager
+    async def get_connection():
+        yield conn
+
+    connection = MagicMock(dialect="postgresql")
+    connection.get_connection = get_connection
+    adapter = MagicMock()
+    adapter.get_sample_query = AsyncMock(
+        return_value="SELECT description FROM t LIMIT 301"
+    )
+    server = DatabaseMCPServer.__new__(DatabaseMCPServer)
+    server.executor = QueryExecutor(connection, adapter)
+    content = await server.handle_sample_data({"table": "t", "limit": 301})
+    legacy = json.loads(content[0].text)
+    structured, is_error = _structured_tool_result("sample_data", content)
+
+    assert not is_error
+    assert legacy["data"]["rows"] == structured["rows"]
+    assert legacy["_truncation_info"] == structured["_truncation_info"]
+    assert 0 < structured["row_count"] == len(structured["rows"]) < 300
+    assert structured["truncated"] is True
+    assert structured["_truncation_info"]["truncated_fields"] == ["rows"]
+    assert result.close.await_count == 1
+
+
+@pytest.mark.asyncio
 async def test_sample_data_previews_binary_before_byte_budget() -> None:
     result = MagicMock()
     result.keys.return_value = ["blob"]

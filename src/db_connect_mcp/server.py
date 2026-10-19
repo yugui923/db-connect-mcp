@@ -1331,14 +1331,31 @@ class DatabaseMCPServer:
         result = await self.executor.sample_data(table, schema, limit)
         result_data = result.model_dump(mode="json")
 
-        # Apply truncation to long string values in rows
-        result_data, truncated_fields = apply_truncation_to_sample_data(
+        # Track cell truncation per row so fields from a discarded suffix are
+        # not reported as present in the response.
+        cell_truncations = [
+            {
+                column
+                for column, value in row.items()
+                if isinstance(value, str) and len(value) > MAX_STRING_VALUE_LENGTH
+            }
+            for row in result_data["rows"]
+        ]
+        result_data, _ = apply_truncation_to_sample_data(
             result_data, MAX_RESPONSE_SAMPLE_DATA
         )
-        for column in result._preview_truncated_columns:
-            field = f"rows[].{column}"
-            if field not in truncated_fields:
-                truncated_fields.append(field)
+        for index, columns in enumerate(result._preview_truncated_columns_by_row):
+            cell_truncations[index].update(columns)
+
+        def truncated_fields_for_prefix(count: int) -> list[str]:
+            columns = set().union(*cell_truncations[:count]) if count else set()
+            return [
+                f"rows[].{column}"
+                for column in result_data["columns"]
+                if column in columns
+            ]
+
+        truncated_fields = truncated_fields_for_prefix(len(result_data["rows"]))
 
         # Wrap with truncation info if any fields were truncated
         final_result = wrap_response_with_truncation_info(result_data, truncated_fields)
@@ -1353,19 +1370,19 @@ class DatabaseMCPServer:
             if len(response) > MAX_RESPONSE_SAMPLE_DATA and result_data["rows"]:
                 result_data["truncated"] = True
                 result_data["warning"] = "Sample truncated to response size limit"
-                if "rows" not in truncated_fields:
-                    truncated_fields.append("rows")
-                final_result = wrap_response_with_truncation_info(
-                    result_data, truncated_fields
-                )
                 rows = result_data["rows"]
                 low, high = 0, len(rows)
                 while low < high:
                     mid = (low + high + 1) // 2
                     result_data["rows"] = rows[:mid]
                     result_data["row_count"] = mid
+                    truncated_fields = truncated_fields_for_prefix(mid) + ["rows"]
                     candidate = json.dumps(
-                        final_result, separators=(",", ":"), ensure_ascii=False
+                        wrap_response_with_truncation_info(
+                            result_data, truncated_fields
+                        ),
+                        separators=(",", ":"),
+                        ensure_ascii=False,
                     )
                     if len(candidate) <= MAX_RESPONSE_SAMPLE_DATA:
                         low = mid
@@ -1373,6 +1390,10 @@ class DatabaseMCPServer:
                         high = mid - 1
                 result_data["rows"] = rows[:low]
                 result_data["row_count"] = low
+                truncated_fields = truncated_fields_for_prefix(low) + ["rows"]
+                final_result = wrap_response_with_truncation_info(
+                    result_data, truncated_fields
+                )
                 response = json.dumps(
                     final_result, separators=(",", ":"), ensure_ascii=False
                 )

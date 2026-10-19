@@ -32,7 +32,9 @@ class QueryResult(BaseModel):
         default=False, description="Whether results were truncated due to limits"
     )
     warning: Optional[str] = Field(None, description="Warning message if applicable")
-    _preview_truncated_columns: set[str] = PrivateAttr(default_factory=set)
+    _preview_truncated_columns_by_row: list[set[str]] = PrivateAttr(
+        default_factory=list
+    )
 
     @property
     def is_empty(self) -> bool:

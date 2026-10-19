@@ -124,7 +124,7 @@ class QueryExecutor:
                 rows: list[dict[str, Any]] = []
                 used = 2  # JSON array brackets
                 truncated = False
-                preview_truncated_columns: set[str] = set()
+                preview_truncated_columns_by_row: list[set[str]] = []
                 for index in range(limit + 1):
                     row = (
                         result.fetchone() if is_clickhouse else await result.fetchone()
@@ -137,6 +137,7 @@ class QueryExecutor:
                     # A single decoded cell can already be large at this point;
                     # reject it before retaining another row or serializing the array.
                     values = dict(zip(columns, row))
+                    preview_truncated_columns: set[str] = set()
                     if sample_preview:
                         # Preserve the MCP sample preview's 500-character cell
                         # limit before the byte budget rejects a large raw cell.
@@ -169,6 +170,10 @@ class QueryExecutor:
                             "select fewer or smaller columns"
                         )
                     rows.append(orjson.loads(encoded))
+                    if sample_preview:
+                        preview_truncated_columns_by_row.append(
+                            preview_truncated_columns
+                        )
             finally:
                 if is_clickhouse:
                     result.close()
@@ -185,7 +190,7 @@ class QueryExecutor:
                 truncated=truncated,
                 warning="Results truncated to limit" if truncated else None,
             )
-            output._preview_truncated_columns = preview_truncated_columns
+            output._preview_truncated_columns_by_row = preview_truncated_columns_by_row
             return output
 
     async def sample_data(
