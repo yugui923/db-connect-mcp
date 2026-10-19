@@ -66,6 +66,7 @@ class QueryExecutor:
         limit: Optional[int] = 1000,
         *,
         max_result_bytes: int = 100_000,
+        sample_preview: bool = False,
     ) -> QueryResult:
         """
         Execute a SELECT/WITH query safely.
@@ -122,6 +123,7 @@ class QueryExecutor:
                 rows: list[dict[str, Any]] = []
                 used = 2  # JSON array brackets
                 truncated = False
+                preview_truncated_columns: set[str] = set()
                 for index in range(limit + 1):
                     row = (
                         result.fetchone() if is_clickhouse else await result.fetchone()
@@ -134,6 +136,13 @@ class QueryExecutor:
                     # A single decoded cell can already be large at this point;
                     # reject it before retaining another row or serializing the array.
                     values = dict(zip(columns, row))
+                    if sample_preview:
+                        # Preserve the MCP sample preview's 500-character cell
+                        # limit before the byte budget rejects a large raw cell.
+                        for key, value in values.items():
+                            if isinstance(value, str) and len(value) > 500:
+                                values[key] = value[:497] + "..."
+                                preview_truncated_columns.add(key)
                     for key, value in values.items():
                         if (
                             isinstance(value, (datetime.datetime, datetime.time))
@@ -155,7 +164,7 @@ class QueryExecutor:
                     await result.close()
 
             execution_time = (time.time() - start_time) * 1000
-            return QueryResult(
+            output = QueryResult(
                 query=modified_query,
                 rows=rows,
                 row_count=len(rows),
@@ -164,6 +173,8 @@ class QueryExecutor:
                 truncated=truncated,
                 warning="Results truncated to limit" if truncated else None,
             )
+            output._preview_truncated_columns = preview_truncated_columns
+            return output
 
     async def sample_data(
         self,
@@ -186,7 +197,15 @@ class QueryExecutor:
         query = await self.adapter.get_sample_query(table_name, schema, limit)
 
         # Existing sample_data truncates individual cells in its MCP handler.
-        return await self.execute_query(query, limit=limit, max_result_bytes=1_000_000)
+        result = await self.execute_query(
+            query, limit=limit, max_result_bytes=1_000_000, sample_preview=True
+        )
+        # Adapter SQL already limits rows to `limit`, so the outer limit+1
+        # cannot determine whether a full sample has more rows behind it.
+        if result.row_count == limit and not result.truncated:
+            result.truncated = True
+            result.warning = "Sample may be truncated to limit"
+        return result
 
     async def explain_query(self, query: str, analyze: bool = False) -> ExplainPlan:
         """

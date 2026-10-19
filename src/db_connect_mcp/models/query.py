@@ -2,7 +2,7 @@
 
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PrivateAttr
 
 
 MAX_EXPLAIN_ADVICE = 20
@@ -32,6 +32,7 @@ class QueryResult(BaseModel):
         default=False, description="Whether results were truncated due to limits"
     )
     warning: Optional[str] = Field(None, description="Warning message if applicable")
+    _preview_truncated_columns: set[str] = PrivateAttr(default_factory=set)
 
     @property
     def is_empty(self) -> bool:

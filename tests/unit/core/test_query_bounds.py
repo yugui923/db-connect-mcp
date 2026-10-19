@@ -1,13 +1,15 @@
 """Query result upper-bound regressions."""
 
-from unittest.mock import AsyncMock, MagicMock
+import json
 from contextlib import asynccontextmanager
+from unittest.mock import AsyncMock, MagicMock
 
 import orjson
 
 import pytest
 
 from db_connect_mcp.core.executor import QueryExecutor
+from db_connect_mcp.server import DatabaseMCPServer
 
 
 @pytest.mark.parametrize("limit", [None, 0, -1, 10001])
@@ -81,3 +83,81 @@ async def test_stream_metadata_budget_and_truncation() -> None:
     assert result.fetchone.await_count == 3
     result.close.assert_awaited_once()
     assert len(orjson.dumps(output.model_dump(mode="json"))) > 0
+
+
+@pytest.mark.asyncio
+async def test_execute_query_handler_transmits_many_short_rows() -> None:
+    result = MagicMock()
+    result.keys.return_value = ["n"]
+    result.fetchone = AsyncMock(side_effect=[(i,) for i in range(7000)] + [None])
+    result.close = AsyncMock()
+    conn = MagicMock()
+    conn.stream = AsyncMock(return_value=result)
+
+    @asynccontextmanager
+    async def get_connection():
+        yield conn
+
+    connection = MagicMock(dialect="postgresql")
+    connection.get_connection = get_connection
+    server = DatabaseMCPServer.__new__(DatabaseMCPServer)
+    server.executor = QueryExecutor(connection, MagicMock())
+    content = await server.handle_execute_query(
+        {"query": "SELECT n FROM t", "limit": 7000}
+    )
+    payload = json.loads(content[0].text)
+    assert payload["row_count"] == 7000
+    assert len(payload["rows"]) == 7000
+    assert len(content[0].text) <= 100_000
+
+
+@pytest.mark.asyncio
+async def test_sample_data_marks_full_adapter_limited_result_as_possibly_truncated() -> (
+    None
+):
+    result = MagicMock()
+    result.keys.return_value = ["n"]
+    result.fetchone = AsyncMock(side_effect=[(1,), (2,), None])
+    result.close = AsyncMock()
+    conn = MagicMock()
+    conn.stream = AsyncMock(return_value=result)
+
+    @asynccontextmanager
+    async def get_connection():
+        yield conn
+
+    connection = MagicMock(dialect="postgresql")
+    connection.get_connection = get_connection
+    adapter = MagicMock()
+    adapter.get_sample_query = AsyncMock(return_value="SELECT n FROM t LIMIT 2")
+    output = await QueryExecutor(connection, adapter).sample_data("t", limit=2)
+    assert output.row_count == 2
+    assert output.truncated is True
+    assert output.warning
+
+
+@pytest.mark.asyncio
+async def test_sample_data_truncates_large_cell_before_byte_budget() -> None:
+    result = MagicMock()
+    result.keys.return_value = ["description"]
+    result.fetchone = AsyncMock(side_effect=[("x" * 1_100_000,), None])
+    result.close = AsyncMock()
+    conn = MagicMock()
+    conn.stream = AsyncMock(return_value=result)
+
+    @asynccontextmanager
+    async def get_connection():
+        yield conn
+
+    connection = MagicMock(dialect="postgresql")
+    connection.get_connection = get_connection
+    adapter = MagicMock()
+    adapter.get_sample_query = AsyncMock(
+        return_value="SELECT description FROM t LIMIT 2"
+    )
+    server = DatabaseMCPServer.__new__(DatabaseMCPServer)
+    server.executor = QueryExecutor(connection, adapter)
+    content = await server.handle_sample_data({"table": "t", "limit": 2})
+    payload = json.loads(content[0].text)
+    assert payload["data"]["rows"][0]["description"] == "x" * 497 + "..."
+    assert "rows[].description" in payload["_truncation_info"]["truncated_fields"]

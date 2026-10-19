@@ -1306,7 +1306,12 @@ class DatabaseMCPServer:
 
         result = await self.executor.execute_query(query, limit=limit)
 
-        response = json.dumps(result.model_dump(mode="json"), indent=2)
+        payload = result.model_dump(mode="json")
+        response = json.dumps(payload, indent=2)
+        if len(response) > MAX_RESPONSE_EXECUTE_QUERY:
+            # Preserve the existing readable format for small responses, but
+            # match the executor's compact row budget for larger results.
+            response = json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
         return [
             TextContent(
                 type="text",
@@ -1330,6 +1335,10 @@ class DatabaseMCPServer:
         result_data, truncated_fields = apply_truncation_to_sample_data(
             result_data, MAX_RESPONSE_SAMPLE_DATA
         )
+        for column in result._preview_truncated_columns:
+            field = f"rows[].{column}"
+            if field not in truncated_fields:
+                truncated_fields.append(field)
 
         # Wrap with truncation info if any fields were truncated
         final_result = wrap_response_with_truncation_info(result_data, truncated_fields)
