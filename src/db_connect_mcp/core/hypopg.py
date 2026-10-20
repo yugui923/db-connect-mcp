@@ -1,5 +1,6 @@
 """Opt-in, session-local PostgreSQL hypothetical-index plan comparison."""
 
+import json
 import re
 from typing import Any, cast
 
@@ -19,6 +20,10 @@ class HypoPGResult(BaseModel):
     hypothetical_estimated_cost: float
     hypothetical_index: str
     hypothetical_index_used: bool
+    plans_truncated: bool = Field(
+        default=False,
+        description="True when either plan exceeded the response limits and was reduced to its root cost.",
+    )
     note: str = Field(
         default="Planner estimates only; no query executed, no persistent index created."
     )
@@ -26,6 +31,10 @@ class HypoPGResult(BaseModel):
 
 class HypoPGComparison:
     """Compare two EXPLAIN plans on one connection with a temporary HypoPG index."""
+
+    MAX_RAW_PLAN_BYTES = 64_000
+    MAX_PLAN_NODES = 64
+    MAX_PLAN_BYTES = 16_384
 
     def __init__(self, connection: DatabaseConnection):
         self.connection = connection
@@ -109,6 +118,24 @@ class HypoPGComparison:
                         "HypoPG is not installed; ask a database administrator to provision it"
                     )
                 extension_schema = self.validate_identifier(row[0])
+                # HypoPG keeps hypothetical and hidden indexes across transactions on
+                # pooled sessions. Do not reset another borrower's session state.
+                for function in ("hypopg", "hypopg_hidden_indexes"):
+                    state = await conn.execute(
+                        text(
+                            f'SELECT EXISTS (SELECT 1 FROM "{extension_schema}".{function}())'
+                        )
+                    )
+                    state_row = state.fetchone()
+                    if state_row is None or state_row[0] is None:
+                        raise ValueError("Could not verify session-local HypoPG state")
+                    if state_row[0]:
+                        # Closing this backend on pool return prevents reuse, but
+                        # does not mutate another borrower's session-local state.
+                        await conn.invalidate()
+                        raise ValueError(
+                            "Cannot compare with existing session-local HypoPG state"
+                        )
                 relation = await conn.execute(
                     text(
                         "SELECT c.oid, pg_catalog.has_table_privilege(c.oid, 'SELECT') "
@@ -154,17 +181,21 @@ class HypoPGComparison:
                 oid = int(index_row[0])
                 index_name = str(index_row[1])
                 hypothetical = await self._explain(conn, safe_query)
+                used = self._uses_index(hypothetical["Plan"], index_name)
+                baseline_output, baseline_truncated = self._bounded_plan(baseline)
+                hypothetical_output, hypothetical_truncated = self._bounded_plan(
+                    hypothetical
+                )
                 return HypoPGResult(
-                    baseline_plan=baseline,
-                    hypothetical_plan=hypothetical,
+                    baseline_plan=baseline_output,
+                    hypothetical_plan=hypothetical_output,
                     baseline_estimated_cost=float(baseline["Plan"]["Total Cost"]),
                     hypothetical_estimated_cost=float(
                         hypothetical["Plan"]["Total Cost"]
                     ),
                     hypothetical_index=index_sql,
-                    hypothetical_index_used=self._uses_index(
-                        hypothetical["Plan"], index_name
-                    ),
+                    hypothetical_index_used=used,
+                    plans_truncated=baseline_truncated or hypothetical_truncated,
                 )
             finally:
                 # A failed statement aborts the transaction, but HypoPG's indexes
@@ -192,10 +223,56 @@ class HypoPGComparison:
 
     @staticmethod
     def _uses_index(plan: dict[str, Any], index_name: str) -> bool:
-        return plan.get("Index Name") == index_name or any(
-            HypoPGComparison._uses_index(child, index_name)
-            for child in plan.get("Plans", [])
-        )
+        pending = [plan]
+        while pending:
+            node = pending.pop()
+            if node.get("Index Name") == index_name:
+                return True
+            pending.extend(node.get("Plans", []))
+        return False
+
+    @classmethod
+    def _bounded_plan(cls, plan: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+        # Size is tested before copying/serializing an unbounded nested plan.
+        pending: list[Any] = [plan]
+        plan_nodes = [plan["Plan"]]
+        nodes = 0
+        while plan_nodes and nodes <= cls.MAX_PLAN_NODES:
+            node = plan_nodes.pop()
+            nodes += 1
+            if isinstance(node, dict):
+                plan_nodes.extend(node.get("Plans", []))
+        if nodes > cls.MAX_PLAN_NODES:
+            return {"Plan": {"Total Cost": plan["Plan"]["Total Cost"]}}, True
+        items = 0
+        raw_bytes = 0
+        while pending:
+            value = pending.pop()
+            items += 1
+            if items > cls.MAX_PLAN_NODES * 32:
+                break
+            if isinstance(value, dict):
+                pending.extend(value.values())
+                pending.extend(value.keys())
+            elif isinstance(value, list):
+                pending.extend(value)
+            elif isinstance(value, str):
+                if len(value) > cls.MAX_PLAN_BYTES:
+                    raw_bytes = cls.MAX_PLAN_BYTES + 1
+                    break
+                raw_bytes += len(value.encode("utf-8"))
+            else:
+                raw_bytes += 32  # Numbers and booleans in the planner's JSON.
+            if raw_bytes > cls.MAX_PLAN_BYTES:
+                break
+        if items > cls.MAX_PLAN_NODES * 32 or raw_bytes > cls.MAX_PLAN_BYTES:
+            return {"Plan": {"Total Cost": plan["Plan"]["Total Cost"]}}, True
+        if (
+            len(json.dumps(plan, ensure_ascii=False).encode("utf-8"))
+            > cls.MAX_PLAN_BYTES
+        ):
+            return {"Plan": {"Total Cost": plan["Plan"]["Total Cost"]}}, True
+        return plan, False
 
     @staticmethod
     async def _explain(conn: Any, query: str) -> dict[str, Any]:
@@ -205,7 +282,12 @@ class HypoPGComparison:
             raise ValueError("Planner returned no plan")
         plan = row[0]
         if isinstance(plan, str):
-            import json
-
+            if (
+                len(plan) > HypoPGComparison.MAX_RAW_PLAN_BYTES
+                or len(plan.encode("utf-8")) > HypoPGComparison.MAX_RAW_PLAN_BYTES
+            ):
+                raise ValueError("Planner output exceeds raw JSON size limit")
             plan = json.loads(plan)
+        if not isinstance(plan, list) or not plan or not isinstance(plan[0], dict):
+            raise ValueError("Planner returned an invalid plan")
         return plan[0]

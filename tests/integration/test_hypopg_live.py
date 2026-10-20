@@ -64,3 +64,48 @@ async def test_hypopg_index_does_not_leak_after_planner_failure() -> None:
         assert repeated.baseline_plan == baseline.baseline_plan
     finally:
         await connection.dispose()
+
+
+@pytest.mark.asyncio
+async def test_pooled_hypopg_state_is_rejected_without_resetting_other_indexes() -> (
+    None
+):
+    url = os.getenv("HYPOPG_TEST_DATABASE_URL")
+    if not url:
+        pytest.skip("HYPOPG_TEST_DATABASE_URL not set (requires provisioned HypoPG)")
+
+    connection = DatabaseConnection(
+        DatabaseConfig(url=url, pool_size=1, max_overflow=0)
+    )
+    await connection.initialize()
+    try:
+        # The same backend is borrowed again by comparison; don't reset or
+        # silently incorporate another borrower's hypothetical index.
+        async with connection.get_connection() as borrowed:
+            conn = cast(AsyncConnection, borrowed)
+            created = await conn.scalar(
+                text(
+                    "SELECT indexrelid FROM hypopg_create_index("
+                    "'CREATE INDEX ON public.products (category_id)')"
+                )
+            )
+            assert created is not None
+        with pytest.raises(ValueError, match="existing session-local HypoPG state"):
+            await HypoPGComparison(connection).compare(
+                "SELECT * FROM products WHERE category_id = 1",
+                "public",
+                "products",
+                ["category_id"],
+                opt_in=True,
+            )
+        # Invalidation closed the contaminated session; subsequent borrows use
+        # a clean backend. The comparison did not invoke any destructive reset.
+        async with connection.get_connection() as borrowed:
+            assert (
+                await cast(AsyncConnection, borrowed).scalar(
+                    text("SELECT count(*) FROM hypopg()")
+                )
+                == 0
+            )
+    finally:
+        await connection.dispose()

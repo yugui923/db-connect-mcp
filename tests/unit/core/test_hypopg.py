@@ -1,6 +1,6 @@
 """Safety and lifecycle tests for the opt-in hypothetical index comparison."""
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -87,6 +87,10 @@ async def test_same_session_and_cleanup_on_explain_failure():
             result = MagicMock()
             result.fetchone.return_value = ("public",)
             return result
+        if "hypopg_hidden_indexes()" in sql or "hypopg()" in sql:
+            result = MagicMock()
+            result.fetchone.return_value = (False,)
+            return result
         if "pg_catalog.pg_class" in sql:
             result = MagicMock()
             result.fetchone.return_value = (1, True)
@@ -143,6 +147,8 @@ def comparison_session():
         result = MagicMock()
         if "FROM pg_catalog.pg_extension" in sql:
             result.fetchone.return_value = extension
+        elif "hypopg_hidden_indexes()" in sql or "hypopg()" in sql:
+            result.fetchone.return_value = (False,)
         elif "FROM pg_catalog.pg_class" in sql:
             result.fetchone.return_value = relation
         elif "FROM pg_catalog.pg_attribute" in sql:
@@ -400,6 +406,173 @@ async def test_failed_index_cleanup_invalidates_pooled_backend(comparison_sessio
             "SELECT * FROM users", "public", "users", ["id"], opt_in=True
         )
     conn.invalidate.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("state", ["index", "hidden_index"])
+async def test_preexisting_hypopg_state_fails_closed_without_changing_it(
+    comparison_session, state
+):
+    comparison, conn, calls = comparison_session
+    original_execute = conn.execute.side_effect
+
+    async def execute(statement, params=None):
+        sql = str(statement)
+        if (state == "index" and "hypopg()" in sql) or (
+            state == "hidden_index" and "hypopg_hidden_indexes()" in sql
+        ):
+            response = MagicMock()
+            response.fetchone.return_value = (True,)
+            return response
+        return await original_execute(statement, params)
+
+    conn.execute.side_effect = execute
+    with pytest.raises(ValueError, match="existing session-local HypoPG state"):
+        await comparison.compare(
+            "SELECT * FROM users", "public", "users", ["id"], opt_in=True
+        )
+    assert not any("EXPLAIN" in sql or "hypopg_create_index" in sql for sql, _ in calls)
+    assert not any("hypopg_reset" in sql or "hypopg_unhide" in sql for sql, _ in calls)
+    conn.invalidate.assert_awaited_once()
+    assert conn.rollback.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_preexisting_state_checked_before_baseline_on_pooled_backend(
+    comparison_session,
+):
+    comparison, conn, calls = comparison_session
+    original_execute = conn.execute.side_effect
+    state = False
+
+    async def execute(statement, params=None):
+        if "hypopg()" in str(statement):
+            result = MagicMock()
+            result.fetchone.return_value = (state,)
+            return result
+        return await original_execute(statement, params)
+
+    conn.execute.side_effect = execute
+    await comparison.compare(
+        "SELECT * FROM users", "public", "users", ["id"], opt_in=True
+    )
+    state = True  # Simulate an index left on this pooled backend by another borrower.
+    with pytest.raises(ValueError, match="existing session-local HypoPG state"):
+        await comparison.compare(
+            "SELECT * FROM users", "public", "users", ["id"], opt_in=True
+        )
+    assert sum("hypopg_create_index" in sql for sql, _ in calls) == 1
+    conn.invalidate.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_oversized_plan_is_replaced_with_bounded_summary(comparison_session):
+    comparison, conn, _ = comparison_session
+    original_execute = conn.execute.side_effect
+    explain_count = 0
+
+    async def execute(statement, params=None):
+        nonlocal explain_count
+        if "EXPLAIN" in str(statement):
+            explain_count += 1
+            response = MagicMock()
+            response.fetchone.return_value = (
+                [
+                    {
+                        "Plan": {
+                            "Node Type": "Nested Loop",
+                            "Total Cost": 15.0 if explain_count == 1 else 5.0,
+                            "Plans": [
+                                {"Index Name": "<123>btree_users_id", "Total Cost": 2.0}
+                                for _ in range(300)
+                            ],
+                        }
+                    }
+                ],
+            )
+            return response
+        return await original_execute(statement, params)
+
+    conn.execute.side_effect = execute
+    result = await comparison.compare(
+        "SELECT * FROM users", "public", "users", ["id"], opt_in=True
+    )
+    assert result.baseline_estimated_cost == 15.0
+    assert result.hypothetical_index_used is True
+    assert result.plans_truncated is True
+    assert result.baseline_plan["Plan"]["Total Cost"] == 15.0
+    assert "Plans" not in result.baseline_plan["Plan"]
+    assert len(result.model_dump_json()) < 4096
+
+
+@pytest.mark.asyncio
+async def test_plan_node_limit_even_when_payload_is_small(comparison_session):
+    comparison, conn, _ = comparison_session
+    original_execute = conn.execute.side_effect
+
+    async def execute(statement, params=None):
+        if "EXPLAIN" in str(statement):
+            response = MagicMock()
+            response.fetchone.return_value = (
+                [{"Plan": {"Total Cost": 3.0, "Plans": [{} for _ in range(65)]}}],
+            )
+            return response
+        return await original_execute(statement, params)
+
+    conn.execute.side_effect = execute
+    result = await comparison.compare(
+        "SELECT * FROM users", "public", "users", ["id"], opt_in=True
+    )
+    assert result.plans_truncated is True
+    assert result.baseline_plan == {"Plan": {"Total Cost": 3.0}}
+
+
+@pytest.mark.asyncio
+async def test_large_plan_scalar_truncates_before_json_serialization(
+    comparison_session,
+):
+    comparison, conn, _ = comparison_session
+    original_execute = conn.execute.side_effect
+
+    async def execute(statement, params=None):
+        if "EXPLAIN" in str(statement):
+            response = MagicMock()
+            response.fetchone.return_value = (
+                [{"Plan": {"Total Cost": 3.0, "Node Type": "x" * 100_000}}],
+            )
+            return response
+        return await original_execute(statement, params)
+
+    conn.execute.side_effect = execute
+    with patch(
+        "db_connect_mcp.core.hypopg.json.dumps",
+        side_effect=AssertionError("serialized huge plan"),
+    ):
+        result = await comparison.compare(
+            "SELECT * FROM users", "public", "users", ["id"], opt_in=True
+        )
+    assert result.plans_truncated is True
+    assert result.baseline_plan == {"Plan": {"Total Cost": 3.0}}
+
+
+@pytest.mark.asyncio
+async def test_large_raw_json_plan_rejected_before_decoding(comparison_session):
+    comparison, conn, _ = comparison_session
+    original_execute = conn.execute.side_effect
+
+    async def execute(statement, params=None):
+        if "EXPLAIN" in str(statement):
+            response = MagicMock()
+            response.fetchone.return_value = ("[" + " " * 100_000 + "]",)
+            return response
+        return await original_execute(statement, params)
+
+    conn.execute.side_effect = execute
+    with pytest.raises(ValueError, match="Planner output exceeds"):
+        await comparison.compare(
+            "SELECT * FROM users", "public", "users", ["id"], opt_in=True
+        )
+    conn.rollback.assert_awaited_once()
 
 
 @pytest.mark.asyncio
