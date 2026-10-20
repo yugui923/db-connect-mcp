@@ -26,6 +26,28 @@ def test_query_rejects_unbounded_statement_types(query: str) -> None:
         executor._validate_query(query)
 
 
+@pytest.mark.parametrize(
+    "query",
+    [
+        "SELECT GET_LOCK('health-check', 0)",
+        "WITH q AS (SELECT GET_LOCK('health-check', 0)) SELECT * FROM q",
+        "SELECT RELEASE_LOCK('health-check')",
+        "SELECT RELEASE_ALL_LOCKS()",
+        "SELECT @session_key := 'persisted'",
+    ],
+)
+def test_mysql_rejects_session_side_effects(query: str) -> None:
+    connection = MagicMock(dialect="mysql")
+    executor = QueryExecutor(connection, MagicMock())
+    with pytest.raises(ValueError, match="session side effect"):
+        executor._validate_query(query)
+
+
+def test_mysql_allows_lock_name_as_string_literal() -> None:
+    executor = QueryExecutor(MagicMock(dialect="mysql"), MagicMock())
+    executor._validate_query("SELECT 'GET_LOCK' AS function_name")
+
+
 def test_query_accepts_semicolon_inside_string() -> None:
     executor = QueryExecutor(MagicMock(), MagicMock())
     executor._validate_query("SELECT ';' AS separator")

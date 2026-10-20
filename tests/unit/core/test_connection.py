@@ -303,6 +303,27 @@ class TestDatabaseConnectionProperties:
         assert conn._is_sync_only is False
 
 
+@pytest.mark.asyncio
+async def test_mysql_read_only_engine_does_not_reuse_sessions() -> None:
+    connection = DatabaseConnection(DatabaseConfig(url="mysql://user:pass@host/db"))
+    with patch("db_connect_mcp.core.connection.create_async_engine") as create_engine:
+        await connection.initialize()
+    assert create_engine.call_args.kwargs["poolclass"].__name__ == "NullPool"
+    assert "pool_size" not in create_engine.call_args.kwargs
+
+
+@pytest.mark.asyncio
+async def test_postgres_marks_current_transaction_read_only() -> None:
+    connection = DatabaseConnection(
+        DatabaseConfig(url="postgresql://user:pass@host/db")
+    )
+    conn = AsyncMock()
+    await connection._set_readonly(conn)
+    statements = [str(call.args[0]) for call in conn.execute.await_args_list]
+    assert "SET TRANSACTION READ ONLY" in statements
+    assert "SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY" in statements
+
+
 class TestDatabaseConnectionGetConnectionErrors:
     """Tests for get_connection error handling."""
 

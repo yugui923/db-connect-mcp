@@ -1,15 +1,81 @@
 """Live query result caps, including caller-authored SQL LIMIT."""
 
 import json
+from uuid import uuid4
 from unittest.mock import AsyncMock
 
 import pytest
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import create_async_engine
 
 from db_connect_mcp.server import DatabaseMCPServer, _structured_tool_result
 from db_connect_mcp.adapters import create_adapter
 from db_connect_mcp.core.connection import DatabaseConnection
 from db_connect_mcp.core.executor import QueryExecutor
 from db_connect_mcp.models.config import DatabaseConfig
+
+
+@pytest.mark.asyncio
+async def test_pg_setval_cannot_persist_even_in_current_transaction(
+    pg_database_url: str,
+) -> None:
+    # Create a unique synthetic object with a separate setup connection; never
+    # modify pre-existing tables or production data.
+    name = f"mcp_readonly_{uuid4().hex}"
+    setup = create_async_engine(pg_database_url)
+    try:
+        async with setup.begin() as conn:
+            await conn.execute(text(f"CREATE SEQUENCE {name}"))
+        config = DatabaseConfig(url=pg_database_url)
+        connection = DatabaseConnection(config)
+        await connection.initialize()
+        try:
+            executor = QueryExecutor(connection, create_adapter(config))
+            with pytest.raises(Exception, match="read-only transaction"):
+                await executor.execute_query(
+                    f"SELECT setval('{name}', 50) AS sequence_value", limit=1
+                )
+            async with setup.connect() as conn:
+                value = await conn.scalar(text(f"SELECT last_value FROM {name}"))
+                assert value == 1
+        finally:
+            await connection.dispose()
+    finally:
+        async with setup.begin() as conn:
+            await conn.execute(text(f"DROP SEQUENCE IF EXISTS {name}"))
+        await setup.dispose()
+
+
+@pytest.mark.asyncio
+async def test_mysql_named_lock_cannot_survive_mcp_checkout(
+    mysql_database_url: str,
+) -> None:
+    lock_name = f"mcp_readonly_{uuid4().hex}"
+    config = DatabaseConfig(url=mysql_database_url)
+    connection = DatabaseConnection(config)
+    await connection.initialize()
+    observer = create_async_engine(mysql_database_url)
+    try:
+        executor = QueryExecutor(connection, create_adapter(config))
+        with pytest.raises(ValueError, match="session side effect"):
+            await executor.execute_query(
+                "SELECT GET_LOCK(:name, 0)", {"name": lock_name}
+            )
+        async with connection.get_connection() as conn:
+            # Validate isolation even for a session effect outside execute_query:
+            # closing this checkout must close its underlying MySQL session.
+            result = await conn.execute(
+                text("SELECT GET_LOCK(:name, 0)"), {"name": lock_name}
+            )
+            assert result.scalar() == 1
+        async with observer.connect() as conn:
+            result = await conn.execute(
+                text("SELECT IS_FREE_LOCK(:name)"), {"name": lock_name}
+            )
+            assert result.scalar() == 1
+    finally:
+        await observer.dispose()
+        await connection.dispose()
 
 
 @pytest.mark.asyncio

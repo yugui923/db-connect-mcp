@@ -583,16 +583,8 @@ Once configured, you can use the server with any compatible MCP client:
 
 ## Safety and Security
 
-- **Read-only by design**: The server enforces read-only access at multiple levels:
-  - Connection string parameters
-  - Session-level settings
-  - Query validation
-
-- **No data modification**: INSERT, UPDATE, DELETE, CREATE, DROP, and other modification statements are blocked
-
-- **Query limits**: All queries are automatically limited to prevent excessive resource usage
-
-- **No sensitive operations**: No access to system catalogs or administrative functions
+- **Read-only intent**: Write statements are rejected, and PostgreSQL and MySQL connections use read-only transactions. This is not a SQL sandbox: SELECT may call functions with external or session-level effects. MySQL read-only sessions are not pooled across requests; direct named-lock calls and variable assignments are rejected in `execute_query`. Use a least-privilege database role on every engine, especially ClickHouse, where SELECT may invoke external table functions.
+- **Query limits**: `execute_query` bounds returned rows and serialized response size, not total database work or peak process memory. ClickHouse's synchronous driver may buffer a full result before the application checks it. Use database-side execution, memory, and access limits. See [health and query safety notes](docs/guides/POSTGRES_HEALTH.md).
 
 ## Development
 

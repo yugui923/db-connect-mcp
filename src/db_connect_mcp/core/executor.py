@@ -333,6 +333,17 @@ class QueryExecutor:
                 f"Only SELECT or WITH queries are allowed. Got: {first_keyword}"
             )
 
+        # MySQL's transaction read-only flag cannot isolate session state.
+        # Reject known session-mutating expressions; NullPool additionally
+        # prevents any such state from carrying into another MCP checkout.
+        if self.connection.dialect == "mysql" and (
+            re.search(
+                r"\b(?:GET_LOCK|RELEASE_LOCK|RELEASE_ALL_LOCKS)\s*\(|(?<!\w)@\w+\s*:=",
+                normalized,
+            )
+        ):
+            raise ValueError("MySQL session side effect is not allowed")
+
         # Check for dangerous keywords outside strings and comments
         dangerous_keywords = {
             "DROP",

@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, AsyncGenerator, Optional, Union
 
 from sqlalchemy import text, create_engine, Engine, Connection
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_engine
+from sqlalchemy.pool import NullPool
 
 from db_connect_mcp.models.config import DatabaseConfig
 
@@ -203,12 +204,21 @@ class DatabaseConnection:
                     url_obj = url_obj.difference_update_query(["ssl"])
                     effective_url = url_obj.render_as_string(hide_password=False)
 
-        # Create async engine for PostgreSQL and MySQL
+        # MySQL read-only transactions do not prevent session effects (e.g.
+        # GET_LOCK), and rollback does not clear them. Never reuse a session
+        # across MCP calls while read-only mode is requested.
+        pool_options = (
+            {"poolclass": NullPool}
+            if self._dialect == "mysql" and self.config.read_only
+            else {
+                "pool_size": self.config.pool_size,
+                "max_overflow": self.config.max_overflow,
+                "pool_timeout": self.config.pool_timeout,
+            }
+        )
         self.engine = create_async_engine(
             effective_url,
-            pool_size=self.config.pool_size,
-            max_overflow=self.config.max_overflow,
-            pool_timeout=self.config.pool_timeout,
+            **pool_options,
             pool_pre_ping=True,  # Verify connections before using
             echo=self.config.echo_sql,
             connect_args=connect_args if connect_args else {},
@@ -363,6 +373,9 @@ class DatabaseConnection:
             await conn.execute(
                 text("SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY")
             )
+            # The command above changes only future transactions. SQLAlchemy has
+            # already autobegun this transaction for the SET, so protect it too.
+            await conn.execute(text("SET TRANSACTION READ ONLY"))
         elif self._dialect == "mysql":
             await conn.execute(text("SET SESSION TRANSACTION READ ONLY"))
         elif self._dialect == "clickhouse":
