@@ -426,13 +426,174 @@ async def test_waiting_checkout_does_not_reopen_disposed_engine() -> None:
         await asyncio.wait_for(entered.wait(), 2)
         pending = asyncio.create_task(_checkout_once(connection))
         await asyncio.sleep(0.05)
-        await connection.dispose()
+        disposal = asyncio.create_task(connection.dispose())
+        await asyncio.sleep(0)
+        assert not disposal.done()
         holder.cancel()
         with pytest.raises(asyncio.CancelledError):
             await holder
+        await asyncio.wait_for(disposal, 2)
         with pytest.raises(RuntimeError, match="not initialized"):
             await asyncio.wait_for(pending, 2)
     assert create_engine.return_value.connect.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_dispose_waits_for_checkout_opening_before_stopping_tunnel() -> None:
+    connection = DatabaseConnection(
+        DatabaseConfig(url="postgresql://user:pass@host/db")
+    )
+    opening = asyncio.Event()
+    allow_open = asyncio.Event()
+
+    @asynccontextmanager
+    async def connect():
+        opening.set()
+        await allow_open.wait()
+        yield AsyncMock()
+
+    with patch("db_connect_mcp.core.connection.create_async_engine") as create_engine:
+        create_engine.return_value.connect.side_effect = connect
+        create_engine.return_value.dispose = AsyncMock()
+        await connection.initialize()
+    tunnel = MagicMock()
+    connection._tunnel_manager = tunnel
+    with patch.object(connection, "_set_readonly", new_callable=AsyncMock):
+        checkout = asyncio.create_task(_checkout_once(connection))
+        await asyncio.wait_for(opening.wait(), 2)
+        disposal = asyncio.create_task(connection.dispose())
+        await asyncio.sleep(0)
+        assert not disposal.done()
+        tunnel.stop.assert_not_called()
+        allow_open.set()
+        await asyncio.wait_for(checkout, 2)
+        await asyncio.wait_for(disposal, 2)
+    tunnel.stop.assert_called_once()
+    create_engine.return_value.dispose.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_cancelled_dispose_does_not_stop_live_checkout_tunnel() -> None:
+    connection = DatabaseConnection(
+        DatabaseConfig(url="postgresql://user:pass@host/db")
+    )
+    with patch("db_connect_mcp.core.connection.create_async_engine") as create_engine:
+        create_engine.return_value.dispose = AsyncMock()
+        await connection.initialize()
+    tunnel = MagicMock()
+    connection._tunnel_manager = tunnel
+    entered = asyncio.Event()
+    with patch.object(connection, "_set_readonly", new_callable=AsyncMock):
+        holder = asyncio.create_task(_hold_checkout(connection, entered))
+        await entered.wait()
+        disposal = asyncio.create_task(connection.dispose())
+        await asyncio.sleep(0)
+        disposal.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await disposal
+        tunnel.stop.assert_not_called()
+        holder.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await holder
+        await connection.dispose()
+    tunnel.stop.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_concurrent_dispose_calls_stop_tunnel_once() -> None:
+    connection = DatabaseConnection(
+        DatabaseConfig(url="postgresql://user:pass@host/db")
+    )
+    disposing = asyncio.Event()
+    continue_dispose = asyncio.Event()
+
+    async def dispose_engine() -> None:
+        disposing.set()
+        await continue_dispose.wait()
+
+    with patch("db_connect_mcp.core.connection.create_async_engine") as create_engine:
+        create_engine.return_value.dispose = AsyncMock(side_effect=dispose_engine)
+        await connection.initialize()
+    tunnel = MagicMock()
+    connection._tunnel_manager = tunnel
+    first = asyncio.create_task(connection.dispose())
+    await disposing.wait()
+    second = asyncio.create_task(connection.dispose())
+    await asyncio.sleep(0)
+    assert not second.done()
+    continue_dispose.set()
+    await asyncio.gather(first, second)
+    tunnel.stop.assert_called_once()
+    create_engine.return_value.dispose.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_failed_engine_disposal_still_stops_tunnel_and_allows_retry() -> None:
+    connection = DatabaseConnection(
+        DatabaseConfig(url="postgresql://user:pass@host/db")
+    )
+    with patch("db_connect_mcp.core.connection.create_async_engine") as create_engine:
+        create_engine.return_value.dispose = AsyncMock(
+            side_effect=[RuntimeError("dispose failed"), None]
+        )
+        await connection.initialize()
+    tunnel = MagicMock()
+    connection._tunnel_manager = tunnel
+    with pytest.raises(RuntimeError, match="dispose failed"):
+        await connection.dispose()
+    tunnel.stop.assert_called_once()
+    await connection.dispose()
+    create_engine.return_value.dispose.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_read_only_checkouts_allow_switching_event_loops() -> None:
+    connection = DatabaseConnection(
+        DatabaseConfig(url="postgresql://user:pass@host/db")
+    )
+    with patch("db_connect_mcp.core.connection.create_async_engine") as create_engine:
+        create_engine.return_value.dispose = AsyncMock()
+        await connection.initialize()
+    with patch.object(connection, "_set_readonly", new_callable=AsyncMock):
+        await _checkout_once(connection)
+
+        def checkout_from_thread() -> None:
+            asyncio.run(_checkout_once(connection))
+
+        await asyncio.to_thread(checkout_from_thread)
+    assert create_engine.return_value.connect.call_count == 2
+    await connection.dispose()
+
+
+@pytest.mark.asyncio
+async def test_clickhouse_dispose_waits_for_active_checkout() -> None:
+    connection = DatabaseConnection(
+        DatabaseConfig(url="clickhouse://user:pass@host/db")
+    )
+    with patch("db_connect_mcp.core.connection.create_engine") as create_engine:
+        await connection.initialize()
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def hold() -> None:
+        async with connection.get_connection():
+            entered.set()
+            await release.wait()
+
+    with (
+        patch.object(connection, "_set_readonly_wrapper", new_callable=AsyncMock),
+        patch.object(connection, "_set_timeout_wrapper", new_callable=AsyncMock),
+    ):
+        checkout = asyncio.create_task(hold())
+        await entered.wait()
+        disposal = asyncio.create_task(connection.dispose())
+        await asyncio.sleep(0)
+        assert not disposal.done()
+        create_engine.return_value.dispose.assert_not_called()
+        release.set()
+        await checkout
+        await disposal
+    create_engine.return_value.dispose.assert_called_once()
 
 
 async def _checkout_once(connection: DatabaseConnection) -> None:

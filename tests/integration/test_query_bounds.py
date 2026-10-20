@@ -117,6 +117,36 @@ async def test_quoted_pg_advisory_lock_cannot_block_mcp_query(
 
 
 @pytest.mark.asyncio
+async def test_unicode_quoted_pg_advisory_lock_cannot_block_mcp_query(
+    pg_database_url: str,
+) -> None:
+    lock_key = uuid4().int & ((1 << 63) - 1)
+    blocker = create_async_engine(pg_database_url)
+    config = DatabaseConfig(url=pg_database_url, statement_timeout=1)
+    connection = DatabaseConnection(config)
+    await connection.initialize()
+    try:
+        async with blocker.connect() as conn:
+            await conn.execute(text("SELECT pg_advisory_lock(:key)"), {"key": lock_key})
+            try:
+                executor = QueryExecutor(connection, create_adapter(config))
+                with pytest.raises(ValueError, match="Unicode quoted identifier"):
+                    await asyncio.wait_for(
+                        executor.execute_query(
+                            'SELECT U&"pg_advisory_lock"(:key)', {"key": lock_key}
+                        ),
+                        timeout=3,
+                    )
+            finally:
+                await conn.execute(
+                    text("SELECT pg_advisory_unlock(:key)"), {"key": lock_key}
+                )
+    finally:
+        await connection.dispose()
+        await blocker.dispose()
+
+
+@pytest.mark.asyncio
 async def test_mysql_executable_comment_cannot_acquire_named_lock(
     mysql_database_url: str,
 ) -> None:

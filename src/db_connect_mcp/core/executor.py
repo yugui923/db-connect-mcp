@@ -310,7 +310,8 @@ class QueryExecutor:
         # Ignore SQL strings, quoted identifiers and comments while checking syntax.
         # Unrecognized quoting is rejected rather than risking stacked statements.
         tokens = re.compile(
-            r"--[^\n]*|/\*.*?\*/|'(?:''|[^'])*'|\"(?:\"\"|[^\"])*\"|"
+            r"--[^\n]*|/\*.*?\*/|'(?:''|[^'])*'|"
+            r"(?i:U&)\"(?:\"\"|[^\"])*\"|\"(?:\"\"|[^\"])*\"|"
             r"\$(?P<tag>[A-Za-z_][A-Za-z_0-9]*)?\$.*?\$(?P=tag)\$",
             re.DOTALL,
         )
@@ -321,6 +322,10 @@ class QueryExecutor:
                 ("/*!", "/*+", "/*M!")
             ):
                 raise ValueError("MySQL executable comment is not allowed")
+            # PostgreSQL decodes U& quoted identifiers before resolving a
+            # function. Reject this syntax rather than silently hiding a lock.
+            if self.connection.dialect == "postgresql" and token[:2].upper() == "U&":
+                raise ValueError("PostgreSQL Unicode quoted identifier is not allowed")
             # Quoted PostgreSQL function names execute just like unquoted ones.
             # Preserve only advisory-lock identifiers for the check below; keep
             # strings, comments and unrelated quoted identifiers hidden.

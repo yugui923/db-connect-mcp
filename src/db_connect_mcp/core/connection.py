@@ -2,6 +2,8 @@
 
 import asyncio
 import logging
+import threading
+from concurrent.futures import Future
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, AsyncGenerator, Optional, Union
 
@@ -123,7 +125,7 @@ class AsyncConnectionWrapper:
 
 
 class DatabaseConnection:
-    """Manages SQLAlchemy async engine and connection pool."""
+    """Manages SQLAlchemy connections and their checkout lifecycle."""
 
     def __init__(self, config: DatabaseConfig):
         """
@@ -149,10 +151,17 @@ class DatabaseConnection:
         # SSH tunnel support
         self._tunnel_manager: Optional["SSHTunnelManager"] = None
         self._tunneled_url: Optional[str] = None
-        self._checkout_limit: asyncio.Semaphore | None = None
+        self._checkout_limit: threading.BoundedSemaphore | None = None
+        self._lifecycle_lock = threading.Lock()
+        self._active_checkouts = 0
+        self._checkout_idle: Future[None] | None = None
+        self._disposed: Future[None] | None = None
+        self._disposing = False
 
     async def initialize(self) -> None:
         """Initialize the async or sync engine based on driver requirements."""
+        if self._disposing:
+            raise RuntimeError("DatabaseConnection is disposing")
         if self.engine is not None or self.sync_engine is not None:
             return  # Already initialized
 
@@ -230,7 +239,7 @@ class DatabaseConnection:
         # NullPool closes every session on return, but offers no QueuePool-style
         # concurrency bound. Limit open checkouts to the configured pool budget.
         if isolated_sessions:
-            self._checkout_limit = asyncio.Semaphore(
+            self._checkout_limit = threading.BoundedSemaphore(
                 self.config.pool_size + self.config.max_overflow
             )
 
@@ -291,21 +300,52 @@ class DatabaseConnection:
             raise
 
     async def dispose(self) -> None:
-        """Dispose of the connection pool and cleanup resources."""
+        """Wait for active checkouts before closing the engine and SSH tunnel."""
+        with self._lifecycle_lock:
+            if self._disposing:
+                disposed = self._disposed
+                assert disposed is not None
+                idle = None
+            else:
+                self._disposing = True
+                disposed = None
+                self._disposed = Future()
+                idle = self._checkout_idle
+        if disposed is not None:
+            await asyncio.shield(asyncio.wrap_future(disposed))
+            return
+        if idle is not None:
+            try:
+                # A thread-safe future can be awaited on any event loop.
+                await asyncio.shield(asyncio.wrap_future(idle))
+            except BaseException:
+                with self._lifecycle_lock:
+                    self._disposing = False
+                    assert self._disposed is not None
+                    self._disposed.set_result(None)
+                    self._disposed = None
+                raise
         try:
-            # Dispose engine first
-            if self.engine is not None:
-                await self.engine.dispose()
-                self.engine = None
-            if self.sync_engine is not None:
-                self.sync_engine.dispose()
-                self.sync_engine = None
+            try:
+                # Dispose engine first
+                if self.engine is not None:
+                    await self.engine.dispose()
+                    self.engine = None
+                if self.sync_engine is not None:
+                    self.sync_engine.dispose()
+                    self.sync_engine = None
+            finally:
+                # Always stop SSH tunnel, even if engine dispose fails
+                if self._tunnel_manager is not None:
+                    self._tunnel_manager.stop()
+                    self._tunnel_manager = None
+                    self._tunneled_url = None
         finally:
-            # Always stop SSH tunnel, even if engine dispose fails
-            if self._tunnel_manager is not None:
-                self._tunnel_manager.stop()
-                self._tunnel_manager = None
-                self._tunneled_url = None
+            with self._lifecycle_lock:
+                self._disposing = False
+                assert self._disposed is not None
+                self._disposed.set_result(None)
+                self._disposed = None
 
     @asynccontextmanager
     async def get_connection(
@@ -322,46 +362,42 @@ class DatabaseConnection:
         """
         # Handle sync engine for ClickHouse
         if self._is_sync_only:
-            if self.sync_engine is None:
+            if self.sync_engine is None or self._disposing:
                 raise RuntimeError(
                     "DatabaseConnection not initialized. Call initialize() first."
                 )
 
-            # Get sync connection
-            sync_conn = self.sync_engine.connect()
-
-            # Monkey-patch the execute method to handle raw SQL strings
-            original_execute = sync_conn.execute
-
-            def patched_execute(statement, *args, **kwargs):
-                from sqlalchemy import text
-
-                if isinstance(statement, str):
-                    statement = text(statement)
-                return original_execute(statement, *args, **kwargs)
-
-            sync_conn.execute = patched_execute
-
-            # Wrap it for async
-            wrapper = AsyncConnectionWrapper(sync_conn)
-
+            self._begin_checkout(self.sync_engine)
             try:
-                # Set read-only mode if configured (sync)
-                if self.config.read_only:
-                    await self._set_readonly_wrapper(wrapper)
+                # A sync checkout cannot yield to disposal while connect() runs.
+                sync_conn = self.sync_engine.connect()
+                # Monkey-patch execute to handle raw SQL strings.
+                original_execute = sync_conn.execute
 
-                # Set statement timeout if configured (sync)
-                if self.config.statement_timeout:
-                    await self._set_timeout_wrapper(
-                        wrapper, self.config.statement_timeout
-                    )
+                def patched_execute(statement, *args, **kwargs):
+                    from sqlalchemy import text
 
-                yield wrapper
+                    if isinstance(statement, str):
+                        statement = text(statement)
+                    return original_execute(statement, *args, **kwargs)
+
+                sync_conn.execute = patched_execute
+                wrapper = AsyncConnectionWrapper(sync_conn)
+                try:
+                    if self.config.read_only:
+                        await self._set_readonly_wrapper(wrapper)
+                    if self.config.statement_timeout:
+                        await self._set_timeout_wrapper(
+                            wrapper, self.config.statement_timeout
+                        )
+                    yield wrapper
+                finally:
+                    wrapper.close()
             finally:
-                wrapper.close()
+                self._end_checkout()
         else:
             # Handle async engine for PostgreSQL and MySQL
-            if self.engine is None:
+            if self.engine is None or self._disposing:
                 raise RuntimeError(
                     "DatabaseConnection not initialized. Call initialize() first."
                 )
@@ -371,30 +407,51 @@ class DatabaseConnection:
             engine = self.engine
             limit = self._checkout_limit
             if limit is not None:
-                try:
-                    await asyncio.wait_for(limit.acquire(), self.config.pool_timeout)
-                except asyncio.TimeoutError as exc:
-                    raise PoolTimeoutError(
-                        f"Database checkout timed out after {self.config.pool_timeout}s"
-                    ) from exc
+                # Use short nonblocking attempts so cancellation never leaves a
+                # thread that acquires a permit after its checkout is gone.
+                deadline = asyncio.get_running_loop().time() + self.config.pool_timeout
+                while not limit.acquire(blocking=False):
+                    remaining = deadline - asyncio.get_running_loop().time()
+                    if remaining <= 0:
+                        raise PoolTimeoutError(
+                            f"Database checkout timed out after {self.config.pool_timeout}s"
+                        )
+                    await asyncio.sleep(min(0.01, remaining))
             try:
-                if self.engine is not engine:
-                    raise RuntimeError(
-                        "DatabaseConnection not initialized. Call initialize() first."
-                    )
-                async with engine.connect() as conn:
-                    # Set read-only mode if configured
-                    if self.config.read_only:
-                        await self._set_readonly(conn)
+                self._begin_checkout(engine)
+                try:
+                    async with engine.connect() as conn:
+                        # Set read-only mode if configured
+                        if self.config.read_only:
+                            await self._set_readonly(conn)
 
-                    # Set statement timeout if configured
-                    if self.config.statement_timeout:
-                        await self._set_timeout(conn, self.config.statement_timeout)
+                        # Set statement timeout if configured
+                        if self.config.statement_timeout:
+                            await self._set_timeout(conn, self.config.statement_timeout)
 
-                    yield conn
+                        yield conn
+                finally:
+                    self._end_checkout()
             finally:
                 if limit is not None:
                     limit.release()
+
+    def _begin_checkout(self, engine: AsyncEngine | Engine) -> None:
+        with self._lifecycle_lock:
+            if self._disposing or engine is not (self.sync_engine or self.engine):
+                raise RuntimeError(
+                    "DatabaseConnection not initialized. Call initialize() first."
+                )
+            if self._active_checkouts == 0:
+                self._checkout_idle = Future()
+            self._active_checkouts += 1
+
+    def _end_checkout(self) -> None:
+        with self._lifecycle_lock:
+            self._active_checkouts -= 1
+            if self._active_checkouts == 0 and self._checkout_idle is not None:
+                self._checkout_idle.set_result(None)
+                self._checkout_idle = None
 
     async def _set_readonly(self, conn: AsyncConnection) -> None:
         """Set connection to read-only mode based on database dialect."""

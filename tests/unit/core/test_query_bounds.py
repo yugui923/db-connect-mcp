@@ -61,9 +61,25 @@ def test_postgres_rejects_session_and_transaction_advisory_locks(query: str) -> 
         executor._validate_query(query)
 
 
+@pytest.mark.parametrize(
+    "query",
+    [
+        'SELECT U&"pg_advisory_lock"(42)',
+        'SELECT u&"pg_advisory\\005flock"(42)',
+        'WITH q AS (SELECT pg_catalog.U&"pg_try_advisory_lock_shared"(42)) SELECT * FROM q',
+    ],
+)
+def test_postgres_rejects_unicode_quoted_advisory_lock(query: str) -> None:
+    executor = QueryExecutor(MagicMock(dialect="postgresql"), MagicMock())
+    with pytest.raises(ValueError, match="Unicode quoted identifier"):
+        executor._validate_query(query)
+
+
 def test_postgres_allows_advisory_lock_name_in_literal_and_comment() -> None:
     executor = QueryExecutor(MagicMock(dialect="postgresql"), MagicMock())
     executor._validate_query("SELECT 'pg_advisory_lock(42)' /* pg_advisory_lock(42) */")
+    executor._validate_query("SELECT 'U&\"pg_advisory_lock\"(42)' AS note")
+    executor._validate_query('SELECT 1 /* U&"pg_advisory_lock"(42) */')
 
 
 @pytest.mark.parametrize(
