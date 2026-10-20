@@ -170,10 +170,19 @@ async def test_diagnostic_prompt_is_available_over_mcp(
     try:
         prompts = await client.list_prompts()
         assert "diagnose_query" in [prompt.name for prompt in prompts.prompts]
+        prompt = next(
+            prompt for prompt in prompts.prompts if prompt.name == "diagnose_query"
+        )
+        assert prompt.arguments is not None
+        assert prompt.arguments[0].description is not None
+        assert "Before entering" in prompt.arguments[0].description
+        assert "Redact sensitive SQL" in prompt.arguments[0].description
         result = await client.get_prompt("diagnose_query", {"problem": "slow report"})
         assert result.messages[0].content.type == "text"
         text = result.messages[0].content.text
         assert "slow report" in text
+        assert text.index("may receive this problem") < text.index("slow report")
+        assert "redact sensitive SQL" in text[: text.index("slow report")]
         assert "tools/list" not in text
         assert "tools your MCP host exposes" in text
         assert "refresh tool discovery" in text
