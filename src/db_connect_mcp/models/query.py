@@ -5,6 +5,19 @@ from typing import Any, Optional
 from pydantic import BaseModel, Field
 
 
+MAX_EXPLAIN_ADVICE = 20
+MAX_EXPLAIN_ADVICE_LENGTH = 500
+
+
+def add_plan_advice(result: dict[str, Any], field: str, message: str) -> None:
+    """Retain a bounded preview while counting every further plan finding."""
+    advice = result[field]
+    if len(advice) < MAX_EXPLAIN_ADVICE:
+        advice.append(message[:MAX_EXPLAIN_ADVICE_LENGTH])
+    else:
+        result[f"{field}_omitted"] = result.get(f"{field}_omitted", 0) + 1
+
+
 class QueryResult(BaseModel):
     """Result of a query execution."""
 
@@ -77,6 +90,13 @@ class ExplainPlan(BaseModel):
     recommendations: list[str] = Field(
         default_factory=list, description="Optimization recommendations"
     )
+    warnings_omitted: int = Field(
+        0, description="Number of performance warnings omitted after the advice limit"
+    )
+    recommendations_omitted: int = Field(
+        0,
+        description="Number of optimization recommendations omitted after the advice limit",
+    )
 
     @property
     def has_actual_stats(self) -> bool:
@@ -113,6 +133,8 @@ class ExplainPlan(BaseModel):
                     "actual_rows": None,
                     "warnings": ["Sequential scan on large table"],
                     "recommendations": ["Consider adding index on email column"],
+                    "warnings_omitted": 0,
+                    "recommendations_omitted": 0,
                 }
             ]
         }

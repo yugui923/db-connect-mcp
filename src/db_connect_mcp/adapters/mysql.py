@@ -11,6 +11,7 @@ import orjson
 
 from db_connect_mcp.models.capabilities import DatabaseCapabilities
 from db_connect_mcp.models.database import SchemaInfo
+from db_connect_mcp.models.query import add_plan_advice
 from db_connect_mcp.models.statistics import ColumnStats, Distribution
 from db_connect_mcp.models.table import ColumnInfo, TableInfo
 
@@ -322,9 +323,11 @@ class MySQLAdapter(BaseAdapter):
                     else:
                         if examined_count >= 1000 and 0 <= filtered_pct <= 10:
                             relation = node.get("table_name", "unknown relation")
-                            result["warnings"].append(
+                            add_plan_advice(
+                                result,
+                                "warnings",
                                 f"Full scan on {relation}: estimated {examined_count:g} "
-                                f"rows examined per scan, estimated {filtered_pct:g}% retained."
+                                f"rows examined per scan, estimated {filtered_pct:g}% retained.",
                             )
             for child in node.values():
                 if isinstance(child, (dict, list)):

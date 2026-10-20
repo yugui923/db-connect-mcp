@@ -46,7 +46,12 @@ from db_connect_mcp.core import (
 )
 from db_connect_mcp.models.config import DatabaseConfig, SSHTunnelConfig
 from db_connect_mcp.models.database import DatabaseInfo, SchemaInfo
-from db_connect_mcp.models.query import ExplainPlan, QueryResult
+from db_connect_mcp.models.query import (
+    MAX_EXPLAIN_ADVICE,
+    MAX_EXPLAIN_ADVICE_LENGTH,
+    ExplainPlan,
+    QueryResult,
+)
 from db_connect_mcp.models.search import (
     SearchDetailLevel,
     SearchObjectType,
@@ -397,6 +402,27 @@ def apply_truncation_to_explain_query(
         Tuple of (truncated_data, list_of_truncated_field_names)
     """
     truncated_fields: list[str] = []
+
+    # Bound advice from adapters as well as legacy ExplainPlan callers.
+    for field in ("warnings", "recommendations"):
+        advice = plan_data.get(field, [])
+        if len(advice) > MAX_EXPLAIN_ADVICE:
+            plan_data[f"{field}_omitted"] = plan_data.get(f"{field}_omitted", 0) + (
+                len(advice) - MAX_EXPLAIN_ADVICE
+            )
+            advice = advice[:MAX_EXPLAIN_ADVICE]
+            truncated_fields.append(field)
+        bounded_advice = []
+        for message in advice:
+            truncated, was_truncated = _truncate_string(
+                message, MAX_EXPLAIN_ADVICE_LENGTH
+            )
+            bounded_advice.append(truncated)
+            if was_truncated and field not in truncated_fields:
+                truncated_fields.append(field)
+        plan_data[field] = bounded_advice
+        if plan_data.get(f"{field}_omitted", 0) and field not in truncated_fields:
+            truncated_fields.append(field)
 
     # Truncate plan text if very long
     if plan_data.get("plan"):

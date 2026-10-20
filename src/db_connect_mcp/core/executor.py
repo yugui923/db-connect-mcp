@@ -230,6 +230,8 @@ class QueryExecutor:
                 actual_rows=plan_info.get("actual_rows"),
                 warnings=plan_info.get("warnings", []),
                 recommendations=plan_info.get("recommendations", []),
+                warnings_omitted=plan_info.get("warnings_omitted", 0),
+                recommendations_omitted=plan_info.get("recommendations_omitted", 0),
             )
 
     def _validate_query(self, query: str) -> None:

@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from db_connect_mcp.adapters.base import BaseAdapter
 from db_connect_mcp.models.capabilities import DatabaseCapabilities
 from db_connect_mcp.models.database import SchemaInfo
+from db_connect_mcp.models.query import add_plan_advice
 from db_connect_mcp.models.statistics import ColumnStats, Distribution
 from db_connect_mcp.models.table import ColumnInfo, TableInfo
 
@@ -513,14 +514,18 @@ class PostgresAdapter(BaseAdapter):
                 and removed >= 9 * max(kept, 1)
             ):
                 relation = plan.get("Relation Name", "unknown relation")
-                result["warnings"].append(
+                add_plan_advice(
+                    result,
+                    "warnings",
                     f"Sequential scan on {relation}: observed approximately "
                     f"{removed * loops:g} rows removed by filter across {loops:g} loops "
-                    f"({kept * loops:g} rows returned)."
+                    f"({kept * loops:g} rows returned).",
                 )
-                result["recommendations"].append(
+                add_plan_advice(
+                    result,
+                    "recommendations",
                     f"Review the filter and existing indexes on {relation}; "
-                    "an index may help if this selective scan is frequent."
+                    "an index may help if this selective scan is frequent.",
                 )
         for child in plan.get("Plans", []):
             if isinstance(child, dict):
