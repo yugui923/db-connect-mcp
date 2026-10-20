@@ -204,12 +204,11 @@ class DatabaseConnection:
                     url_obj = url_obj.difference_update_query(["ssl"])
                     effective_url = url_obj.render_as_string(hide_password=False)
 
-        # MySQL read-only transactions do not prevent session effects (e.g.
-        # GET_LOCK), and rollback does not clear them. Never reuse a session
-        # across MCP calls while read-only mode is requested.
+        # PostgreSQL advisory locks and MySQL named locks survive rollback.
+        # Never reuse a database session across read-only MCP checkouts.
         pool_options = (
             {"poolclass": NullPool}
-            if self._dialect == "mysql" and self.config.read_only
+            if self._dialect in {"postgresql", "mysql"} and self.config.read_only
             else {
                 "pool_size": self.config.pool_size,
                 "max_overflow": self.config.max_overflow,

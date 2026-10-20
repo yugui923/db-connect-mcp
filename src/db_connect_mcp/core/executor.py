@@ -314,7 +314,16 @@ class QueryExecutor:
             r"\$(?P<tag>[A-Za-z_][A-Za-z_0-9]*)?\$.*?\$(?P=tag)\$",
             re.DOTALL,
         )
-        sanitized = tokens.sub(lambda match: " " * len(match.group()), query)
+
+        def strip_token(match: re.Match[str]) -> str:
+            token = match.group()
+            if self.connection.dialect == "mysql" and token.startswith(
+                ("/*!", "/*+", "/*M!")
+            ):
+                raise ValueError("MySQL executable comment is not allowed")
+            return " " * len(token)
+
+        sanitized = tokens.sub(strip_token, query)
         # Do not silently accept malformed quoting.
         if (
             "'" in sanitized
@@ -332,6 +341,14 @@ class QueryExecutor:
             raise ValueError(
                 f"Only SELECT or WITH queries are allowed. Got: {first_keyword}"
             )
+
+        # Read-only transactions do not prevent PostgreSQL advisory locks.
+        # NullPool also closes the session on checkout exit, including failures.
+        if self.connection.dialect == "postgresql" and re.search(
+            r"\bPG_(?:TRY_)?ADVISORY_(?:XACT_)?LOCK(?:_SHARED)?\s*\(",
+            normalized,
+        ):
+            raise ValueError("PostgreSQL advisory lock is not allowed")
 
         # MySQL's transaction read-only flag cannot isolate session state.
         # Reject known session-mutating expressions; NullPool additionally

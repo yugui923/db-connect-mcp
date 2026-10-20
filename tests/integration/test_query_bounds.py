@@ -47,6 +47,72 @@ async def test_pg_setval_cannot_persist_even_in_current_transaction(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("fail_checkout", [False, True])
+async def test_pg_advisory_lock_cannot_survive_mcp_checkout(
+    pg_database_url: str, fail_checkout: bool
+) -> None:
+    # The advisory key is synthetic, and an observer releases it if it acquires
+    # it. Dispose the MCP engine even on assertion failures to release its lock.
+    lock_key = uuid4().int & ((1 << 63) - 1)
+    config = DatabaseConfig(url=pg_database_url)
+    connection = DatabaseConnection(config)
+    observer = create_async_engine(pg_database_url)
+    await connection.initialize()
+    try:
+        try:
+            async with connection.get_connection() as conn:
+                result = await conn.execute(
+                    text("SELECT pg_advisory_lock(:key)"), {"key": lock_key}
+                )
+                result.close()
+                if fail_checkout:
+                    raise ValueError("synthetic checkout failure")
+        except ValueError:
+            if not fail_checkout:
+                raise
+        async with observer.connect() as conn:
+            acquired = await conn.scalar(
+                text("SELECT pg_try_advisory_lock(:key)"), {"key": lock_key}
+            )
+            if acquired:
+                await conn.execute(
+                    text("SELECT pg_advisory_unlock(:key)"), {"key": lock_key}
+                )
+            assert acquired is True
+    finally:
+        await observer.dispose()
+        await connection.dispose()
+
+
+@pytest.mark.asyncio
+async def test_mysql_executable_comment_cannot_acquire_named_lock(
+    mysql_database_url: str,
+) -> None:
+    lock_name = f"mcp_readonly_{uuid4().hex}"
+    config = DatabaseConfig(url=mysql_database_url)
+    connection = DatabaseConnection(config)
+    observer = create_async_engine(mysql_database_url)
+    await connection.initialize()
+    try:
+        executor = QueryExecutor(connection, create_adapter(config))
+        with pytest.raises(ValueError, match="executable comment"):
+            await executor.execute_query(
+                "SELECT /*!50000 GET_LOCK(:name, 0) AS locked, */ 1 AS marker",
+                {"name": lock_name},
+            )
+        async with observer.connect() as conn:
+            assert (
+                await conn.scalar(
+                    text("SELECT IS_FREE_LOCK(:name)"), {"name": lock_name}
+                )
+                == 1
+            )
+    finally:
+        await observer.dispose()
+        await connection.dispose()
+
+
+@pytest.mark.asyncio
 async def test_mysql_named_lock_cannot_survive_mcp_checkout(
     mysql_database_url: str,
 ) -> None:

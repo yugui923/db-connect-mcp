@@ -43,6 +43,45 @@ def test_mysql_rejects_session_side_effects(query: str) -> None:
         executor._validate_query(query)
 
 
+@pytest.mark.parametrize(
+    "query",
+    [
+        "SELECT pg_advisory_lock(42)",
+        "WITH q AS (SELECT pg_advisory_lock_shared(42)) SELECT * FROM q",
+        "SELECT pg_try_advisory_lock(42)",
+        "SELECT pg_advisory_xact_lock(42)",
+    ],
+)
+def test_postgres_rejects_session_and_transaction_advisory_locks(query: str) -> None:
+    executor = QueryExecutor(MagicMock(dialect="postgresql"), MagicMock())
+    with pytest.raises(ValueError, match="advisory lock"):
+        executor._validate_query(query)
+
+
+def test_postgres_allows_advisory_lock_name_in_literal_and_comment() -> None:
+    executor = QueryExecutor(MagicMock(dialect="postgresql"), MagicMock())
+    executor._validate_query("SELECT 'pg_advisory_lock(42)' /* pg_advisory_lock(42) */")
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "SELECT /*!50000 GET_LOCK('name', 0) AS locked, */ 1 AS marker",
+        "SELECT /*! SET @session_key := 1 */ 1",
+        "SELECT /*+ MAX_EXECUTION_TIME(1000) */ 1",
+    ],
+)
+def test_mysql_rejects_executable_comments(query: str) -> None:
+    executor = QueryExecutor(MagicMock(dialect="mysql"), MagicMock())
+    with pytest.raises(ValueError, match="executable comment"):
+        executor._validate_query(query)
+
+
+def test_mysql_allows_executable_comment_text_in_literal() -> None:
+    executor = QueryExecutor(MagicMock(dialect="mysql"), MagicMock())
+    executor._validate_query("SELECT '/*!50000 GET_LOCK(42, 0) */' AS note")
+
+
 def test_mysql_allows_lock_name_as_string_literal() -> None:
     executor = QueryExecutor(MagicMock(dialect="mysql"), MagicMock())
     executor._validate_query("SELECT 'GET_LOCK' AS function_name")
