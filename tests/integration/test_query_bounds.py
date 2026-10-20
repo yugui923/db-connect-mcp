@@ -147,6 +147,64 @@ async def test_unicode_quoted_pg_advisory_lock_cannot_block_mcp_query(
 
 
 @pytest.mark.asyncio
+async def test_pg_escaped_string_cannot_hide_advisory_lock(
+    pg_database_url: str,
+) -> None:
+    key = uuid4().int & ((1 << 63) - 1)
+    config = DatabaseConfig(url=pg_database_url)
+    connection = DatabaseConnection(config)
+    await connection.initialize()
+    try:
+        executor = QueryExecutor(connection, create_adapter(config))
+        with pytest.raises(ValueError, match="backslash escape"):
+            await executor.execute_query(
+                r"SELECT E'it\'s', pg_advisory_lock(:key) -- '", {"key": key}
+            )
+        observer = create_async_engine(pg_database_url)
+        try:
+            async with observer.connect() as conn:
+                assert await conn.scalar(
+                    text("SELECT pg_try_advisory_lock(:key)"), {"key": key}
+                )
+                await conn.execute(
+                    text("SELECT pg_advisory_unlock(:key)"), {"key": key}
+                )
+        finally:
+            await observer.dispose()
+    finally:
+        await connection.dispose()
+
+
+@pytest.mark.asyncio
+async def test_mysql_escaped_string_cannot_hide_named_lock(
+    mysql_database_url: str,
+) -> None:
+    name = f"mcp_readonly_{uuid4().hex}"
+    config = DatabaseConfig(url=mysql_database_url)
+    connection = DatabaseConnection(config)
+    await connection.initialize()
+    try:
+        executor = QueryExecutor(connection, create_adapter(config))
+        with pytest.raises(ValueError, match="backslash escape"):
+            await executor.execute_query(
+                r"SELECT 'it\'s', GET_LOCK(:name, 0) -- '", {"name": name}
+            )
+        observer = create_async_engine(mysql_database_url)
+        try:
+            async with observer.connect() as conn:
+                assert (
+                    await conn.scalar(
+                        text("SELECT IS_FREE_LOCK(:name)"), {"name": name}
+                    )
+                    == 1
+                )
+        finally:
+            await observer.dispose()
+    finally:
+        await connection.dispose()
+
+
+@pytest.mark.asyncio
 async def test_mysql_executable_comment_cannot_acquire_named_lock(
     mysql_database_url: str,
 ) -> None:

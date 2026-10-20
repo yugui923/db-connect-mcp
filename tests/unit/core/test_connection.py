@@ -500,6 +500,208 @@ async def test_cancelled_dispose_does_not_stop_live_checkout_tunnel() -> None:
 
 
 @pytest.mark.asyncio
+async def test_dispose_waits_for_tunnel_start_without_publishing_engine() -> None:
+    from db_connect_mcp.models.config import SSHTunnelConfig
+
+    connection = DatabaseConnection(
+        DatabaseConfig(
+            url="postgresql://user:pass@host/db",
+            ssh_tunnel=SSHTunnelConfig(
+                ssh_host="bastion", ssh_username="user", ssh_password="password"
+            ),
+        )
+    )
+    started = asyncio.Event()
+    resume = asyncio.Event()
+    tunnel = MagicMock()
+
+    async def start_tunnel() -> None:
+        connection._tunnel_manager = tunnel
+        started.set()
+        await resume.wait()
+
+    with (
+        patch.object(connection, "_start_tunnel", side_effect=start_tunnel),
+        patch("db_connect_mcp.core.connection.create_async_engine") as create_engine,
+    ):
+        initialization = asyncio.create_task(connection.initialize())
+        await started.wait()
+        disposal = asyncio.create_task(connection.dispose())
+        await asyncio.sleep(0)
+        assert not disposal.done()
+        resume.set()
+        with pytest.raises(RuntimeError, match="disposing"):
+            await asyncio.wait_for(initialization, 2)
+        await asyncio.wait_for(disposal, 2)
+    create_engine.assert_not_called()
+    tunnel.stop.assert_called_once()
+    assert not connection.is_initialized
+
+
+@pytest.mark.asyncio
+async def test_cancelled_tunnel_start_does_not_leave_running_tunnel() -> None:
+    import threading
+
+    from db_connect_mcp.models.config import SSHTunnelConfig
+
+    connection = DatabaseConnection(
+        DatabaseConfig(
+            url="postgresql://user:pass@host/db",
+            ssh_tunnel=SSHTunnelConfig(
+                ssh_host="bastion", ssh_username="user", ssh_password="password"
+            ),
+        )
+    )
+    started = threading.Event()
+    resume = threading.Event()
+    tunnel = MagicMock()
+
+    def start() -> int:
+        started.set()
+        assert resume.wait(timeout=2)
+        return 12345
+
+    tunnel.start.side_effect = start
+    with (
+        patch("db_connect_mcp.core.tunnel.SSHTunnelManager", return_value=tunnel),
+        patch("db_connect_mcp.core.connection.create_async_engine") as create_engine,
+    ):
+        initialization = asyncio.create_task(connection.initialize())
+        assert await asyncio.to_thread(started.wait, 2)
+        initialization.cancel()
+        disposal = asyncio.create_task(connection.dispose())
+        await asyncio.sleep(0)
+        assert not disposal.done()
+        resume.set()
+        with pytest.raises(asyncio.CancelledError):
+            await initialization
+        await asyncio.wait_for(disposal, 2)
+    create_engine.assert_not_called()
+    tunnel.stop.assert_called_once()
+    assert not connection.is_initialized
+
+
+@pytest.mark.asyncio
+async def test_cancelled_tunnel_start_without_dispose_stops_tunnel() -> None:
+    import threading
+
+    from db_connect_mcp.models.config import SSHTunnelConfig
+
+    connection = DatabaseConnection(
+        DatabaseConfig(
+            url="postgresql://user:pass@host/db",
+            ssh_tunnel=SSHTunnelConfig(
+                ssh_host="bastion", ssh_username="user", ssh_password="password"
+            ),
+        )
+    )
+    started = threading.Event()
+    resume = threading.Event()
+    tunnel = MagicMock()
+
+    def start() -> int:
+        started.set()
+        assert resume.wait(timeout=2)
+        return 12345
+
+    tunnel.start.side_effect = start
+    with patch("db_connect_mcp.core.tunnel.SSHTunnelManager", return_value=tunnel):
+        initialization = asyncio.create_task(connection.initialize())
+        assert await asyncio.to_thread(started.wait, 2)
+        initialization.cancel()
+        resume.set()
+        with pytest.raises(asyncio.CancelledError):
+            await initialization
+    tunnel.stop.assert_called_once()
+    assert not connection.is_initialized
+
+
+@pytest.mark.asyncio
+async def test_failed_tunnel_start_stops_tunnel_without_external_dispose() -> None:
+    from db_connect_mcp.models.config import SSHTunnelConfig
+    from db_connect_mcp.core.tunnel import SSHTunnelError
+
+    connection = DatabaseConnection(
+        DatabaseConfig(
+            url="postgresql://user:pass@host/db",
+            ssh_tunnel=SSHTunnelConfig(
+                ssh_host="bastion", ssh_username="user", ssh_password="password"
+            ),
+        )
+    )
+    tunnel = MagicMock()
+    tunnel.start.side_effect = SSHTunnelError("synthetic startup failure")
+    with patch("db_connect_mcp.core.tunnel.SSHTunnelManager", return_value=tunnel):
+        with pytest.raises(SSHTunnelError, match="synthetic startup failure"):
+            await connection.initialize()
+    tunnel.stop.assert_called_once()
+    assert not connection.is_initialized
+
+
+@pytest.mark.asyncio
+async def test_concurrent_dispose_retries_when_first_cancelled_while_waiting() -> None:
+    connection = DatabaseConnection(
+        DatabaseConfig(url="postgresql://user:pass@host/db")
+    )
+    with patch("db_connect_mcp.core.connection.create_async_engine") as create_engine:
+        create_engine.return_value.dispose = AsyncMock()
+        await connection.initialize()
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def hold() -> None:
+        async with connection.get_connection():
+            entered.set()
+            await release.wait()
+
+    with patch.object(connection, "_set_readonly", new_callable=AsyncMock):
+        holder = asyncio.create_task(hold())
+        await entered.wait()
+        first = asyncio.create_task(connection.dispose())
+        await asyncio.sleep(0)
+        second = asyncio.create_task(connection.dispose())
+        await asyncio.sleep(0)
+        first.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await first
+        assert not second.done()
+        release.set()
+        await holder
+        await asyncio.wait_for(second, 2)
+    create_engine.return_value.dispose.assert_awaited_once()
+    assert not connection.is_initialized
+
+
+@pytest.mark.asyncio
+async def test_concurrent_dispose_retries_cancelled_engine_dispose() -> None:
+    connection = DatabaseConnection(
+        DatabaseConfig(url="postgresql://user:pass@host/db")
+    )
+    entered = asyncio.Event()
+    resume = asyncio.Event()
+
+    async def dispose_engine() -> None:
+        entered.set()
+        await resume.wait()
+
+    with patch("db_connect_mcp.core.connection.create_async_engine") as create_engine:
+        create_engine.return_value.dispose = AsyncMock(side_effect=dispose_engine)
+        await connection.initialize()
+    first = asyncio.create_task(connection.dispose())
+    await entered.wait()
+    second = asyncio.create_task(connection.dispose())
+    await asyncio.sleep(0)
+    first.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await first
+    assert not second.done()
+    resume.set()
+    await asyncio.wait_for(second, 2)
+    assert create_engine.return_value.dispose.await_count == 2
+    assert not connection.is_initialized
+
+
+@pytest.mark.asyncio
 async def test_concurrent_dispose_calls_stop_tunnel_once() -> None:
     connection = DatabaseConnection(
         DatabaseConfig(url="postgresql://user:pass@host/db")

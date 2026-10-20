@@ -155,16 +155,42 @@ class DatabaseConnection:
         self._lifecycle_lock = threading.Lock()
         self._active_checkouts = 0
         self._checkout_idle: Future[None] | None = None
-        self._disposed: Future[None] | None = None
+        self._disposed: Future[bool] | None = None
+        self._initializing: Future[None] | None = None
         self._disposing = False
 
     async def initialize(self) -> None:
         """Initialize the async or sync engine based on driver requirements."""
-        if self._disposing:
-            raise RuntimeError("DatabaseConnection is disposing")
-        if self.engine is not None or self.sync_engine is not None:
-            return  # Already initialized
+        with self._lifecycle_lock:
+            if self._disposing:
+                raise RuntimeError("DatabaseConnection is disposing")
+            if self.engine is not None or self.sync_engine is not None:
+                return  # Already initialized
+            if self._initializing is not None:
+                raise RuntimeError("DatabaseConnection is initializing")
+            initializing: Future[None] = Future()
+            self._initializing = initializing
+        try:
+            await self._initialize_engine()
+            with self._lifecycle_lock:
+                if self._disposing:
+                    raise RuntimeError("DatabaseConnection is disposing")
+        except BaseException:
+            # A failed or cancelled startup must not strand an SSH listener.
+            # A concurrent dispose owns the cleanup when already in progress.
+            with self._lifecycle_lock:
+                disposing = self._disposing
+            if not disposing and self._tunnel_manager is not None:
+                self._tunnel_manager.stop()
+                self._tunnel_manager = None
+                self._tunneled_url = None
+            raise
+        finally:
+            with self._lifecycle_lock:
+                initializing.set_result(None)
+                self._initializing = None
 
+    async def _initialize_engine(self) -> None:
         # Start SSH tunnel if configured
         if self.config.ssh_tunnel:
             await self._start_tunnel()
@@ -175,14 +201,17 @@ class DatabaseConnection:
         # Handle ClickHouse with sync-only driver
         if self._is_sync_only:
             # Create synchronous engine for ClickHouse
-            self.sync_engine = create_engine(
-                effective_url,
-                pool_size=self.config.pool_size,
-                max_overflow=self.config.max_overflow,
-                pool_timeout=self.config.pool_timeout,
-                pool_pre_ping=True,
-                echo=self.config.echo_sql,
-            )
+            with self._lifecycle_lock:
+                if self._disposing:
+                    raise RuntimeError("DatabaseConnection is disposing")
+                self.sync_engine = create_engine(
+                    effective_url,
+                    pool_size=self.config.pool_size,
+                    max_overflow=self.config.max_overflow,
+                    pool_timeout=self.config.pool_timeout,
+                    pool_pre_ping=True,
+                    echo=self.config.echo_sql,
+                )
             return
 
         # Extract SSL configuration from URL for asyncpg
@@ -229,19 +258,22 @@ class DatabaseConnection:
                 "pool_timeout": self.config.pool_timeout,
             }
         )
-        self.engine = create_async_engine(
-            effective_url,
-            **pool_options,
-            pool_pre_ping=True,  # Verify connections before using
-            echo=self.config.echo_sql,
-            connect_args=connect_args if connect_args else {},
-        )
-        # NullPool closes every session on return, but offers no QueuePool-style
-        # concurrency bound. Limit open checkouts to the configured pool budget.
-        if isolated_sessions:
-            self._checkout_limit = threading.BoundedSemaphore(
-                self.config.pool_size + self.config.max_overflow
+        with self._lifecycle_lock:
+            if self._disposing:
+                raise RuntimeError("DatabaseConnection is disposing")
+            self.engine = create_async_engine(
+                effective_url,
+                **pool_options,
+                pool_pre_ping=True,  # Verify connections before using
+                echo=self.config.echo_sql,
+                connect_args=connect_args if connect_args else {},
             )
+            # NullPool closes every session on return, but offers no QueuePool-style
+            # concurrency bound. Limit open checkouts to the configured pool budget.
+            if isolated_sessions:
+                self._checkout_limit = threading.BoundedSemaphore(
+                    self.config.pool_size + self.config.max_overflow
+                )
 
     async def _start_tunnel(self) -> None:
         """Start SSH tunnel and rewrite database URL."""
@@ -284,7 +316,17 @@ class DatabaseConnection:
 
         try:
             self._tunnel_manager = TunnelManager(effective_config)
-            local_port = await asyncio.to_thread(self._tunnel_manager.start)
+            start = asyncio.create_task(asyncio.to_thread(self._tunnel_manager.start))
+            try:
+                local_port = await asyncio.shield(start)
+            except asyncio.CancelledError:
+                # Cancelling to_thread does not stop the worker. Keep disposal
+                # behind initialization until the tunnel has actually started.
+                try:
+                    await asyncio.shield(start)
+                except Exception:
+                    pass  # The original cancellation still wins.
+                raise
 
             # Rewrite URL to use tunnel
             self._tunneled_url = rewrite_database_url(
@@ -301,33 +343,28 @@ class DatabaseConnection:
 
     async def dispose(self) -> None:
         """Wait for active checkouts before closing the engine and SSH tunnel."""
-        with self._lifecycle_lock:
-            if self._disposing:
+        while True:
+            with self._lifecycle_lock:
                 disposed = self._disposed
-                assert disposed is not None
-                idle = None
-            else:
-                self._disposing = True
-                disposed = None
-                self._disposed = Future()
-                idle = self._checkout_idle
-        if disposed is not None:
-            await asyncio.shield(asyncio.wrap_future(disposed))
-            return
-        if idle is not None:
-            try:
-                # A thread-safe future can be awaited on any event loop.
-                await asyncio.shield(asyncio.wrap_future(idle))
-            except BaseException:
-                with self._lifecycle_lock:
-                    self._disposing = False
-                    assert self._disposed is not None
-                    self._disposed.set_result(None)
-                    self._disposed = None
-                raise
+                if disposed is None:
+                    self._disposing = True
+                    disposed = Future()
+                    self._disposed = disposed
+                    initializing = self._initializing
+                    break
+            # A cancelled or failed owner must not make waiters report success.
+            if await asyncio.shield(asyncio.wrap_future(disposed)):
+                return
+        completed = False
         try:
+            if initializing is not None:
+                await asyncio.shield(asyncio.wrap_future(initializing))
+            with self._lifecycle_lock:
+                idle = self._checkout_idle
+            if idle is not None:
+                # Thread-safe futures can be awaited from another event loop.
+                await asyncio.shield(asyncio.wrap_future(idle))
             try:
-                # Dispose engine first
                 if self.engine is not None:
                     await self.engine.dispose()
                     self.engine = None
@@ -335,16 +372,16 @@ class DatabaseConnection:
                     self.sync_engine.dispose()
                     self.sync_engine = None
             finally:
-                # Always stop SSH tunnel, even if engine dispose fails
+                # An interrupted engine disposal leaves the engine for a retry.
                 if self._tunnel_manager is not None:
                     self._tunnel_manager.stop()
                     self._tunnel_manager = None
                     self._tunneled_url = None
+            completed = True
         finally:
             with self._lifecycle_lock:
                 self._disposing = False
-                assert self._disposed is not None
-                self._disposed.set_result(None)
+                disposed.set_result(completed)
                 self._disposed = None
 
     @asynccontextmanager

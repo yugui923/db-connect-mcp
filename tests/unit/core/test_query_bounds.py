@@ -75,6 +75,19 @@ def test_postgres_rejects_unicode_quoted_advisory_lock(query: str) -> None:
         executor._validate_query(query)
 
 
+@pytest.mark.parametrize(
+    ("dialect", "query"),
+    [
+        ("postgresql", r"SELECT E'it\'s', pg_advisory_lock(42) -- '"),
+        ("mysql", r"SELECT 'it\'s', GET_LOCK('name', 0) -- '"),
+    ],
+)
+def test_query_rejects_escaped_quote_masking_lock(dialect: str, query: str) -> None:
+    executor = QueryExecutor(MagicMock(dialect=dialect), MagicMock())
+    with pytest.raises(ValueError):
+        executor._validate_query(query)
+
+
 def test_postgres_allows_advisory_lock_name_in_literal_and_comment() -> None:
     executor = QueryExecutor(MagicMock(dialect="postgresql"), MagicMock())
     executor._validate_query("SELECT 'pg_advisory_lock(42)' /* pg_advisory_lock(42) */")

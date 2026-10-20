@@ -9,7 +9,8 @@ from typing import TYPE_CHECKING, Any, Optional, cast
 
 import orjson
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncConnection
+from sqlalchemy.engine import Result
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncResult
 
 from db_connect_mcp.core.connection import DatabaseConnection
 from db_connect_mcp.models.query import ExplainPlan, QueryResult
@@ -101,7 +102,9 @@ class QueryExecutor:
         async with self.connection.get_connection() as conn:
             is_clickhouse = self.connection.dialect in {"clickhouse", "clickhousedb"}
             if is_clickhouse:
-                result = await conn.execute(text(modified_query), params or {})
+                result = cast(
+                    Result[Any], await conn.execute(text(modified_query), params or {})
+                )
             else:
                 result = await cast(AsyncConnection, conn).stream(
                     text(modified_query), params or {}
@@ -126,9 +129,10 @@ class QueryExecutor:
                 truncated = False
                 preview_truncated_columns_by_row: list[set[str]] = []
                 for index in range(limit + 1):
-                    row = (
-                        result.fetchone() if is_clickhouse else await result.fetchone()
-                    )
+                    if is_clickhouse:
+                        row = cast(Result[Any], result).fetchone()
+                    else:
+                        row = await cast(AsyncResult[Any], result).fetchone()
                     if row is None:
                         break
                     if index == limit:
@@ -136,7 +140,7 @@ class QueryExecutor:
                         break
                     # A single decoded cell can already be large at this point;
                     # reject it before retaining another row or serializing the array.
-                    values = dict(zip(columns, row))
+                    values: dict[str, Any] = dict(zip(columns, row))
                     preview_truncated_columns: set[str] = set()
                     if sample_preview:
                         # Preserve the MCP sample preview's 500-character cell
@@ -176,9 +180,9 @@ class QueryExecutor:
                         )
             finally:
                 if is_clickhouse:
-                    result.close()
+                    cast(Result[Any], result).close()
                 else:
-                    await result.close()
+                    await cast(AsyncResult[Any], result).close()
 
             execution_time = (time.time() - start_time) * 1000
             output = QueryResult(
@@ -310,7 +314,7 @@ class QueryExecutor:
         # Ignore SQL strings, quoted identifiers and comments while checking syntax.
         # Unrecognized quoting is rejected rather than risking stacked statements.
         tokens = re.compile(
-            r"--[^\n]*|/\*.*?\*/|'(?:''|[^'])*'|"
+            r"--[^\n]*|/\*.*?\*/|(?i:E)'(?:''|[^'])*'|'(?:''|[^'])*'|"
             r"(?i:U&)\"(?:\"\"|[^\"])*\"|\"(?:\"\"|[^\"])*\"|"
             r"\$(?P<tag>[A-Za-z_][A-Za-z_0-9]*)?\$.*?\$(?P=tag)\$",
             re.DOTALL,
@@ -326,6 +330,14 @@ class QueryExecutor:
             # function. Reject this syntax rather than silently hiding a lock.
             if self.connection.dialect == "postgresql" and token[:2].upper() == "U&":
                 raise ValueError("PostgreSQL Unicode quoted identifier is not allowed")
+            # Backslash escapes change the end of PostgreSQL E-strings and
+            # MySQL strings. Reject them before masking their contents.
+            if (
+                self.connection.dialect in {"postgresql", "mysql"}
+                and token.startswith(("'", "E'", "e'"))
+                and "\\" in token
+            ):
+                raise ValueError("SQL backslash escape is not allowed")
             # Quoted PostgreSQL function names execute just like unquoted ones.
             # Preserve only advisory-lock identifiers for the check below; keep
             # strings, comments and unrelated quoted identifiers hidden.
@@ -348,6 +360,9 @@ class QueryExecutor:
             or '"' in sanitized
             or "/*" in sanitized
             or "$" in sanitized
+            or (
+                self.connection.dialect in {"postgresql", "mysql"} and "\\" in sanitized
+            )
         ):
             raise ValueError("Unterminated SQL quote or comment")
         statement = sanitized.strip()
