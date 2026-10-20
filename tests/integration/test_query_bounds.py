@@ -1,11 +1,13 @@
 """Live query result caps, including caller-authored SQL LIMIT."""
 
+import asyncio
 import json
 from uuid import uuid4
 from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy import text
+from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from db_connect_mcp.server import DatabaseMCPServer, _structured_tool_result
@@ -85,6 +87,36 @@ async def test_pg_advisory_lock_cannot_survive_mcp_checkout(
 
 
 @pytest.mark.asyncio
+async def test_quoted_pg_advisory_lock_cannot_block_mcp_query(
+    pg_database_url: str,
+) -> None:
+    lock_key = uuid4().int & ((1 << 63) - 1)
+    blocker = create_async_engine(pg_database_url)
+    config = DatabaseConfig(url=pg_database_url, statement_timeout=1)
+    connection = DatabaseConnection(config)
+    await connection.initialize()
+    try:
+        async with blocker.connect() as conn:
+            await conn.execute(text("SELECT pg_advisory_lock(:key)"), {"key": lock_key})
+            try:
+                executor = QueryExecutor(connection, create_adapter(config))
+                with pytest.raises(ValueError, match="advisory lock"):
+                    await asyncio.wait_for(
+                        executor.execute_query(
+                            'SELECT "pg_advisory_lock"(:key)', {"key": lock_key}
+                        ),
+                        timeout=3,
+                    )
+            finally:
+                await conn.execute(
+                    text("SELECT pg_advisory_unlock(:key)"), {"key": lock_key}
+                )
+    finally:
+        await connection.dispose()
+        await blocker.dispose()
+
+
+@pytest.mark.asyncio
 async def test_mysql_executable_comment_cannot_acquire_named_lock(
     mysql_database_url: str,
 ) -> None:
@@ -141,6 +173,27 @@ async def test_mysql_named_lock_cannot_survive_mcp_checkout(
             assert result.scalar() == 1
     finally:
         await observer.dispose()
+        await connection.dispose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("database_url", ["pg_database_url", "mysql_database_url"])
+async def test_null_pool_respects_one_connection_budget_live(
+    request: pytest.FixtureRequest, database_url: str
+) -> None:
+    url = request.getfixturevalue(database_url)
+    config = DatabaseConfig(url=url, pool_size=1, max_overflow=0, pool_timeout=1)
+    connection = DatabaseConnection(config)
+    await connection.initialize()
+    try:
+        async with connection.get_connection() as conn:
+            await conn.execute(text("SELECT 1"))
+            with pytest.raises(PoolTimeoutError, match="timed out"):
+                async with connection.get_connection():
+                    pass
+        async with connection.get_connection() as conn:
+            assert await conn.scalar(text("SELECT 1")) == 1
+    finally:
         await connection.dispose()
 
 

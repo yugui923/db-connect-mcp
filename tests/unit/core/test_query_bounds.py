@@ -50,6 +50,9 @@ def test_mysql_rejects_session_side_effects(query: str) -> None:
         "WITH q AS (SELECT pg_advisory_lock_shared(42)) SELECT * FROM q",
         "SELECT pg_try_advisory_lock(42)",
         "SELECT pg_advisory_xact_lock(42)",
+        'SELECT "pg_advisory_lock"(42)',
+        'SELECT pg_catalog."pg_try_advisory_lock_shared"(42)',
+        'WITH q AS (SELECT "pg_advisory_xact_lock"(42)) SELECT * FROM q',
     ],
 )
 def test_postgres_rejects_session_and_transaction_advisory_locks(query: str) -> None:

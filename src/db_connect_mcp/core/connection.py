@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, AsyncGenerator, Optional, Union
 
 from sqlalchemy import text, create_engine, Engine, Connection
+from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_engine
 from sqlalchemy.pool import NullPool
 
@@ -148,6 +149,7 @@ class DatabaseConnection:
         # SSH tunnel support
         self._tunnel_manager: Optional["SSHTunnelManager"] = None
         self._tunneled_url: Optional[str] = None
+        self._checkout_limit: asyncio.Semaphore | None = None
 
     async def initialize(self) -> None:
         """Initialize the async or sync engine based on driver requirements."""
@@ -206,9 +208,12 @@ class DatabaseConnection:
 
         # PostgreSQL advisory locks and MySQL named locks survive rollback.
         # Never reuse a database session across read-only MCP checkouts.
+        isolated_sessions = (
+            self._dialect in {"postgresql", "mysql"} and self.config.read_only
+        )
         pool_options = (
             {"poolclass": NullPool}
-            if self._dialect in {"postgresql", "mysql"} and self.config.read_only
+            if isolated_sessions
             else {
                 "pool_size": self.config.pool_size,
                 "max_overflow": self.config.max_overflow,
@@ -222,6 +227,12 @@ class DatabaseConnection:
             echo=self.config.echo_sql,
             connect_args=connect_args if connect_args else {},
         )
+        # NullPool closes every session on return, but offers no QueuePool-style
+        # concurrency bound. Limit open checkouts to the configured pool budget.
+        if isolated_sessions:
+            self._checkout_limit = asyncio.Semaphore(
+                self.config.pool_size + self.config.max_overflow
+            )
 
     async def _start_tunnel(self) -> None:
         """Start SSH tunnel and rewrite database URL."""
@@ -355,16 +366,35 @@ class DatabaseConnection:
                     "DatabaseConnection not initialized. Call initialize() first."
                 )
 
-            async with self.engine.connect() as conn:
-                # Set read-only mode if configured
-                if self.config.read_only:
-                    await self._set_readonly(conn)
+            # Only NullPool checkouts need our own budget; QueuePool enforces
+            # its own size and timeout. Hold the permit through connection close.
+            engine = self.engine
+            limit = self._checkout_limit
+            if limit is not None:
+                try:
+                    await asyncio.wait_for(limit.acquire(), self.config.pool_timeout)
+                except TimeoutError as exc:
+                    raise PoolTimeoutError(
+                        f"Database checkout timed out after {self.config.pool_timeout}s"
+                    ) from exc
+            try:
+                if self.engine is not engine:
+                    raise RuntimeError(
+                        "DatabaseConnection not initialized. Call initialize() first."
+                    )
+                async with engine.connect() as conn:
+                    # Set read-only mode if configured
+                    if self.config.read_only:
+                        await self._set_readonly(conn)
 
-                # Set statement timeout if configured
-                if self.config.statement_timeout:
-                    await self._set_timeout(conn, self.config.statement_timeout)
+                    # Set statement timeout if configured
+                    if self.config.statement_timeout:
+                        await self._set_timeout(conn, self.config.statement_timeout)
 
-                yield conn
+                    yield conn
+            finally:
+                if limit is not None:
+                    limit.release()
 
     async def _set_readonly(self, conn: AsyncConnection) -> None:
         """Set connection to read-only mode based on database dialect."""

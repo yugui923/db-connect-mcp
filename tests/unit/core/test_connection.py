@@ -1,8 +1,11 @@
 """Unit tests for DatabaseConnection and connection wrappers."""
 
+import asyncio
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 
 from db_connect_mcp.core.connection import (
     AsyncConnectionWrapper,
@@ -310,6 +313,139 @@ async def test_mysql_read_only_engine_does_not_reuse_sessions() -> None:
         await connection.initialize()
     assert create_engine.call_args.kwargs["poolclass"].__name__ == "NullPool"
     assert "pool_size" not in create_engine.call_args.kwargs
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("dialect", ["postgresql", "mysql"])
+async def test_read_only_null_pool_limits_parallel_checkouts(dialect: str) -> None:
+    config = DatabaseConfig(
+        url=f"{dialect}://user:pass@host/db",
+        pool_size=1,
+        max_overflow=1,
+        pool_timeout=1,
+    )
+    connection = DatabaseConnection(config)
+    active = 0
+    peak = 0
+
+    @asynccontextmanager
+    async def connect():
+        nonlocal active, peak
+        active += 1
+        peak = max(peak, active)
+        try:
+            yield AsyncMock()
+        finally:
+            active -= 1
+
+    with patch("db_connect_mcp.core.connection.create_async_engine") as create_engine:
+        create_engine.return_value.connect.side_effect = connect
+        await connection.initialize()
+    with patch.object(connection, "_set_readonly", new_callable=AsyncMock):
+        entered = [asyncio.Event() for _ in range(2)]
+        release = asyncio.Event()
+
+        async def checkout(index: int) -> None:
+            async with connection.get_connection():
+                if index < 2:
+                    entered[index].set()
+                await release.wait()
+
+        first, second = (asyncio.create_task(checkout(i)) for i in range(2))
+        await asyncio.wait_for(asyncio.gather(*(event.wait() for event in entered)), 2)
+        third = asyncio.create_task(checkout(2))
+        await asyncio.sleep(0.05)
+        assert peak == 2
+        assert not third.done()
+        assert active == 2
+        release.set()
+        await asyncio.wait_for(asyncio.gather(first, second, third), 2)
+        assert peak == 2
+        assert active == 0
+
+
+@pytest.mark.asyncio
+async def test_null_pool_checkout_timeout_and_cancellation_release_permits() -> None:
+    config = DatabaseConfig(
+        url="postgresql://user:pass@host/db",
+        pool_size=1,
+        max_overflow=0,
+        pool_timeout=1,
+    )
+    connection = DatabaseConnection(config)
+    active = 0
+
+    @asynccontextmanager
+    async def connect():
+        nonlocal active
+        active += 1
+        try:
+            yield AsyncMock()
+        finally:
+            active -= 1
+
+    with patch("db_connect_mcp.core.connection.create_async_engine") as create_engine:
+        create_engine.return_value.connect.side_effect = connect
+        await connection.initialize()
+    with patch.object(connection, "_set_readonly", new_callable=AsyncMock):
+        entered = asyncio.Event()
+        holder = asyncio.create_task(_hold_checkout(connection, entered))
+        await asyncio.wait_for(entered.wait(), 2)
+        try:
+            with pytest.raises(PoolTimeoutError, match="timed out"):
+                async with connection.get_connection():
+                    pass
+            pending = asyncio.create_task(_hold_checkout(connection, asyncio.Event()))
+            await asyncio.sleep(0.05)
+            pending.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await pending
+            assert active == 1
+        finally:
+            holder.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await holder
+        assert active == 0
+        async with connection.get_connection():
+            assert active == 1
+        assert active == 0
+
+
+@pytest.mark.asyncio
+async def test_waiting_checkout_does_not_reopen_disposed_engine() -> None:
+    config = DatabaseConfig(
+        url="postgresql://user:pass@host/db", pool_size=1, max_overflow=0
+    )
+    connection = DatabaseConnection(config)
+    with patch("db_connect_mcp.core.connection.create_async_engine") as create_engine:
+        create_engine.return_value.dispose = AsyncMock()
+        await connection.initialize()
+    with patch.object(connection, "_set_readonly", new_callable=AsyncMock):
+        entered = asyncio.Event()
+        holder = asyncio.create_task(_hold_checkout(connection, entered))
+        await asyncio.wait_for(entered.wait(), 2)
+        pending = asyncio.create_task(_checkout_once(connection))
+        await asyncio.sleep(0.05)
+        await connection.dispose()
+        holder.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await holder
+        with pytest.raises(RuntimeError, match="not initialized"):
+            await asyncio.wait_for(pending, 2)
+    assert create_engine.return_value.connect.call_count == 1
+
+
+async def _checkout_once(connection: DatabaseConnection) -> None:
+    async with connection.get_connection():
+        pass
+
+
+async def _hold_checkout(
+    connection: DatabaseConnection, entered: asyncio.Event
+) -> None:
+    async with connection.get_connection():
+        entered.set()
+        await asyncio.Event().wait()
 
 
 @pytest.mark.asyncio

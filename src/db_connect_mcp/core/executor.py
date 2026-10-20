@@ -321,6 +321,19 @@ class QueryExecutor:
                 ("/*!", "/*+", "/*M!")
             ):
                 raise ValueError("MySQL executable comment is not allowed")
+            # Quoted PostgreSQL function names execute just like unquoted ones.
+            # Preserve only advisory-lock identifiers for the check below; keep
+            # strings, comments and unrelated quoted identifiers hidden.
+            if (
+                self.connection.dialect == "postgresql"
+                and token.startswith('"')
+                and re.fullmatch(
+                    r"pg_(?:try_)?advisory_(?:xact_)?lock(?:_shared)?",
+                    token[1:-1],
+                    re.IGNORECASE,
+                )
+            ):
+                return token[1:-1]
             return " " * len(token)
 
         sanitized = tokens.sub(strip_token, query)
