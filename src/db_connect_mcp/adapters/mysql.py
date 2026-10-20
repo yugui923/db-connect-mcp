@@ -11,6 +11,7 @@ import orjson
 
 from db_connect_mcp.models.capabilities import DatabaseCapabilities
 from db_connect_mcp.models.database import SchemaInfo
+from db_connect_mcp.models.query import add_plan_advice
 from db_connect_mcp.models.statistics import ColumnStats, Distribution
 from db_connect_mcp.models.table import ColumnInfo, TableInfo
 
@@ -302,6 +303,36 @@ class MySQLAdapter(BaseAdapter):
             sample_size=int(stats_row[0]),
         )
 
+    def _interpret_plan_tables(self, node: Any, result: dict[str, Any]) -> None:
+        """Walk nested JSON plan nodes without treating estimates as measurements."""
+        if isinstance(node, list):
+            for child in node:
+                self._interpret_plan_tables(child, result)
+        elif isinstance(node, dict):
+            if node.get("access_type") == "ALL":
+                examined = node.get("rows_examined_per_scan")
+                filtered = node.get("filtered")
+                if isinstance(examined, (int, float, str)) and isinstance(
+                    filtered, (int, float, str)
+                ):
+                    try:
+                        examined_count = float(examined)
+                        filtered_pct = float(filtered)
+                    except ValueError:
+                        pass
+                    else:
+                        if examined_count >= 1000 and 0 <= filtered_pct <= 10:
+                            relation = node.get("table_name", "unknown relation")
+                            add_plan_advice(
+                                result,
+                                "warnings",
+                                f"Full scan on {relation}: estimated {examined_count:g} "
+                                f"rows examined per scan, estimated {filtered_pct:g}% retained.",
+                            )
+            for child in node.values():
+                if isinstance(child, (dict, list)):
+                    self._interpret_plan_tables(child, result)
+
     async def get_sample_query(
         self, table_name: str, schema: Optional[str], limit: int
     ) -> str:
@@ -337,12 +368,10 @@ class MySQLAdapter(BaseAdapter):
                     cost_info = query_block["cost_info"]
                     result["estimated_cost"] = float(cost_info.get("query_cost", 0))
 
-                # Check for table scans
-                if "table" in query_block:
-                    table = query_block["table"]
-                    if table.get("access_type") == "ALL":
-                        result["warnings"].append("Full table scan detected")
-                        result["recommendations"].append("Consider adding indexes")
+                # FORMAT=JSON is estimated, including nested-loop table access.
+                # A low filtered fraction is a signal to investigate, not proof
+                # that an index would improve the query.
+                self._interpret_plan_tables(query_block, result)
 
             return result
 

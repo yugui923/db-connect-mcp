@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from db_connect_mcp.adapters.base import BaseAdapter
 from db_connect_mcp.models.capabilities import DatabaseCapabilities
 from db_connect_mcp.models.database import SchemaInfo
+from db_connect_mcp.models.query import add_plan_advice
 from db_connect_mcp.models.statistics import ColumnStats, Distribution
 from db_connect_mcp.models.table import ColumnInfo, TableInfo
 
@@ -472,14 +473,10 @@ class PostgresAdapter(BaseAdapter):
                     result["actual_time_ms"] = plan.get("Actual Total Time")
                     result["actual_rows"] = plan.get("Actual Rows")
 
-                # Add warnings based on plan analysis
-                if "Seq Scan" in str(plan):
-                    result["warnings"].append(
-                        "Sequential scan detected - may be slow on large tables"
-                    )
-                    result["recommendations"].append(
-                        "Consider adding appropriate indexes"
-                    )
+                # Only observed selective scans provide enough evidence for advice.
+                # Rows Removed by Filter and Actual Rows are per-loop counters.
+                if analyzed:
+                    self._interpret_scans(plan, result)
 
                 return result
 
@@ -499,6 +496,40 @@ class PostgresAdapter(BaseAdapter):
             "warnings": [],
             "recommendations": [],
         }
+
+    def _interpret_scans(self, plan: dict[str, Any], result: dict[str, Any]) -> None:
+        """Flag measured selective scans, not every sequential scan."""
+        if plan.get("Node Type") == "Seq Scan" and plan.get("Filter"):
+            kept = plan.get("Actual Rows")
+            removed = plan.get("Rows Removed by Filter")
+            loops = plan.get("Actual Loops")
+            if (
+                isinstance(kept, (int, float))
+                and isinstance(removed, (int, float))
+                and isinstance(loops, (int, float))
+                and loops > 0
+                and removed >= 0
+                and kept >= 0
+                and removed * loops >= 1000
+                and removed >= 9 * max(kept, 1)
+            ):
+                relation = plan.get("Relation Name", "unknown relation")
+                add_plan_advice(
+                    result,
+                    "warnings",
+                    f"Sequential scan on {relation}: observed approximately "
+                    f"{removed * loops:g} rows removed by filter across {loops:g} loops "
+                    f"({kept * loops:g} rows returned).",
+                )
+                add_plan_advice(
+                    result,
+                    "recommendations",
+                    f"Review the filter and existing indexes on {relation}; "
+                    "an index may help if this selective scan is frequent.",
+                )
+        for child in plan.get("Plans", []):
+            if isinstance(child, dict):
+                self._interpret_scans(child, result)
 
     def _format_plan_text(self, plan: dict[str, Any], indent: int = 0) -> str:
         """Format JSON plan as human-readable text."""

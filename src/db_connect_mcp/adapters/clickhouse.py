@@ -352,12 +352,7 @@ class ClickHouseAdapter(BaseAdapter):
             "recommendations": [],
         }
 
-        # ClickHouse EXPLAIN is text-based
-        # Look for common patterns
-        if "FULL" in plan_text.upper() and "SCAN" in plan_text.upper():
-            result["warnings"].append("Full table scan detected")
-            result["recommendations"].append(
-                "Consider using appropriate indexes or sampling"
-            )
+        # ClickHouse EXPLAIN is text-based and does not report measured
+        # selectivity; scan words alone cannot justify indexing advice.
 
         return result
