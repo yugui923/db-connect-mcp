@@ -10,7 +10,7 @@ Agents need a reproducible path from object discovery through workload, schema, 
 
 ## Decision
 
-Expose a `diagnose_query` MCP prompt requiring a user-provided problem. It returns guidance only: no database calls, external LLM requests, or automatic plan execution. Agents discover existing typed tools and resources independently, use only available read-only workload tools, and explicitly distinguish observations from hypotheses. Keep existing tool contracts and legacy text outputs unchanged.
+Expose a `diagnose_query` MCP prompt requiring a user-provided problem. It returns guidance only: the server makes no database calls or external model requests to construct it, and never automatically executes plans. Agents inspect tools exposed by their MCP host (requesting a host discovery refresh if needed), use only available read-only workload tools, and explicitly distinguish observations from hypotheses. A hosted model may receive tool results through ordinary MCP host operation; users must verify host/model data egress before sensitive retrieval. Keep existing tool contracts and legacy text outputs unchanged.
 
 ## Consequences
 

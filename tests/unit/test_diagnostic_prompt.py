@@ -41,6 +41,12 @@ async def test_diagnostic_prompt_is_discoverable_and_read_only() -> None:
     assert "PostgreSQL" in text and "MySQL" in text and "ClickHouse" in text
     assert "EXPLAIN ANALYZE" in text
     assert "do not" in text.lower()
+    assert "tools/list" not in text
+    assert "tools your MCP host exposes" in text
+    assert "refresh tool discovery" in text
+    assert "server does not make external model calls" in text
+    assert "host or model provider may receive tool results" in text
+    assert "verify your host's data egress" in text
 
 
 @pytest.mark.asyncio

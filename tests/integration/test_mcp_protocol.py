@@ -174,12 +174,16 @@ async def test_diagnostic_prompt_is_available_over_mcp(
         assert result.messages[0].content.type == "text"
         text = result.messages[0].content.text
         assert "slow report" in text
-        assert "tools/list" in text
+        assert "tools/list" not in text
+        assert "tools your MCP host exposes" in text
+        assert "refresh tool discovery" in text
         assert "get_top_queries" in text and "postgres_health" in text
         assert "only if advertised" in text
         assert "result" in text and "does not bound plan execution" in text
         assert "HypoPG" in text and "opt-in" in text
-        assert "external LLM" in text
+        assert "server does not make external model calls" in text
+        assert "host or model provider may receive tool results" in text
+        assert "verify your host's data egress" in text
     finally:
         await server.cleanup()
 
