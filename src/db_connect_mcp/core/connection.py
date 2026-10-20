@@ -373,7 +373,7 @@ class DatabaseConnection:
             if limit is not None:
                 try:
                     await asyncio.wait_for(limit.acquire(), self.config.pool_timeout)
-                except TimeoutError as exc:
+                except asyncio.TimeoutError as exc:
                     raise PoolTimeoutError(
                         f"Database checkout timed out after {self.config.pool_timeout}s"
                     ) from exc
