@@ -334,7 +334,7 @@ class QueryExecutor:
             # MySQL strings. Reject them before masking their contents.
             if (
                 self.connection.dialect in {"postgresql", "mysql"}
-                and token.startswith(("'", "E'", "e'"))
+                and token.startswith(("'", "E'", "e'", '"'))
                 and "\\" in token
             ):
                 raise ValueError("SQL backslash escape is not allowed")

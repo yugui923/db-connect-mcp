@@ -185,10 +185,12 @@ async def test_mysql_escaped_string_cannot_hide_named_lock(
     await connection.initialize()
     try:
         executor = QueryExecutor(connection, create_adapter(config))
-        with pytest.raises(ValueError, match="backslash escape"):
-            await executor.execute_query(
-                r"SELECT 'it\'s', GET_LOCK(:name, 0) -- '", {"name": name}
-            )
+        for query in (
+            r"SELECT 'it\'s', GET_LOCK(:name, 0) -- '",
+            r'SELECT "it\"s", GET_LOCK(:name, 0) -- "',
+        ):
+            with pytest.raises(ValueError, match="backslash escape"):
+                await executor.execute_query(query, {"name": name})
         observer = create_async_engine(mysql_database_url)
         try:
             async with observer.connect() as conn:

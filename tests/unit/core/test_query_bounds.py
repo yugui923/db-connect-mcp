@@ -80,6 +80,7 @@ def test_postgres_rejects_unicode_quoted_advisory_lock(query: str) -> None:
     [
         ("postgresql", r"SELECT E'it\'s', pg_advisory_lock(42) -- '"),
         ("mysql", r"SELECT 'it\'s', GET_LOCK('name', 0) -- '"),
+        ("mysql", r'SELECT "it\"s", GET_LOCK("name", 0) -- "'),
     ],
 )
 def test_query_rejects_escaped_quote_masking_lock(dialect: str, query: str) -> None:
