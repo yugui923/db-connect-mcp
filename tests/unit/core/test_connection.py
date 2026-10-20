@@ -582,6 +582,71 @@ async def test_cancelled_tunnel_start_does_not_leave_running_tunnel() -> None:
 
 
 @pytest.mark.asyncio
+async def test_repeated_cancel_during_tunnel_start_serializes_dispose() -> None:
+    import threading
+
+    from db_connect_mcp.models.config import SSHTunnelConfig
+
+    connection = DatabaseConnection(
+        DatabaseConfig(
+            url="postgresql://user:pass@host/db",
+            ssh_tunnel=SSHTunnelConfig(
+                ssh_host="bastion", ssh_username="user", ssh_password="password"
+            ),
+        )
+    )
+    started = threading.Event()
+    resume = threading.Event()
+    tunnel = MagicMock()
+    listener_active = False
+
+    def start() -> int:
+        nonlocal listener_active
+        started.set()
+        assert resume.wait(timeout=5)
+        listener_active = True
+        return 12345
+
+    def stop() -> None:
+        nonlocal listener_active
+        assert listener_active, "dispose stopped the tunnel before start completed"
+        listener_active = False
+
+    tunnel.start.side_effect = start
+    tunnel.stop.side_effect = stop
+    initialization = None
+    disposal = None
+    with (
+        patch("db_connect_mcp.core.tunnel.SSHTunnelManager", return_value=tunnel),
+        patch("db_connect_mcp.core.connection.create_async_engine") as create_engine,
+    ):
+        try:
+            initialization = asyncio.create_task(connection.initialize())
+            assert await asyncio.to_thread(started.wait, 2)
+            initialization.cancel()
+            # Allow the first cancellation to enter _start_tunnel's cleanup wait.
+            await asyncio.sleep(0)
+            disposal = asyncio.create_task(connection.dispose())
+            await asyncio.sleep(0)
+            initialization.cancel()
+            await asyncio.sleep(0)
+            assert not initialization.done()
+            assert not disposal.done()
+            tunnel.stop.assert_not_called()
+        finally:
+            resume.set()
+            if initialization is not None:
+                with pytest.raises(asyncio.CancelledError):
+                    await asyncio.wait_for(initialization, 2)
+            if disposal is not None:
+                await asyncio.wait_for(disposal, 2)
+    create_engine.assert_not_called()
+    tunnel.stop.assert_called_once()
+    assert not connection.is_initialized
+    assert connection._tunnel_manager is None
+
+
+@pytest.mark.asyncio
 async def test_cancelled_tunnel_start_without_dispose_stops_tunnel() -> None:
     import threading
 

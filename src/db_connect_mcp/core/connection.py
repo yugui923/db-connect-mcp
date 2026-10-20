@@ -321,11 +321,16 @@ class DatabaseConnection:
                 local_port = await asyncio.shield(start)
             except asyncio.CancelledError:
                 # Cancelling to_thread does not stop the worker. Keep disposal
-                # behind initialization until the tunnel has actually started.
-                try:
-                    await asyncio.shield(start)
-                except Exception:
-                    pass  # The original cancellation still wins.
+                # behind initialization even if the caller cancels again.
+                while not start.done():
+                    try:
+                        await asyncio.shield(start)
+                    except asyncio.CancelledError:
+                        pass
+                    except Exception:
+                        break  # The original cancellation still wins.
+                if not start.cancelled():
+                    start.exception()  # Retrieve a failure that raced cancellation.
                 raise
 
             # Rewrite URL to use tunnel
