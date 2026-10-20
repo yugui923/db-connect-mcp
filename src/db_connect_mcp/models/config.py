@@ -228,6 +228,10 @@ class DatabaseConfig(BaseModel):
         default=False,
         description="Echo SQL statements to stdout",
     )
+    enable_pg_stat_statements: bool = Field(
+        default=False,
+        description="Opt in to exposing bounded PostgreSQL statement statistics",
+    )
     ssh_tunnel: Optional[SSHTunnelConfig] = Field(
         default=None,
         description="SSH tunnel configuration for connecting through bastion hosts",
