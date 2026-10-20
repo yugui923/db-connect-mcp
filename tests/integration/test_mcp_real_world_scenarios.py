@@ -296,11 +296,12 @@ class TestEdgeCasesAndErrorHandling:
             pg_client,
             "execute_query",
             {
-                "query": "SELECT 'hello''s world' as greeting, E'line1\\nline2' as multiline"
+                "query": "SELECT 'hello''s world' as greeting, 'line1\nline2' as multiline"
             },
         )
         assert result["row_count"] == 1
         assert "hello's world" in result["rows"][0]["greeting"]
+        assert result["rows"][0]["multiline"] == "line1\nline2"
 
     @pytest.mark.asyncio
     async def test_null_values_handling(self, pg_client: ClientSession):

@@ -44,6 +44,8 @@ from db_connect_mcp.core import (
     StatisticsAnalyzer,
     paginate_resources,
 )
+from db_connect_mcp.core.pg_health import PostgresHealthChecker
+from db_connect_mcp.models.health import HealthReport
 from db_connect_mcp.models.config import DatabaseConfig, SSHTunnelConfig
 from db_connect_mcp.models.database import DatabaseInfo, SchemaInfo
 from db_connect_mcp.models.query import (
@@ -754,6 +756,9 @@ class DatabaseMCPServer:
             self._create_search_objects_tool(),
         ]
 
+        if self.config.dialect == "postgresql":
+            tools.append(self._create_postgres_health_tool())
+
         if self.adapter.capabilities.foreign_keys:
             tools.append(self._create_get_relationships_tool())
 
@@ -780,6 +785,8 @@ class DatabaseMCPServer:
             "sample_data": self.handle_sample_data,
             "search_objects": self.handle_search_objects,
         }
+        if self.config.dialect == "postgresql":
+            handlers["postgres_health"] = self.handle_postgres_health
         if self.adapter.capabilities.foreign_keys:
             handlers["get_table_relationships"] = self.handle_get_relationships
         if self.adapter.capabilities.advanced_stats:
@@ -818,6 +825,38 @@ class DatabaseMCPServer:
             structured_content=structured_content,
             is_error=is_error,
         )
+
+    def _create_postgres_health_tool(self) -> Tool:
+        return _read_only_tool(
+            name="postgres_health",
+            title="PostgreSQL Health Snapshot",
+            description=(
+                "Read-only point-in-time aggregate checks for XID age, invalid indexes, "
+                "unvalidated constraints, replication slot retention, and connection utilization. "
+                "Thresholds are advisory; missing data is not interpreted as healthy."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {},
+                "required": [],
+                "additionalProperties": False,
+            },
+            output_schema=_model_output_schema(HealthReport),
+        )
+
+    async def handle_postgres_health(
+        self, arguments: dict[str, Any]
+    ) -> list[TextContent]:
+        report = await PostgresHealthChecker(self.connection).check()
+        return [
+            TextContent(
+                type="text",
+                text=truncate_json_response(
+                    json.dumps(report.model_dump(mode="json"), indent=2),
+                    MAX_RESPONSE_DATABASE_INFO,
+                ),
+            )
+        ]
 
     def _create_get_database_info_tool(self) -> Tool:
         """Create get_database_info tool."""
@@ -913,7 +952,7 @@ class DatabaseMCPServer:
             name="execute_query",
             title="Execute Read-Only Query",
             description=(
-                "Execute a bounded read-only SELECT, WITH, or EXPLAIN query and "
+                "Execute a bounded read-only SELECT or WITH query and "
                 "return rows with execution metadata."
             ),
             input_schema={
@@ -1267,7 +1306,12 @@ class DatabaseMCPServer:
 
         result = await self.executor.execute_query(query, limit=limit)
 
-        response = json.dumps(result.model_dump(mode="json"), indent=2)
+        payload = result.model_dump(mode="json")
+        response = json.dumps(payload, indent=2)
+        if len(response) > MAX_RESPONSE_EXECUTE_QUERY:
+            # Preserve the existing readable format for small responses, but
+            # match the executor's compact row budget for larger results.
+            response = json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
         return [
             TextContent(
                 type="text",
@@ -1287,15 +1331,72 @@ class DatabaseMCPServer:
         result = await self.executor.sample_data(table, schema, limit)
         result_data = result.model_dump(mode="json")
 
-        # Apply truncation to long string values in rows
-        result_data, truncated_fields = apply_truncation_to_sample_data(
+        # Track cell truncation per row so fields from a discarded suffix are
+        # not reported as present in the response.
+        cell_truncations = [
+            {
+                column
+                for column, value in row.items()
+                if isinstance(value, str) and len(value) > MAX_STRING_VALUE_LENGTH
+            }
+            for row in result_data["rows"]
+        ]
+        result_data, _ = apply_truncation_to_sample_data(
             result_data, MAX_RESPONSE_SAMPLE_DATA
         )
+        for index, columns in enumerate(result._preview_truncated_columns_by_row):
+            cell_truncations[index].update(columns)
+
+        def truncated_fields_for_prefix(count: int) -> list[str]:
+            columns = set().union(*cell_truncations[:count]) if count else set()
+            return [
+                f"rows[].{column}"
+                for column in result_data["columns"]
+                if column in columns
+            ]
+
+        truncated_fields = truncated_fields_for_prefix(len(result_data["rows"]))
 
         # Wrap with truncation info if any fields were truncated
         final_result = wrap_response_with_truncation_info(result_data, truncated_fields)
 
         response = json.dumps(final_result, indent=2)
+        if len(response) > MAX_RESPONSE_SAMPLE_DATA:
+            # Prefer compact JSON before dropping rows. When even that exceeds
+            # the MCP cap, retain the largest prefix that fits with metadata.
+            response = json.dumps(
+                final_result, separators=(",", ":"), ensure_ascii=False
+            )
+            if len(response) > MAX_RESPONSE_SAMPLE_DATA and result_data["rows"]:
+                result_data["truncated"] = True
+                result_data["warning"] = "Sample truncated to response size limit"
+                rows = result_data["rows"]
+                low, high = 0, len(rows)
+                while low < high:
+                    mid = (low + high + 1) // 2
+                    result_data["rows"] = rows[:mid]
+                    result_data["row_count"] = mid
+                    truncated_fields = truncated_fields_for_prefix(mid) + ["rows"]
+                    candidate = json.dumps(
+                        wrap_response_with_truncation_info(
+                            result_data, truncated_fields
+                        ),
+                        separators=(",", ":"),
+                        ensure_ascii=False,
+                    )
+                    if len(candidate) <= MAX_RESPONSE_SAMPLE_DATA:
+                        low = mid
+                    else:
+                        high = mid - 1
+                result_data["rows"] = rows[:low]
+                result_data["row_count"] = low
+                truncated_fields = truncated_fields_for_prefix(low) + ["rows"]
+                final_result = wrap_response_with_truncation_info(
+                    result_data, truncated_fields
+                )
+                response = json.dumps(
+                    final_result, separators=(",", ":"), ensure_ascii=False
+                )
         return [
             TextContent(
                 type="text",

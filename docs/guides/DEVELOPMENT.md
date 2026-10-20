@@ -102,6 +102,8 @@ For development and testing with Claude Code, see [Claude Code Integration Guide
 
 The server supports connecting to databases through SSH tunnels for secure access to databases behind firewalls. See [SSH Tunnel Guide](SSH_TUNNEL.md) for configuration details.
 
+`DatabaseConnection.dispose()` waits for in-flight checkouts to close before stopping a tunnel. Close or cancel checkouts before awaiting disposal; otherwise it will wait for them to finish. The checkout budget is shared across event loops, including HTTP server threads.
+
 ### Devcontainer
 
 The project includes a full devcontainer (`.devcontainer/`) with 5 Docker containers covering all 4 database access patterns: PostgreSQL direct, PostgreSQL tunneled, MySQL direct, MySQL tunneled, plus an SSH bastion host. Rebuild the devcontainer to start everything automatically. See [Docker Setup](DOCKER.md#devcontainer-multi-database-setup) for details.

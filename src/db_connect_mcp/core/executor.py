@@ -1,13 +1,16 @@
 """Safe query execution with validation."""
 
+import base64
 import datetime
 import json
 import re
 import time
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, Optional, cast
 
 import orjson
 from sqlalchemy import text
+from sqlalchemy.engine import Result
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncResult
 
 from db_connect_mcp.core.connection import DatabaseConnection
 from db_connect_mcp.models.query import ExplainPlan, QueryResult
@@ -45,7 +48,7 @@ class QueryExecutor:
     """Safe query execution with validation and limits."""
 
     # Allowed query types (read-only operations)
-    ALLOWED_QUERY_TYPES = {"SELECT", "WITH", "SHOW", "DESCRIBE", "EXPLAIN"}
+    ALLOWED_QUERY_TYPES = {"SELECT", "WITH"}
 
     def __init__(self, connection: DatabaseConnection, adapter: "BaseAdapter"):
         """
@@ -63,6 +66,9 @@ class QueryExecutor:
         query: str,
         params: Optional[dict[str, Any]] = None,
         limit: Optional[int] = 1000,
+        *,
+        max_result_bytes: int = 100_000,
+        sample_preview: bool = False,
     ) -> QueryResult:
         """
         Execute a SELECT/WITH query safely.
@@ -70,7 +76,7 @@ class QueryExecutor:
         Args:
             query: SQL query to execute
             params: Query parameters for parameterized queries
-            limit: Maximum number of rows to return (None for no limit)
+            limit: Maximum number of rows to return (1 to 10,000)
 
         Returns:
             Query result with rows and metadata
@@ -78,67 +84,108 @@ class QueryExecutor:
         Raises:
             ValueError: If query is not a safe read-only query
         """
-        # Validate query is safe
+        # Validate query and enforce a hard output cap even when SQL has its own LIMIT.
         self._validate_query(query)
+        self._validate_limit(limit)
+        assert limit is not None
 
-        # Add LIMIT if not present and limit is specified
-        modified_query = query
-        if limit is not None and not self._has_limit(query):
-            modified_query = self._add_limit(query, limit)
+        # Bound row count in the SQL sent to the database. The ClickHouse
+        # synchronous DBAPI still materializes its result before fetchmany.
+        # All accepted query types are SELECT/WITH (possibly prefixed by comments).
+        modified_query = (
+            f"SELECT * FROM ({query.strip().rstrip(';').rstrip()}\n) AS bounded_query "
+            f"LIMIT {limit + 1}"
+        )
 
         start_time = time.time()
 
         async with self.connection.get_connection() as conn:
-            result = await conn.execute(text(modified_query), params or {})
-            rows_data = result.fetchall()
-
-            # Convert to list of dicts
-            columns = list(result.keys())
-            rows = [dict(zip(columns, row)) for row in rows_data]
-
-            # Pre-process rows to handle timezone-aware datetimes and bytes
-            # orjson doesn't support timezone-aware datetimes or bytes even with a default handler
-            import base64
-
-            processed_rows = []
-            for row in rows:
-                processed_row = {}
-                for key, value in row.items():
-                    # Convert timezone-aware datetime/time to ISO string
-                    if isinstance(value, datetime.datetime):
-                        # datetime.datetime has tzinfo
-                        if value.tzinfo is not None:
-                            processed_row[key] = value.isoformat()
-                        else:
-                            # Let orjson handle naive datetime objects
-                            processed_row[key] = value
-                    elif isinstance(value, datetime.time):
-                        # datetime.time has tzinfo
-                        if value.tzinfo is not None:
-                            processed_row[key] = value.isoformat()
-                        else:
-                            # Let orjson handle naive time objects
-                            processed_row[key] = value
-                    elif isinstance(value, datetime.date):
-                        # datetime.date doesn't have tzinfo, let orjson handle it
-                        processed_row[key] = value
-                    elif isinstance(value, bytes):
-                        # Convert bytes to base64 string
-                        processed_row[key] = base64.b64encode(value).decode("utf-8")
+            is_clickhouse = self.connection.dialect in {"clickhouse", "clickhousedb"}
+            if is_clickhouse:
+                result = cast(
+                    Result[Any], await conn.execute(text(modified_query), params or {})
+                )
+            else:
+                result = await cast(AsyncConnection, conn).stream(
+                    text(modified_query), params or {}
+                )
+            try:
+                columns = list(result.keys())
+                # Leave room for the response envelope (timing, count, flags, warning),
+                # and account for query/column metadata before fetching any rows.
+                budget = (
+                    max_result_bytes
+                    - len(modified_query.encode("utf-8"))
+                    - len(orjson.dumps(columns))
+                    - 256
+                )
+                if budget < 2:
+                    raise ValueError(
+                        f"Query result exceeds {max_result_bytes} bytes; "
+                        "select fewer or smaller columns"
+                    )
+                rows: list[dict[str, Any]] = []
+                used = 2  # JSON array brackets
+                truncated = False
+                preview_truncated_columns_by_row: list[set[str]] = []
+                for index in range(limit + 1):
+                    if is_clickhouse:
+                        row = cast(Result[Any], result).fetchone()
                     else:
-                        processed_row[key] = value
-                processed_rows.append(processed_row)
+                        row = await cast(AsyncResult[Any], result).fetchone()
+                    if row is None:
+                        break
+                    if index == limit:
+                        truncated = True
+                        break
+                    # A single decoded cell can already be large at this point;
+                    # reject it before retaining another row or serializing the array.
+                    values: dict[str, Any] = dict(zip(columns, row))
+                    preview_truncated_columns: set[str] = set()
+                    if sample_preview:
+                        # Preserve the MCP sample preview's 500-character cell
+                        # limit before the byte budget rejects a large raw cell.
+                        for key, value in values.items():
+                            if isinstance(value, bytes):
+                                # Only encode the prefix needed for the preview;
+                                # do not materialize huge base64 payloads.
+                                encoded_preview = base64.b64encode(value[:375]).decode(
+                                    "ascii"
+                                )
+                                if len(value) > 375:
+                                    values[key] = encoded_preview[:497] + "..."
+                                    preview_truncated_columns.add(key)
+                                else:
+                                    values[key] = encoded_preview
+                            elif isinstance(value, str) and len(value) > 500:
+                                values[key] = value[:497] + "..."
+                                preview_truncated_columns.add(key)
+                    for key, value in values.items():
+                        if (
+                            isinstance(value, (datetime.datetime, datetime.time))
+                            and value.tzinfo is not None
+                        ):
+                            values[key] = value.isoformat()
+                    encoded = orjson.dumps(values, default=json_default)
+                    used += len(encoded) + (1 if rows else 0)
+                    if used > budget:
+                        raise ValueError(
+                            f"Query result exceeds {max_result_bytes} bytes; "
+                            "select fewer or smaller columns"
+                        )
+                    rows.append(orjson.loads(encoded))
+                    if sample_preview:
+                        preview_truncated_columns_by_row.append(
+                            preview_truncated_columns
+                        )
+            finally:
+                if is_clickhouse:
+                    cast(Result[Any], result).close()
+                else:
+                    await cast(AsyncResult[Any], result).close()
 
-            # Now use orjson with fallback for remaining types
-            json_bytes = orjson.dumps(processed_rows, default=str)
-            rows = orjson.loads(json_bytes)
-
-            execution_time = (time.time() - start_time) * 1000  # Convert to ms
-
-            # Check if results were truncated
-            truncated = limit is not None and len(rows) == limit
-
-            return QueryResult(
+            execution_time = (time.time() - start_time) * 1000
+            output = QueryResult(
                 query=modified_query,
                 rows=rows,
                 row_count=len(rows),
@@ -147,6 +194,8 @@ class QueryExecutor:
                 truncated=truncated,
                 warning="Results truncated to limit" if truncated else None,
             )
+            output._preview_truncated_columns_by_row = preview_truncated_columns_by_row
+            return output
 
     async def sample_data(
         self,
@@ -168,7 +217,16 @@ class QueryExecutor:
         # Use adapter for database-specific efficient sampling
         query = await self.adapter.get_sample_query(table_name, schema, limit)
 
-        return await self.execute_query(query, limit=limit)
+        # Existing sample_data truncates individual cells in its MCP handler.
+        result = await self.execute_query(
+            query, limit=limit, max_result_bytes=1_000_000, sample_preview=True
+        )
+        # Adapter SQL already limits rows to `limit`, so the outer limit+1
+        # cannot determine whether a full sample has more rows behind it.
+        if result.row_count == limit and not result.truncated:
+            result.truncated = True
+            result.warning = "Sample may be truncated to limit"
+        return result
 
     async def explain_query(self, query: str, analyze: bool = False) -> ExplainPlan:
         """
@@ -234,6 +292,15 @@ class QueryExecutor:
                 recommendations_omitted=plan_info.get("recommendations_omitted", 0),
             )
 
+    @staticmethod
+    def _validate_limit(limit: int | None) -> None:
+        if (
+            isinstance(limit, bool)
+            or not isinstance(limit, int)
+            or not 1 <= limit <= 10000
+        ):
+            raise ValueError("Query limit must be an integer between 1 and 10000")
+
     def _validate_query(self, query: str) -> None:
         """
         Validate that query is safe (read-only).
@@ -244,23 +311,90 @@ class QueryExecutor:
         Raises:
             ValueError: If query is not allowed
         """
-        # Normalize query
-        normalized = query.strip().upper()
+        # Ignore SQL strings, quoted identifiers and comments while checking syntax.
+        # Unrecognized quoting is rejected rather than risking stacked statements.
+        tokens = re.compile(
+            r"--[^\n]*|/\*.*?\*/|(?i:E)'(?:''|[^'])*'|'(?:''|[^'])*'|"
+            r"(?i:U&)\"(?:\"\"|[^\"])*\"|\"(?:\"\"|[^\"])*\"|"
+            r"\$(?P<tag>[A-Za-z_][A-Za-z_0-9]*)?\$.*?\$(?P=tag)\$",
+            re.DOTALL,
+        )
 
-        # Remove comments
-        normalized = re.sub(r"--[^\n]*", "", normalized)
-        normalized = re.sub(r"/\*.*?\*/", "", normalized, flags=re.DOTALL)
+        def strip_token(match: re.Match[str]) -> str:
+            token = match.group()
+            if self.connection.dialect == "mysql" and token.startswith(
+                ("/*!", "/*+", "/*M!")
+            ):
+                raise ValueError("MySQL executable comment is not allowed")
+            # PostgreSQL decodes U& quoted identifiers before resolving a
+            # function. Reject this syntax rather than silently hiding a lock.
+            if self.connection.dialect == "postgresql" and token[:2].upper() == "U&":
+                raise ValueError("PostgreSQL Unicode quoted identifier is not allowed")
+            # Backslash escapes change the end of PostgreSQL E-strings and
+            # MySQL strings. Reject them before masking their contents.
+            if (
+                self.connection.dialect in {"postgresql", "mysql"}
+                and token.startswith(("'", "E'", "e'", '"'))
+                and "\\" in token
+            ):
+                raise ValueError("SQL backslash escape is not allowed")
+            # Quoted PostgreSQL function names execute just like unquoted ones.
+            # Preserve only advisory-lock identifiers for the check below; keep
+            # strings, comments and unrelated quoted identifiers hidden.
+            if (
+                self.connection.dialect == "postgresql"
+                and token.startswith('"')
+                and re.fullmatch(
+                    r"pg_(?:try_)?advisory_(?:xact_)?lock(?:_shared)?",
+                    token[1:-1],
+                    re.IGNORECASE,
+                )
+            ):
+                return token[1:-1]
+            return " " * len(token)
 
-        # Get first keyword
+        sanitized = tokens.sub(strip_token, query)
+        # Do not silently accept malformed quoting.
+        if (
+            "'" in sanitized
+            or '"' in sanitized
+            or "/*" in sanitized
+            or "$" in sanitized
+            or (
+                self.connection.dialect in {"postgresql", "mysql"} and "\\" in sanitized
+            )
+        ):
+            raise ValueError("Unterminated SQL quote or comment")
+        statement = sanitized.strip()
+        if ";" in statement.rstrip().rstrip(";"):
+            raise ValueError("Only one SQL statement is allowed")
+        normalized = statement.upper()
         first_keyword = normalized.split()[0] if normalized.split() else ""
-
         if first_keyword not in self.ALLOWED_QUERY_TYPES:
             raise ValueError(
-                f"Only {', '.join(self.ALLOWED_QUERY_TYPES)} queries are allowed. "
-                f"Got: {first_keyword}"
+                f"Only SELECT or WITH queries are allowed. Got: {first_keyword}"
             )
 
-        # Check for dangerous keywords anywhere in query
+        # Read-only transactions do not prevent PostgreSQL advisory locks.
+        # NullPool also closes the session on checkout exit, including failures.
+        if self.connection.dialect == "postgresql" and re.search(
+            r"\bPG_(?:TRY_)?ADVISORY_(?:XACT_)?LOCK(?:_SHARED)?\s*\(",
+            normalized,
+        ):
+            raise ValueError("PostgreSQL advisory lock is not allowed")
+
+        # MySQL's transaction read-only flag cannot isolate session state.
+        # Reject known session-mutating expressions; NullPool additionally
+        # prevents any such state from carrying into another MCP checkout.
+        if self.connection.dialect == "mysql" and (
+            re.search(
+                r"\b(?:GET_LOCK|RELEASE_LOCK|RELEASE_ALL_LOCKS)\s*\(|(?<!\w)@\w+\s*:=",
+                normalized,
+            )
+        ):
+            raise ValueError("MySQL session side effect is not allowed")
+
+        # Check for dangerous keywords outside strings and comments
         dangerous_keywords = {
             "DROP",
             "DELETE",
