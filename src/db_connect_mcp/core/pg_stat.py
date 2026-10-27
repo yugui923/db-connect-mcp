@@ -80,7 +80,8 @@ class PgStatReporter:
                     """),
                         {"schema": row[0]},
                     )
-                    if not function.fetchone()[0]:
+                    function_row = function.fetchone()
+                    if function_row is None or not function_row[0]:
                         return TopQueriesReport(
                             status="unsupported_version", queries=[]
                         )
