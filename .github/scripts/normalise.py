@@ -8,6 +8,7 @@ its CVE alias collapse to one identity instead of counting twice. Severity comes
 from the advisory's own `database_specific.severity`; a record with no usable
 severity is reported as UNKNOWN rather than assumed harmless.
 """
+
 import json
 import re
 import sys

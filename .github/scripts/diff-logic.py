@@ -6,6 +6,7 @@ Kept as a separate file so the semantics can be unit-tested without Docker or a
 Git checkout — the failure mode we care about is a comparison bug that turns a
 new critical into a pass.
 """
+
 import sys
 from pathlib import Path
 
@@ -56,8 +57,7 @@ def table(rows):
             continue
         seen.add(k)
         out.append(
-            f"| {r['sev']} | `{r['name']}` {r['ver']} "
-            f"| {r['eco']} | {r['adv']} |"
+            f"| {r['sev']} | `{r['name']}` {r['ver']} | {r['eco']} | {r['adv']} |"
         )
     return out
 
