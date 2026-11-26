@@ -1,0 +1,80 @@
+name: Dependency delta
+
+# Blocks a pull request only on HIGH/CRITICAL dependency advisories the PR
+# introduces. Advisories that already exist in the merge-base are reported but
+# never block: one PR cannot clear a whole backlog, and a gate that demands it
+# just stops people from opening PRs.
+#
+# Text in .github/dep-audit-allow.txt is the only way to silence an introduced
+# finding, so every exception is reviewed and visible in the diff.
+
+on:
+  pull_request:
+  merge_group:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dep-audit-diff:
+    name: Dependency delta (introduced only)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Full history: the gate scans the merge-base commit, so a shallow
+          # clone would leave it unable to compute a baseline.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Resolve baseline and candidate
+        id: revs
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "pull_request" ] && [ -n "${PR_BASE_SHA:-}" ]; then
+            base="$PR_BASE_SHA"; head="$PR_HEAD_SHA"
+          else
+            # merge_group and manual dispatch: compare against the parent used
+            # for the queued merge, which is the only meaningful baseline.
+            head="$HEAD_SHA"
+            base="$(git rev-parse "${head}^1" 2>/dev/null || echo "$head")"
+          fi
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+          echo "head=$head" >> "$GITHUB_OUTPUT"
+          echo "baseline ${base:-<none>} -> head $head"
+
+      - name: Scan baseline and head, compare
+        env:
+          DEP_AUDIT_BASE_SHA: ${{ steps.revs.outputs.base }}
+          DEP_AUDIT_HEAD_SHA: ${{ steps.revs.outputs.head }}
+          DEP_AUDIT_BLOCK: CRITICAL,HIGH
+          DEP_AUDIT_SUMMARY: ${{ runner.temp }}/dep-audit-diff.md
+          DEP_AUDIT_ALLOW_FILE: .github/dep-audit-allow.txt
+        run: |
+          set -euo pipefail
+          bash .github/scripts/dep-audit-diff.sh
+
+      - name: Publish summary
+        if: always()
+        env:
+          SUMMARY: ${{ runner.temp }}/dep-audit-diff.md
+        run: |
+          if [ -f "$SUMMARY" ]; then
+            cat "$SUMMARY" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No summary produced — the gate exited before comparing." >> "$GITHUB_STEP_SUMMARY"
+          fi
