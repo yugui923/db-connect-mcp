@@ -7,21 +7,28 @@ Git checkout — the failure mode we care about is a comparison bug that turns a
 new critical into a pass.
 """
 import sys
+from pathlib import Path
 
 
 def load(path):
     rows = []
-    try:
-        fh = open(path)
-    except FileNotFoundError:
+    if not Path(path).is_file():
         return rows
-    with fh:
+    with Path(path).open() as fh:
         for line in fh:
             line = line.rstrip("\n")
             if not line:
                 continue
             parts = (line.split("\t") + ["?"] * 5)[:5]
-            rows.append(dict(eco=parts[0], name=parts[1], ver=parts[2], adv=parts[3], sev=parts[4]))
+            rows.append(
+                dict(
+                    eco=parts[0],
+                    name=parts[1],
+                    ver=parts[2],
+                    adv=parts[3],
+                    sev=parts[4],
+                )
+            )
     return rows
 
 
@@ -31,11 +38,9 @@ def ident(r):
 
 def load_allow(path):
     allowed = set()
-    try:
-        fh = open(path)
-    except FileNotFoundError:
+    if not Path(path).is_file():
         return allowed
-    with fh:
+    with Path(path).open() as fh:
         for line in fh:
             parts = line.rstrip("\n").split("\t")
             if len(parts) >= 3 and not line.lstrip().startswith("#"):
@@ -50,7 +55,10 @@ def table(rows):
         if k in seen:
             continue
         seen.add(k)
-        out.append(f"| {r['sev']} | `{r['name']}` {r['ver']} | {r['eco']} | {r['adv']} |")
+        out.append(
+            f"| {r['sev']} | `{r['name']}` {r['ver']} "
+            f"| {r['eco']} | {r['adv']} |"
+        )
     return out
 
 
@@ -72,7 +80,10 @@ def main(argv):
     blocking = [r for r in introduced if r["sev"] in block]
 
     L = ["## Dependency vulnerability delta", ""]
-    L.append(f"Baseline (merge-base) findings: **{len(base)}** · head findings: **{len(head)}**")
+    L.append(
+        f"Baseline (merge-base) findings: **{len(base)}** "
+        f"· head findings: **{len(head)}**"
+    )
     L.append("")
     L.append(f"- Introduced by this PR: **{len(introduced)}**")
     L.append(f"- Inherited from base, does not block: **{len(inherited)}**")
