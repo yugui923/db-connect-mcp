@@ -1,0 +1,8 @@
+# Reviewed exceptions for the incremental dependency gate.
+#
+# One entry per line:  <ecosystem> <package> <advisory-id>
+# Example:             npm lodash CVE-2020-8203
+#
+# Only introduce a line here after reviewing the advisory against this
+# codebase and writing down why it does not apply. The gate reports every
+# allowed finding in the PR summary, so an entry here stays visible.
