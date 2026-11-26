@@ -39,7 +39,9 @@ ALLOW_FILE="${DEP_AUDIT_ALLOW_FILE:-}"
 
 # Lockfiles we understand. An explicit allowlist rather than a whole-tree scan:
 # bounded, fast, and its scope is reviewable in the PR that adds it.
-LOCK_PATTERN='(^|/)(package-lock\.json|pnpm-lock\.yaml|yarn\.lock|npm-shrinkwrap\.json|uv\.lock|poetry\.lock|Pipfile\.lock|go\.sum)$'
+# go.mod is included because osv-scanner needs it alongside go.sum to resolve
+# the module graph; without it the scanner reports "No package sources found".
+LOCK_PATTERN='(^|/)(package-lock\.json|pnpm-lock\.yaml|yarn\.lock|npm-shrinkwrap\.json|uv\.lock|poetry\.lock|Pipfile\.lock|go\.mod|go\.sum)$'
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORK="$(mktemp -d)"
