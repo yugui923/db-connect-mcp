@@ -9,14 +9,13 @@ name: Dependency delta
 # finding, so every exception is reviewed and visible in the diff.
 
 on:
-  pull_request:
-  merge_group:
   workflow_dispatch:
+  workflow_call:
 
 permissions: {}
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: dependency-delta-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -26,7 +25,6 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: read
-      pull-requests: write
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -41,21 +39,24 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
           HEAD_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-          if [ "$EVENT_NAME" = "pull_request" ] && [ -n "${PR_BASE_SHA:-}" ]; then
-            base="$PR_BASE_SHA"; head="$PR_HEAD_SHA"
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            base="${PR_BASE_SHA:?missing pull request base}"; head="$HEAD_SHA"
+          elif [ "$EVENT_NAME" = "merge_group" ]; then
+            base="${MERGE_GROUP_BASE_SHA:?missing merge group base}"; head="$HEAD_SHA"
           else
-            # merge_group and manual dispatch: compare against the parent used
-            # for the queued merge, which is the only meaningful baseline.
             head="$HEAD_SHA"
-            base="$(git rev-parse "${head}^1" 2>/dev/null || echo "$head")"
+            base="$(git rev-parse --verify "${head}^1")"
           fi
           echo "base=$base" >> "$GITHUB_OUTPUT"
           echo "head=$head" >> "$GITHUB_OUTPUT"
           echo "baseline ${base:-<none>} -> head $head"
+
+      - name: Test comparison and failure handling
+        run: python3 -B .github/scripts/test-dep-audit-diff.py
 
       - name: Scan baseline and head, compare
         env:
