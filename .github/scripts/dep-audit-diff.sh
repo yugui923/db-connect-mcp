@@ -107,6 +107,23 @@ extract_at() {
 # --- scan --------------------------------------------------------------------
 # A scanner failure must never read as "no vulnerabilities": exit 2 closes the
 # gate instead of opening it.
+npm_lock_is_empty() {
+  # Exit 0 only when the lockfile provably installs nothing (root only).
+  python3 - "$1" <<'PY'
+import json
+import sys
+
+try:
+    lock = json.load(open(sys.argv[1], encoding="utf-8"))
+except (OSError, ValueError):
+    raise SystemExit(2)  # Unprovable: keep requiring scanner coverage.
+packages = lock.get("packages") if isinstance(lock, dict) else None
+if lock.get("lockfileVersion") not in (2, 3) or not isinstance(packages, dict):
+    raise SystemExit(2)
+raise SystemExit(0 if not any(packages) else 1)
+PY
+}
+
 scan_dir() {
   local src="$1" out="$2" scanner="$3" path rc
   local -a extra=() expected=()
@@ -118,7 +135,12 @@ scan_dir() {
   while IFS= read -r -d '' path; do
     case "${path##*/}" in
       requirements.lock.txt) extra+=(--lockfile "requirements.txt:$path") ;;
-      npm-shrinkwrap.json) extra+=(--lockfile "package-lock.json:$path") ;;
+      npm-shrinkwrap.json)
+        # Required coverage, but an empty lock has no packages to report and
+        # handing it to the scanner makes it exit 128.
+        npm_lock_is_empty "$path" || extra+=(--lockfile "package-lock.json:$path") ;;
+      package-lock.json)
+        npm_lock_is_empty "$path" || extra+=(--lockfile "package-lock.json:$path") ;;
       go.sum)
         [[ -f "${path%/*}/go.mod" ]] || die "go.sum has no companion go.mod: $path"
         continue ;;
@@ -126,6 +148,13 @@ scan_dir() {
     esac
     expected+=("$path")
   done < "$WORK/extracted"
+  if [ "${#extra[@]}" -eq 0 ]; then
+    # Nothing is left to hand the scanner. osv-scanner exits 128 on an empty
+    # input set; that is a complete, empty result for this tree, not a
+    # scanner failure.
+    printf '{"results":[]}' > "$out"
+    return 0
+  fi
   "$scanner" scan source --all-packages --all-vulns --no-resolve --verbosity error \
     --format json "${extra[@]}" >"$out" 2>"$WORK/scan.err"
   rc=$?
@@ -213,6 +242,62 @@ def check_uv_inventory(path: Path, items: list) -> None:
         )
 
 
+
+def requirements_coordinates(path: Path) -> set[tuple[str, str]]:
+    """Read a pinned pip requirements lockfile without resolving anything.
+
+    Each logical line (continuations joined) must be an exact ``name==version``
+    pin, optionally with extras and an environment marker. Whitespace around
+    ``==`` is accepted because pip accepts it. Only sha256 ``--hash=`` options
+    are allowed, on either side of a marker; anything else fails closed.
+    """
+    text = path.read_text(encoding="utf-8").replace(chr(92) + chr(10), " ")
+    expected = set()
+    pin = re.compile(
+        r"^([A-Za-z0-9][A-Za-z0-9._-]*)(?:\[[A-Za-z0-9._,-]+\])?"
+        r"\s*==\s*([^\s,;]+)$"
+    )
+    digest = re.compile(r"--hash=sha256:[0-9a-f]{64}")
+    for line in text.splitlines():
+        line = re.split(r"\s+#", line, 1)[0].strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("-"):
+            raise ValueError(f"unsupported requirements directive in {path}: {line[:40]}")
+        requirement, _, marker = line.partition(";")
+        # Validate every option token, whether it precedes the marker or trails it.
+        for token in requirement.split() + marker.split():
+            if token.startswith("-") and not digest.fullmatch(token):
+                raise ValueError(
+                    f"unsupported requirements option in {path}: {token[:40]}"
+                )
+        requirement = " ".join(
+            token for token in requirement.split() if not token.startswith("-")
+        )
+        if not requirement:
+            continue
+        match = pin.fullmatch(requirement)
+        if not match:
+            raise ValueError(f"unsupported requirements pin in {path}: {requirement[:40]}")
+        expected.add(python_coordinate(match.group(1), match.group(2)))
+    if not expected:
+        raise ValueError(f"empty requirements inventory: {path}")
+    return expected
+
+
+def npm_declares_no_dependencies(path: Path) -> bool:
+    """True only when an npm lockfile provably installs nothing (root only)."""
+    try:
+        lock = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False  # Unprovable: keep requiring scanner coverage.
+    if not isinstance(lock, dict):
+        return False
+    packages = lock.get("packages")
+    if lock.get("lockfileVersion") not in (2, 3) or not isinstance(packages, dict):
+        return False
+    return not any(location for location in packages)
+
 try:
     result = json.loads(Path(sys.argv[1]).read_text())
     if not isinstance(result["results"], list):
@@ -238,9 +323,32 @@ try:
                     f"npm package inventory mismatch for {source}: "
                     f"{len(expected - actual)} missing, {len(actual - expected)} unexpected"
                 )
+        elif source.name == "requirements.lock.txt":
+            expected = requirements_coordinates(source)
+            actual = set()
+            for item in entry["packages"]:
+                identity = item["package"]
+                if identity["ecosystem"] != "PyPI":
+                    raise ValueError(f"non-PyPI inventory entry for {source}")
+                actual.add(python_coordinate(identity["name"], identity["version"]))
+            if actual != expected:
+                raise ValueError(
+                    f"pip package inventory mismatch for {source}: "
+                    f"{len(expected - actual)} missing, {len(actual - expected)} unexpected"
+                )
         elif source.name == "uv.lock":
             check_uv_inventory(source, entry["packages"])
     required = {Path(p).resolve() for p in sys.argv[2:]}
+    # A lockfile that declares no dependencies produces no scanner source
+    # record. That is complete coverage for an empty expected inventory.
+    required = {
+        p
+        for p in required
+        if not (
+            p.name in ("package-lock.json", "npm-shrinkwrap.json")
+            and npm_declares_no_dependencies(p)
+        )
+    }
     missing = required - scanned
     if missing:
         raise ValueError("missing inputs: " + ", ".join(map(str, sorted(missing))))

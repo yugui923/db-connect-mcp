@@ -99,6 +99,56 @@ class DependencyDeltaTests(unittest.TestCase):
         result = self.run_scan("uv-complete", "uv.lock")
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_pip_tab_before_inline_comment_is_accepted(self):
+        # A tab before an inline comment is valid pip; the comment must not be
+        # mistaken for an unsupported option.
+        result = self.run_scan("pip-tab", "scripts/math/requirements.lock.txt")
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_pip_spaces_around_operator_is_accepted(self):
+        # pip accepts `name == 1.0`; rejecting it would be a false failure.
+        result = self.run_scan("pip-spaces", "scripts/math/requirements.lock.txt")
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_pip_unsupported_option_after_marker_fails(self):
+        # A marker must not become a place to hide options from validation.
+        result = self.run_scan("pip-option", "scripts/math/requirements.lock.txt")
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("unsupported requirements option", result.stderr)
+
+    def test_only_dependency_free_lockfile_is_not_a_scanner_failure(self):
+        # osv-scanner 2.2.4 exits 128 when every lockfile declares no
+        # dependencies. That is an empty result for the tree, not a failure.
+        result = self.run_scan("empty-npm-none", "empty/package-lock.json")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("scanner failed", result.stderr)
+
+    def test_only_dependency_free_lockfile_does_not_fail(self):
+        # osv-scanner exits 128 on an empty input set; a tree with nothing to
+        # scan must be a complete empty result, not a scanner failure.
+        result = self.run_scan("empty-npm", "empty/package-lock.json")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("scanner failed", result.stderr)
+
+    def test_pip_sha256_continuation_is_accepted(self):
+        result = self.run_scan("pip-complete", "scripts/math/requirements.lock.txt")
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_dependency_free_npm_lockfile_is_complete(self):
+        # A lockfile declaring no dependencies yields no scanner source record;
+        # that is complete coverage, not a missing input.
+        result = self.run_scan("empty-npm", "empty/package-lock.json")
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_pip_omitted_package_fails(self):
+        result = self.run_scan("pip-missing", "scripts/math/requirements.lock.txt")
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("pip package inventory mismatch", result.stderr)
+
+    def test_pip_complete_inventory_passes(self):
+        result = self.run_scan("pip-complete", "scripts/math/requirements.lock.txt")
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_math_requirements_lock_is_scanned(self):
         result = self.run_scan("math", "scripts/math/requirements.lock.txt")
         self.assertEqual(result.returncode, 2, result.stderr)
@@ -133,7 +183,41 @@ class DependencyDeltaTests(unittest.TestCase):
             for lock in locks or ("package-lock.json",):
                 file = repo / lock
                 file.parent.mkdir(parents=True, exist_ok=True)
-                if file.name == "package-lock.json":
+                if "empty/" in lock:
+                    file.write_text(
+                        json.dumps(
+                            {
+                                "lockfileVersion": 3,
+                                "packages": {"": {"name": "root", "version": "1.0.0"}},
+                            }
+                        ),
+                        encoding="utf-8",
+                    )
+                elif lock.endswith("requirements.lock.txt") and mode == "pip-tab":
+                    # Tab before an inline comment, as some generators emit.
+                    file.write_text(
+                        "alpha==1.0.0" + chr(9) + "# note" + chr(10), encoding="utf-8"
+                    )
+                elif lock.endswith("requirements.lock.txt") and mode == "pip-spaces":
+                    # pip tolerates whitespace around the operator.
+                    file.write_text("alpha == 1.0.0" + chr(10), encoding="utf-8")
+                elif lock.endswith("requirements.lock.txt") and mode == "pip-option":
+                    # An option hidden after the marker must still be rejected.
+                    file.write_text(
+                        "alpha==1.0.0 ; python_version >= '3.11' "
+                        "--config-settings=x" + chr(10),
+                        encoding="utf-8",
+                    )
+                elif lock.endswith("requirements.lock.txt"):
+                    # uv-pip-compile style: exact pins with --hash continuations.
+                    lines = [
+                        "alpha==1.0.0 " + chr(92),
+                        "    --hash=sha256:" + "0" * 64,
+                        "beta==2.0.0 ; python_version >= '3.11' " + chr(92),
+                        "    --hash=sha256:" + "1" * 64,
+                    ]
+                    file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+                elif file.name == "package-lock.json":
                     data = {
                         "lockfileVersion": 3,
                         "packages": {
@@ -201,6 +285,65 @@ if os.environ["FIXTURE_MODE"] == "uv-complete":
 inventory = [{"package": {"ecosystem": "PyPI", "name": n, "version": v}}
              for n, v in coordinates]
 print(json.dumps({"results": [{"source": {"path": p}, "packages": inventory} for p in paths]}))
+PY
+    exit 0 ;;
+  pip-tab)
+    python3 - "$@" <<'PY'
+import json, sys
+paths = [a.split(":", 1)[1] for a in sys.argv[1:] if a.startswith("requirements.txt:")]
+inventory = [{"package": {"ecosystem": "PyPI", "name": "alpha", "version": "1.0.0"}}]
+print(
+    json.dumps(
+        {"results": [{"source": {"path": p}, "packages": inventory} for p in paths]}
+    )
+)
+PY
+    exit 0 ;;
+  pip-spaces)
+    python3 - "$@" <<'PY'
+import json, sys
+paths = [a.split(":", 1)[1] for a in sys.argv[1:] if a.startswith("requirements.txt:")]
+inventory = [{"package": {"ecosystem": "PyPI", "name": "alpha", "version": "1.0.0"}}]
+print(
+    json.dumps(
+        {"results": [{"source": {"path": p}, "packages": inventory} for p in paths]}
+    )
+)
+PY
+    exit 0 ;;
+  pip-option)
+    python3 - "$@" <<'PY'
+import json, sys
+paths = [a.split(":", 1)[1] for a in sys.argv[1:] if a.startswith("requirements.txt:")]
+inventory = [{"package": {"ecosystem": "PyPI", "name": "alpha", "version": "1.0.0"}}]
+print(
+    json.dumps(
+        {"results": [{"source": {"path": p}, "packages": inventory} for p in paths]}
+    )
+)
+PY
+    exit 0 ;;
+  empty-npm-none)
+    # Mirrors osv-scanner 2.2.4: an input set of only dependency-free locks
+    # produces no results file content at all and exits 128.
+    echo 'No package sources found, --help for usage information.' >&2
+    echo '{"results":[]}'
+    exit 128 ;;
+  empty-npm) echo '{"results":[]}'; exit 0 ;;
+  pip-missing|pip-complete)
+    python3 - "$@" <<'PY'
+import json, os, sys
+paths = [a.split(":", 1)[1] for a in sys.argv[1:] if a.startswith("requirements.txt:")]
+inventory = [{"package": {"ecosystem": "PyPI", "name": "alpha", "version": "1.0.0"}}]
+if os.environ["FIXTURE_MODE"] == "pip-complete":
+    inventory.append(
+        {"package": {"ecosystem": "PyPI", "name": "beta", "version": "2.0.0"}}
+    )
+print(
+    json.dumps(
+        {"results": [{"source": {"path": p}, "packages": inventory} for p in paths]}
+    )
+)
 PY
     exit 0 ;;
   math)    for arg in "$@"; do
