@@ -91,13 +91,15 @@ def main(argv):
     L.append("")
 
     if blocking:
-        L.append(f"### ❌ Introduced {', '.join(sorted(block))} findings")
+        L.append(f"### FAIL — introduced {', '.join(sorted(block))} findings")
         L.append("")
         L.extend(["| Severity | Package | Ecosystem | Advisory |", "|---|---|---|---|"])
         L.extend(table(blocking))
         L.append("")
     else:
-        L.append(f"### ✅ No {', '.join(sorted(block))} findings introduced by this PR")
+        L.append(
+            f"### PASS — no {', '.join(sorted(block))} findings introduced by this PR"
+        )
         L.append("")
 
     def detail(title, rows):

@@ -41,12 +41,12 @@ ALLOW_FILE="${DEP_AUDIT_ALLOW_FILE:-}"
 # bounded, fast, and its scope is reviewable in the PR that adds it.
 # go.mod is included because osv-scanner needs it alongside go.sum to resolve
 # the module graph; without it the scanner reports "No package sources found".
-LOCK_PATTERN='(^|/)(package-lock\.json|pnpm-lock\.yaml|yarn\.lock|npm-shrinkwrap\.json|uv\.lock|poetry\.lock|Pipfile\.lock|go\.mod|go\.sum)$'
+LOCK_PATTERN='(^|/)(package-lock\.json|pnpm-lock\.yaml|yarn\.lock|npm-shrinkwrap\.json|uv\.lock|poetry\.lock|Pipfile\.lock|go\.mod|go\.sum|requirements\.lock\.txt)$'
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WORK="$(mktemp -d)"
+WORK="$(mktemp -d)" || exit 2
 trap 'rm -rf "$WORK"' EXIT
-mkdir -p "$WORK/base" "$WORK/head" "$WORK/scan/base" "$WORK/scan/head" "$WORK/bin"
+mkdir -p "$WORK/base" "$WORK/head" "$WORK/scan/base" "$WORK/scan/head" "$WORK/bin" || exit 2
 
 log() { printf '%s\n' "$*" >&2; }
 die() { log "::error::$*"; exit 2; }
@@ -61,6 +61,9 @@ resolve_scanner() {
     [ -x "$DEP_AUDIT_BIN" ] || die "DEP_AUDIT_BIN=$DEP_AUDIT_BIN is not executable"
     printf '%s' "$DEP_AUDIT_BIN"
     return 0
+  fi
+  if [[ ! "$OSV_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ || ! "$OSV_SHA256" =~ ^[0-9a-f]{64}$ ]]; then
+    die "missing or invalid scanner version or checksum pin"
   fi
   local dest="$WORK/bin/osv-scanner"
   local url="https://github.com/google/osv-scanner/releases/download/v${OSV_VERSION}/osv-scanner_linux_amd64"
@@ -77,47 +80,175 @@ resolve_scanner() {
 # --- collect the exact lockfile set at a commit ------------------------------
 # Uses the commit's own tree, not the working tree, so the result depends only on
 # the SHA being asked about.
-lockfiles_at() {
-  git ls-tree -r --name-only "$1" | grep -E "$LOCK_PATTERN" | grep -v -E '(^|/)node_modules/' || true
-}
-
 extract_at() {
-  local sha="$1" dest="$2" files
-  files="$(lockfiles_at "$sha")"
-  if [ -z "$files" ]; then
+  local sha="$1" dest="$2" path
+  local -a arr=()
+  git ls-tree -rz --name-only "$sha" > "$WORK/paths" || die "git ls-tree failed for ${sha:0:12}"
+  while IFS= read -r -d '' path; do
+    if [[ "$path" =~ $LOCK_PATTERN && ! "/$path/" =~ /node_modules/ ]]; then
+      arr+=("$path")
+    fi
+  done < "$WORK/paths"
+  if [ "${#arr[@]}" = 0 ]; then
     log "::warning::no recognised lockfiles at ${sha:0:12}; nothing to scan"
     return 0
   fi
-  printf '%s\n' "$files" > "$WORK/paths"
-  mapfile -t arr < "$WORK/paths"
   git archive --format=tar -o "$WORK/tree.tar" "$sha" -- "${arr[@]}" 2>"$WORK/archive.err" || {
     cat "$WORK/archive.err" >&2
     die "git archive failed for ${sha:0:12}"
   }
   tar -xf "$WORK/tree.tar" -C "$dest" || die "tar extract failed for ${sha:0:12}"
+  for path in "${arr[@]}"; do
+    [[ -f "$dest/$path" && ! -L "$dest/$path" ]] \
+      || die "lockfile missing or not a regular file: $path"
+  done
 }
 
 # --- scan --------------------------------------------------------------------
 # A scanner failure must never read as "no vulnerabilities": exit 2 closes the
 # gate instead of opening it.
 scan_dir() {
-  local src="$1" out="$2" scanner="$3" have rc
-  have="$(find "$src" -type f | wc -l | tr -d ' ')"
-  if [ "$have" = "0" ]; then
+  local src="$1" out="$2" scanner="$3" path rc
+  local -a extra=() expected=()
+  find "$src" -type f -print0 > "$WORK/extracted" || die "cannot enumerate extracted inputs"
+  if [ ! -s "$WORK/extracted" ]; then
     printf '{"results":[]}' > "$out"
     return 0
   fi
-  "$scanner" scan source --recursive --format json "$src" >"$out" 2>"$WORK/scan.err"
+  while IFS= read -r -d '' path; do
+    case "${path##*/}" in
+      requirements.lock.txt) extra+=(--lockfile "requirements.txt:$path") ;;
+      npm-shrinkwrap.json) extra+=(--lockfile "package-lock.json:$path") ;;
+      go.sum)
+        [[ -f "${path%/*}/go.mod" ]] || die "go.sum has no companion go.mod: $path"
+        continue ;;
+      *) extra+=(--lockfile "${path##*/}:$path") ;;
+    esac
+    expected+=("$path")
+  done < "$WORK/extracted"
+  "$scanner" scan source --all-packages --all-vulns --no-resolve --verbosity error \
+    --format json "${extra[@]}" >"$out" 2>"$WORK/scan.err"
   rc=$?
   # osv-scanner exits 1 when it finds vulnerabilities; that is a result, not an
   # error. Anything else is a real failure.
-  if [ "$rc" -ne 0 ] && [ "$rc" -ne 1 ]; then
+  # Some partial lookup failures log errors even when findings cause exit 1.
+  if [ -s "$WORK/scan.err" ] || { [ "$rc" -ne 0 ] && [ "$rc" -ne 1 ]; }; then
     tail -20 "$WORK/scan.err" >&2
     die "scanner failed (exit $rc) scanning $src"
   fi
   [ -s "$out" ] || die "scanner produced no output for $src"
-  python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$out" 2>/dev/null \
-    || die "scanner output is not valid JSON for $src"
+  python3 - "$out" "${expected[@]}" <<'PY' || die "incomplete scanner coverage for $src"
+import json
+import re
+import sys
+import tomllib
+from pathlib import Path, PurePosixPath
+
+
+def npm_coordinates(path: Path) -> set[tuple[str, str]]:
+    lock = json.loads(path.read_text(encoding="utf-8"))
+    if lock["lockfileVersion"] not in (2, 3) or not isinstance(lock["packages"], dict):
+        raise ValueError(f"unsupported npm lockfile inventory: {path}")
+    packages = lock["packages"]
+    expected = set()
+    for location, package in packages.items():
+        if not location:
+            continue  # The root project is not an installed dependency.
+        if package.get("link") is True:
+            target = PurePosixPath(package["resolved"])
+            if (
+                target.is_absolute() or ".." in target.parts or not target.parts
+                or target.as_posix() not in packages
+                or packages[target.as_posix()].get("link") is True
+            ):
+                raise ValueError(f"unresolved npm workspace link: {location}")
+            continue  # The versioned target, not its link, is checked below.
+        name = package.get("name") or ("/" + location).rsplit("/node_modules/", 1)[-1]
+        version = package["version"]
+        if not isinstance(name, str) or not name or not isinstance(version, str) or not version:
+            raise ValueError(f"invalid npm package coordinate: {location}")
+        expected.add((name, version))
+    return expected
+
+
+def python_coordinate(name: str, version: str) -> tuple[str, str]:
+    if not isinstance(name, str) or not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9._-]*", name):
+        raise ValueError("invalid PyPI name in inventory")
+    if not isinstance(version, str) or not version or any(c.isspace() for c in version):
+        raise ValueError("invalid PyPI version in inventory")
+    return re.sub(r"[-_.]+", "-", name).lower(), version
+
+
+def check_uv_inventory(path: Path, items: list) -> None:
+    with path.open("rb") as fh:
+        lock = tomllib.load(fh)
+    if lock["version"] != 1 or not isinstance(lock["package"], list):
+        raise ValueError(f"unsupported uv lockfile inventory: {path}")
+    registry, local = set(), set()
+    for package in lock["package"]:
+        source = package["source"]
+        if not isinstance(source, dict) or len(source) != 1:
+            raise ValueError(f"ambiguous uv package source in {path}")
+        kind, location = next(iter(source.items()))
+        if not isinstance(location, str) or not location:
+            raise ValueError(f"invalid uv package source in {path}")
+        coordinate = python_coordinate(package["name"], package["version"])
+        if kind == "registry":
+            registry.add(coordinate)
+        elif kind in {"editable", "directory", "virtual"}:
+            local.add(coordinate)
+        else:
+            raise ValueError(f"unsupported uv package source kind: {kind}")
+    reported = set()
+    for item in items:
+        identity = item["package"]
+        if identity["ecosystem"] != "PyPI":
+            raise ValueError(f"non-PyPI inventory entry for {path}")
+        reported.add(python_coordinate(identity["name"], identity["version"]))
+    missing, unexpected = registry - reported, reported - (registry | local)
+    if missing or unexpected:
+        raise ValueError(
+            f"uv package inventory mismatch for {path}: "
+            f"{len(missing)} missing, {len(unexpected)} unexpected"
+        )
+
+
+try:
+    result = json.loads(Path(sys.argv[1]).read_text())
+    if not isinstance(result["results"], list):
+        raise ValueError("invalid results list")
+    scanned = set()
+    for entry in result["results"]:
+        if not isinstance(entry["packages"], list) or not entry["packages"]:
+            raise ValueError("source without an inventory")
+        source = Path(entry["source"]["path"]).resolve()
+        if source in scanned:
+            raise ValueError(f"duplicate scanner source: {source}")
+        scanned.add(source)
+        if source.name in ("package-lock.json", "npm-shrinkwrap.json"):
+            expected = npm_coordinates(source)
+            actual = set()
+            for item in entry["packages"]:
+                identity = item["package"]
+                if identity["ecosystem"] != "npm":
+                    raise ValueError(f"non-npm inventory entry for {source}")
+                actual.add((identity["name"], identity["version"]))
+            if actual != expected:
+                raise ValueError(
+                    f"npm package inventory mismatch for {source}: "
+                    f"{len(expected - actual)} missing, {len(actual - expected)} unexpected"
+                )
+        elif source.name == "uv.lock":
+            check_uv_inventory(source, entry["packages"])
+    required = {Path(p).resolve() for p in sys.argv[2:]}
+    missing = required - scanned
+    if missing:
+        raise ValueError("missing inputs: " + ", ".join(map(str, sorted(missing))))
+    if scanned - required:
+        raise ValueError("unexpected scanner input")
+except (AttributeError, KeyError, OSError, TypeError, ValueError) as exc:
+    sys.exit(f"invalid scanner coverage: {exc}")
+PY
 }
 
 # --- run ---------------------------------------------------------------------

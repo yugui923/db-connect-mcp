@@ -5,6 +5,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  merge_group:
 
 permissions: {}
 
@@ -13,6 +14,12 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  dependency-delta:
+    if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/dep-audit-diff.yml
+
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -219,11 +226,16 @@ jobs:
   gate:
     name: CI / gate
     if: ${{ always() }}
-    needs: [test, python-compatibility, build]
+    needs: [test, python-compatibility, build, dependency-delta]
     runs-on: ubuntu-24.04
     timeout-minutes: 2
     permissions: {}
     steps:
+      - name: Require complete dependency delta scan
+        if: ${{ github.event_name == 'pull_request' || github.event_name == 'merge_group' }}
+        env:
+          DELTA_RESULT: ${{ needs.dependency-delta.result }}
+        run: test "$DELTA_RESULT" = success
       - name: Require every CI job to pass
         env:
           TEST_RESULT: ${{ needs.test.result }}
